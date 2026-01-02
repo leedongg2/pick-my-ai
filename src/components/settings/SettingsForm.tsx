@@ -280,24 +280,6 @@ export function SettingsForm() {
         </div>
       </div>
 
-      {/* 자동 삭제 */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
-              <Trash2 className="w-5 h-5 text-orange-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">자동 삭제</h3>
-              <p className="text-sm text-gray-600">오래된 대화를 자동으로 정리하여 저장 공간을 관리하세요</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6">
-          <AutoDeleteSettings />
-        </div>
-      </div>
-
       {/* 전문 분야 프로필 */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
