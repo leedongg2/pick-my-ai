@@ -594,16 +594,16 @@ export const Chat: React.FC = () => {
   }, []);
   
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] bg-white overflow-hidden">
+    <div className="flex h-[calc(100vh-3.5rem)] bg-white dark:bg-gray-900 overflow-hidden">
       {/* 사이드바 */}
-      <div className="w-64 flex-shrink-0 bg-[#f9f9f9] border-r border-gray-200 flex flex-col">
+      <div className="w-64 flex-shrink-0 bg-[#f9f9f9] dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
         {/* 새 채팅 버튼 */}
         <div className="p-2">
           <button
             onClick={handleNewChat}
             disabled={isOnCooldown}
             className={cn(
-              "w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors text-gray-800 hover:bg-gray-100",
+              "w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700",
               isOnCooldown && "opacity-50 cursor-not-allowed"
             )}
           >
@@ -626,7 +626,7 @@ export const Chat: React.FC = () => {
                 key={session.id}
                 className={cn(
                   'group relative rounded-lg transition-colors',
-                  session.id === currentSessionId ? 'bg-gray-200' : 'hover:bg-gray-100'
+                  session.id === currentSessionId ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                 )}
               >
                 <div className="flex items-center justify-between px-3 py-2.5 gap-1">
@@ -886,7 +886,7 @@ export const Chat: React.FC = () => {
               <select
                 value={selectedModelId}
                 onChange={(e) => setSelectedModelId(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm bg-white text-gray-700"
+                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
               >
                 <option value="">모델 선택</option>
                 {availableModels.map(model => (
@@ -959,7 +959,7 @@ export const Chat: React.FC = () => {
             />
 
             {/* 메인 입력창 */}
-            <div className="relative bg-white border border-gray-300 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+            <div className="relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-end p-3 gap-2">
                 {/* Plus 버튼 */}
                 <div className="relative" ref={plusMenuRef}>
@@ -975,7 +975,7 @@ export const Chat: React.FC = () => {
                   {showPlusMenu && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setShowPlusMenu(false)}></div>
-                      <div className="absolute bottom-full left-0 mb-2 w-72 bg-white rounded-2xl shadow-xl border border-gray-200 z-50 overflow-hidden">
+                      <div className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
                         <div className="p-2">
                           {/* 템플릿 */}
                           <button
@@ -1148,9 +1148,9 @@ export const Chat: React.FC = () => {
             }
           }}
         >
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">대화 삭제</h3>
-            <p className="mb-6">정말로 이 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</p>
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4 dark:text-white">대화 삭제</h3>
+            <p className="mb-6 dark:text-gray-300">정말로 이 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</p>
             <div className="flex justify-end space-x-3">
               <Button
                 variant="outline"
@@ -1179,7 +1179,7 @@ export const Chat: React.FC = () => {
       {/* 템플릿 모달 */}
       {showTemplates && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowTemplates(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-900">대화 템플릿</h2>
               <button onClick={() => setShowTemplates(false)} className="p-2 hover:bg-gray-100 rounded-full">
