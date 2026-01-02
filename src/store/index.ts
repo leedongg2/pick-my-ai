@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { 
   AIModel, 
@@ -675,7 +675,7 @@ export const useStore = create<AppState>()(
         return state.wallet.credits[modelId] || 0;
       },
       
-      deleteModelCredit: (modelId) => {
+      deleteModelCredit: (modelId: string) => {
         const state = get();
         if (!state.wallet) return;
         

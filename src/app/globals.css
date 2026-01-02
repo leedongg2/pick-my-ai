@@ -30,6 +30,22 @@
     /* Default to blue theme */
     --theme-primary: 221.2 83.2% 53.3%;
     --theme-primary-foreground: 210 40% 98%;
+    
+    /* Custom design theme defaults */
+    --custom-primary: #3b82f6;
+    --custom-secondary: #6366f1;
+    --custom-background: #ffffff;
+    --custom-text: #1f2937;
+    --custom-button: #3b82f6;
+    --custom-card: #f9fafb;
+    --custom-header: #ffffff;
+  }
+  
+  /* Apply custom theme when set */
+  .custom-theme-applied {
+    --theme-button-bg: var(--custom-button);
+    --theme-card-bg: var(--custom-card);
+    --theme-text: var(--custom-text);
   }
   
   /* Gray theme */

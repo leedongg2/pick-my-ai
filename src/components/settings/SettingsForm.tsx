@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -103,7 +103,7 @@ export function SettingsForm() {
     document.documentElement.setAttribute('data-theme', theme);
     
     // Update the theme in the store
-    setThemeColor(theme);
+    setThemeSettings({ color: theme });
     
     // Show success message
     toast.success(`테마가 ${colorThemes.find(t => t.value === theme)?.name}(으)로 변경되었습니다.`);

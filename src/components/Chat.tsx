@@ -6,7 +6,7 @@ import { useStore } from '@/store';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Sparkles, Send, Plus, Settings, LayoutDashboard, LogOut, Trash2, Upload, X, Download, Pencil, Check, User, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Wand2, Pin } from 'lucide-react';
+import { Sparkles, Send, Plus, Settings, LayoutDashboard, LogOut, Trash2, Upload, X, Download, Pencil, Check, User, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Pin } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
