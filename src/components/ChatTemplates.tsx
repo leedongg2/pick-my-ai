@@ -110,11 +110,12 @@ export const ChatTemplates: React.FC = () => {
   // 템플릿 사용
   const handleUseTemplate = useCallback((template: any) => {
     incrementTemplateUsage(template.id);
-    setActiveTemplate(template.id);
     setSelectedTemplate(template);
     
-    toast.success(`"${template.name}" 템플릿을 적용했습니다. 채팅창에서 사용하세요.`);
-  }, [incrementTemplateUsage, setActiveTemplate]);
+    // 클립보드에 템플릿 복사
+    navigator.clipboard.writeText(template.prompt);
+    toast.success(`"${template.name}" 템플릿이 클립보드에 복사되었습니다.`);
+  }, [incrementTemplateUsage]);
 
   // 변수 추가
   const handleAddVariable = useCallback(() => {

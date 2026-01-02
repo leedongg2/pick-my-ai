@@ -687,4 +687,6 @@ export const Checkout: React.FC = React.memo(() => {
       </div>
     </>
   );
-};
+});
+
+Checkout.displayName = 'Checkout';

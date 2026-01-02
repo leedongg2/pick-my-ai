@@ -158,5 +158,6 @@ export const Header = React.memo(() => {
       <PollModal isOpen={isPollModalOpen} onClose={() => setIsPollModalOpen(false)} />
     </header>
   );
-};
+});
 
+Header.displayName = 'Header';

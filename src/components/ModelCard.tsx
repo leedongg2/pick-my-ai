@@ -13,7 +13,7 @@ interface ModelCardProps {
   isSelected: boolean;
 }
 
-const ModelCardComponent: React.FC<ModelCardProps> = ({
+export const ModelCard: React.FC<ModelCardProps> = React.memo(({
   model,
   quantity,
   onQuantityChange,

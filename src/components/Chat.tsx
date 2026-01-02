@@ -52,15 +52,12 @@ export const Chat: React.FC = () => {
     createChatSession,
     updateChatSessionTitle,
     deleteChatSession,
-    togglePinSession,
     addMessage,
     getCredits,
     deductCredit,
     setCurrentSession,
     models,
     activePersona,
-    activeTemplate,
-    setActiveTemplate,
     settings: {
       showDeleteConfirmation,
     },
@@ -114,15 +111,6 @@ export const Chat: React.FC = () => {
       setSelectedModelId(availableModels[0].id);
     }
   }, [availableModels, selectedModelId]);
-
-  // 템플릿이 활성화되면 메시지 입력창에 자동으로 채우기
-  useEffect(() => {
-    if (activeTemplate) {
-      setMessage(activeTemplate.prompt);
-      // 템플릿 사용 후 비활성화
-      setActiveTemplate(null);
-    }
-  }, [activeTemplate, setActiveTemplate]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -630,9 +618,7 @@ export const Chat: React.FC = () => {
             {[...chatSessions]
               .sort((a, b) => {
                 // 고정된 대화를 먼저 표시
-                if (a.isPinned && !b.isPinned) return -1;
-                if (!a.isPinned && b.isPinned) return 1;
-                // 같은 고정 상태면 업데이트 시간 기준으로 정렬
+                // 업데이트 시간 기준으로 정렬
                 return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
               })
               .map(session => (
@@ -699,21 +685,6 @@ export const Chat: React.FC = () => {
                         ) : (
                           <Wand2 className="w-4 h-4" />
                         )}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePinSession(session.id);
-                        }}
-                        className={cn(
-                          "p-1 hover:bg-gray-200 rounded transition-all",
-                          session.isPinned 
-                            ? "text-blue-600 opacity-100" 
-                            : "text-gray-600 opacity-0 group-hover:opacity-100"
-                        )}
-                        title={session.isPinned ? "고정 해제" : "상단에 고정"}
-                      >
-                        <Pin className={cn("w-4 h-4", session.isPinned && "fill-current")} />
                       </button>
                       <button
                         onClick={(e) => {
