@@ -4,7 +4,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { ArrowLeft, Coins, TrendingUp, Shield, Clock, Info, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Coins, TrendingUp, Shield, Clock, Info, CheckCircle, Zap, BookOpen, Lightbulb, Users, Target, Award } from 'lucide-react';
 
 export default function DocsPage() {
   const router = useRouter();
@@ -245,6 +245,150 @@ export default function DocsPage() {
           </CardContent>
         </Card>
 
+        {/* AI 모델 사용 가이드 */}
+        <Card variant="bordered" className="mb-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Zap className="w-6 h-6 text-indigo-600" />
+              <h2 className="text-xl font-bold text-gray-900">AI 모델 사용 가이드</h2>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-6">
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Target className="w-5 h-5 text-blue-600" />
+                  모델 선택 가이드
+                </h3>
+                <div className="space-y-3">
+                  <div className="bg-blue-50 rounded-lg p-4">
+                    <p className="font-medium text-blue-900 mb-2">💬 일반 대화 & 간단한 작업</p>
+                    <p className="text-sm text-blue-700 mb-2">GPT-4o mini, Claude Haiku 추천</p>
+                    <p className="text-xs text-blue-600">빠른 응답 속도와 저렴한 비용으로 일상적인 질문에 적합합니다.</p>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-4">
+                    <p className="font-medium text-purple-900 mb-2">🎨 창작 & 복잡한 분석</p>
+                    <p className="text-sm text-purple-700 mb-2">GPT-4o, Claude Sonnet 추천</p>
+                    <p className="text-xs text-purple-600">균형잡힌 성능으로 대부분의 작업을 효과적으로 처리합니다.</p>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-4">
+                    <p className="font-medium text-orange-900 mb-2">🚀 전문가급 작업 & 고난이도 문제</p>
+                    <p className="text-sm text-orange-700 mb-2">GPT-4, Claude Opus 추천</p>
+                    <p className="text-xs text-orange-600">최고 수준의 추론 능력이 필요한 전문적인 작업에 최적화되어 있습니다.</p>
+                  </div>
+                  <div className="bg-green-50 rounded-lg p-4">
+                    <p className="font-medium text-green-900 mb-2">🖼️ 이미지 생성</p>
+                    <p className="text-sm text-green-700 mb-2">DALL-E 3 추천</p>
+                    <p className="text-xs text-green-600">텍스트 설명만으로 고품질 이미지를 생성할 수 있습니다.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-green-600" />
+                  크레딧 시스템 이해하기
+                </h3>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 font-bold text-xs">1</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">모델별 크레딧 구매</p>
+                        <p className="text-gray-600">각 AI 모델마다 별도의 크레딧을 구매해야 합니다. 한 모델의 크레딧으로 다른 모델을 사용할 수 없습니다.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 font-bold text-xs">2</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">크레딧 = 사용 횟수</p>
+                        <p className="text-gray-600">1 크레딧 = 1회 대화 또는 1회 이미지 생성. 간단하고 명확한 시스템입니다.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-blue-600 font-bold text-xs">3</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900">유효기간 없음</p>
+                        <p className="text-gray-600">구매한 크레딧은 만료되지 않습니다. 언제든지 사용 가능합니다.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5 text-yellow-600" />
+                  효율적인 사용 팁
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                    <p className="font-medium text-blue-900 mb-2">💡 명확한 질문하기</p>
+                    <p className="text-sm text-blue-700">구체적이고 명확한 질문일수록 더 정확한 답변을 받을 수 있습니다.</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-200">
+                    <p className="font-medium text-purple-900 mb-2">🎯 적절한 모델 선택</p>
+                    <p className="text-sm text-purple-700">작업의 난이도에 맞는 모델을 선택하면 비용을 절약할 수 있습니다.</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
+                    <p className="font-medium text-green-900 mb-2">📝 대화 이력 활용</p>
+                    <p className="text-sm text-green-700">이전 대화 맥락을 활용하면 더 자연스러운 대화가 가능합니다.</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-lg p-4 border border-orange-200">
+                    <p className="font-medium text-orange-900 mb-2">🔄 모델 비교 기능</p>
+                    <p className="text-sm text-orange-700">여러 모델의 답변을 비교하여 최적의 결과를 선택하세요.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* 실전 활용 예시 */}
+        <Card variant="bordered" className="mb-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Users className="w-6 h-6 text-teal-600" />
+              <h2 className="text-xl font-bold text-gray-900">실전 활용 예시</h2>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-4">
+              <div className="border-l-4 border-blue-500 pl-4 py-2">
+                <p className="font-semibold text-gray-900 mb-1">📚 학습 & 교육</p>
+                <p className="text-sm text-gray-600 mb-2">복잡한 개념 설명, 문제 풀이, 학습 자료 요약</p>
+                <p className="text-xs text-blue-600">추천 모델: GPT-4o, Claude Sonnet</p>
+              </div>
+              <div className="border-l-4 border-purple-500 pl-4 py-2">
+                <p className="font-semibold text-gray-900 mb-1">💼 업무 & 생산성</p>
+                <p className="text-sm text-gray-600 mb-2">이메일 작성, 보고서 초안, 데이터 분석, 회의록 정리</p>
+                <p className="text-xs text-purple-600">추천 모델: GPT-4o, Claude Sonnet</p>
+              </div>
+              <div className="border-l-4 border-green-500 pl-4 py-2">
+                <p className="font-semibold text-gray-900 mb-1">🎨 창작 & 디자인</p>
+                <p className="text-sm text-gray-600 mb-2">글쓰기, 브레인스토밍, 이미지 생성, 아이디어 발전</p>
+                <p className="text-xs text-green-600">추천 모델: Claude Opus (글), DALL-E 3 (이미지)</p>
+              </div>
+              <div className="border-l-4 border-orange-500 pl-4 py-2">
+                <p className="font-semibold text-gray-900 mb-1">💻 개발 & 기술</p>
+                <p className="text-sm text-gray-600 mb-2">코드 작성, 디버깅, 기술 문서 작성, 아키텍처 설계</p>
+                <p className="text-xs text-orange-600">추천 모델: GPT-4, Claude Opus</p>
+              </div>
+              <div className="border-l-4 border-red-500 pl-4 py-2">
+                <p className="font-semibold text-gray-900 mb-1">🌐 번역 & 언어</p>
+                <p className="text-sm text-gray-600 mb-2">다국어 번역, 문법 교정, 언어 학습 지원</p>
+                <p className="text-xs text-red-600">추천 모델: GPT-4o, Claude Sonnet</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 자주 묻는 질문 */}
         <Card variant="bordered">
           <CardHeader>
@@ -294,8 +438,50 @@ export default function DocsPage() {
           </CardContent>
         </Card>
 
+        {/* 추가 혜택 안내 */}
+        <Card variant="elevated" className="mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-200">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Award className="w-6 h-6 text-indigo-600" />
+              <h2 className="text-xl font-bold text-gray-900">추가 혜택</h2>
+            </div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-indigo-600 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-gray-900">무료 체험 크레딧</p>
+                  <p className="text-sm text-gray-600">신규 가입 시 각 모델별 무료 크레딧을 제공합니다.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-indigo-600 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-gray-900">대화 템플릿</p>
+                  <p className="text-sm text-gray-600">자주 사용하는 프롬프트를 템플릿으로 저장하여 빠르게 재사용할 수 있습니다.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-indigo-600 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-gray-900">대화 이력 저장</p>
+                  <p className="text-sm text-gray-600">모든 대화 내역이 자동으로 저장되어 언제든지 다시 확인할 수 있습니다.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-indigo-600 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-gray-900">다크모드 지원</p>
+                  <p className="text-sm text-gray-600">눈의 피로를 줄이는 다크모드와 7가지 테마 색상을 제공합니다.</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 하단 CTA */}
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-4">
           <Button
             onClick={() => router.push('/configurator')}
             variant="primary"
@@ -304,6 +490,9 @@ export default function DocsPage() {
           >
             지금 바로 시작하기
           </Button>
+          <p className="text-sm text-gray-500">
+            더 궁금한 사항이 있으신가요? <button onClick={() => router.push('/feedback')} className="text-blue-600 hover:underline">문의하기</button>
+          </p>
         </div>
       </div>
     </div>
