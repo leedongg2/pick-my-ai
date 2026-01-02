@@ -70,16 +70,16 @@ export const Configurator: React.FC = () => {
   };
   
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-semibold text-gray-900 mb-2">AI 모델 선택</h1>
-          <p className="text-gray-600 text-sm">원하는 모델과 월 사용 횟수를 선택해주세요</p>
+          <h1 className="text-3xl font-semibold text-gray-900 dark:text-white mb-2">AI 모델 선택</h1>
+          <p className="text-gray-600 dark:text-gray-400">필요한 AI 모델을 선택하고 크레딧을 충전하세요</p>
         </div>
         
         {/* PMC 광고 배너 */}
         <div className="mb-6 bg-gradient-to-r from-yellow-400 via-orange-400 to-red-400 rounded-2xl p-1 shadow-lg">
-          <div className="bg-white rounded-xl p-6">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center shadow-lg">

@@ -15,11 +15,10 @@ import dynamic from 'next/dynamic';
 const DarkModeToggle = dynamic(() => import('@/components/DarkModeToggle').then(mod => ({ default: mod.DarkModeToggle })), { ssr: false });
 const AutoRechargeSettings = dynamic(() => import('@/components/AutoRechargeSettings').then(mod => ({ default: mod.AutoRechargeSettings })), { ssr: false });
 const AutoDeleteSettings = dynamic(() => import('@/components/AutoDeleteSettings').then(mod => ({ default: mod.AutoDeleteSettings })), { ssr: false });
-const UsageAlerts = dynamic(() => import('@/components/UsageAlerts').then(mod => ({ default: mod.UsageAlerts })), { ssr: false });
 const ExpertiseProfiles = dynamic(() => import('@/components/ExpertiseProfiles').then(mod => ({ default: mod.ExpertiseProfiles })), { ssr: false });
 
 export function SettingsForm() {
-  const { currentUser, setCurrentUser, setTheme } = useStore();
+  const { currentUser, setCurrentUser, themeSettings, setThemeColor } = useStore();
   const router = useRouter();
   
   const [name, setName] = useState('');
@@ -89,34 +88,25 @@ export function SettingsForm() {
     if (currentUser) {
       setName(currentUser.name || '');
       setEmail(currentUser.email || '');
-      // Load saved theme if exists
-      if (currentUser.theme) {
-        setSelectedTheme(currentUser.theme);
-        document.documentElement.setAttribute('data-theme', currentUser.theme);
-      }
     }
-  }, [currentUser]);
+    // Load saved theme from themeSettings
+    if (themeSettings?.color) {
+      setSelectedTheme(themeSettings.color);
+      document.documentElement.setAttribute('data-theme', themeSettings.color);
+    }
+  }, [currentUser, themeSettings]);
   
   const handleThemeChange = (theme: ThemeColor) => {
     setSelectedTheme(theme);
     
-    if (currentUser) {
-      // Update the theme in the root HTML element for global theming
-      document.documentElement.setAttribute('data-theme', theme);
-      
-      // Update the theme in the store
-      setTheme(theme);
-      
-      // Also update the user's theme preference
-      const updatedUser = {
-        ...currentUser,
-        theme,
-      };
-      setCurrentUser(updatedUser);
-      
-      // Show success message
-      toast.success(`테마가 ${colorThemes.find(t => t.value === theme)?.name}(으)로 변경되었습니다.`);
-    }
+    // Update the theme in the root HTML element for global theming
+    document.documentElement.setAttribute('data-theme', theme);
+    
+    // Update the theme in the store
+    setThemeColor(theme);
+    
+    // Show success message
+    toast.success(`테마가 ${colorThemes.find(t => t.value === theme)?.name}(으)로 변경되었습니다.`);
   };
   
   const { settings, toggleSuccessNotifications, logout } = useStore();
@@ -287,42 +277,6 @@ export function SettingsForm() {
           <p className="mt-4 text-sm text-gray-600">
             선택한 색상: <span className="font-medium text-gray-900">{colorThemes.find(t => t.value === selectedTheme)?.name}</span>
           </p>
-        </div>
-      </div>
-
-      {/* 사용량 알림 */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-yellow-100 flex items-center justify-center">
-              <Bell className="w-5 h-5 text-yellow-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">사용량 알림</h3>
-              <p className="text-sm text-gray-600">크레딧 사용량을 모니터링하고 알림을 받으세요</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6">
-          <UsageAlerts />
-        </div>
-      </div>
-
-      {/* 자동 충전 */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
-              <CreditCard className="w-5 h-5 text-emerald-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">자동 충전</h3>
-              <p className="text-sm text-gray-600">크레딧이 부족할 때 자동으로 충전되도록 설정하세요</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6">
-          <AutoRechargeSettings />
         </div>
       </div>
 
