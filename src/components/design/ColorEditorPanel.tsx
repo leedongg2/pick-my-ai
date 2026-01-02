@@ -107,7 +107,13 @@ export const ColorEditorPanel: React.FC<ColorEditorPanelProps> = ({
             {presetColors.map((color) => (
               <button
                 key={color}
-                onClick={() => setSelectedColor(color)}
+                onClick={() => {
+                  setSelectedColor(color);
+                  setCustomColor(color);
+                  if (element) {
+                    onPreview(element.id, color);
+                  }
+                }}
                 className={`w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 ${
                   selectedColor === color
                     ? 'border-blue-500 ring-2 ring-blue-200'
