@@ -280,24 +280,6 @@ export function SettingsForm() {
         </div>
       </div>
 
-      {/* 전문 분야 프로필 */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center">
-              <Award className="w-5 h-5 text-violet-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-gray-900">전문 분야 프로필</h3>
-              <p className="text-sm text-gray-600">AI의 전문 분야와 지식을 상세하게 설정하세요</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6">
-          <ExpertiseProfiles />
-        </div>
-      </div>
-
       {/* 알림 설정 */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-6 py-4">
