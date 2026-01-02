@@ -432,29 +432,6 @@ export const Chat: React.FC = () => {
         }
       }
       
-      // 첫 메시지인 경우 자동으로 제목 생성 (스트리밍과 무관)
-      if (currentSessionId && currentMessages.length === 0 && currentSession?.title === '새 대화') {
-
-        try {
-          const titleResponse = await fetch('/api/generate-title', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ message: msg }),
-          });
-
-          if (titleResponse.ok) {
-            const { title } = await titleResponse.json();
-            updateChatSessionTitle(currentSessionId, title);
-          }
-        } catch (error) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('제목 생성 실패:', error);
-          }
-          // 제목 생성 실패는 무시 (사용자 경험에 영향 없음)
-        }
-      }
       
       setAttachments([]);
       // toast.success(`${model.displayName} 크레딧 1회 사용 (잔여: ${credits - 1}회)`);
@@ -511,48 +488,6 @@ export const Chat: React.FC = () => {
   const removeAttachment = useCallback((id: string) => {
     setAttachments(prev => prev.filter(att => att.id !== id));
   }, []);
-
-  // 제목 자동 생성 함수
-  const handleGenerateTitle = useCallback(async (sessionId: string) => {
-    const session = chatSessions.find(s => s.id === sessionId);
-    if (!session || session.messages.length === 0) {
-      toast.error('메시지가 없어서 제목을 생성할 수 없습니다.');
-      return;
-    }
-
-    // 첫 번째 사용자 메시지 찾기
-    const firstUserMessage = session.messages.find(m => m.role === 'user');
-    if (!firstUserMessage) {
-      toast.error('사용자 메시지가 없습니다.');
-      return;
-    }
-
-    setGeneratingTitleFor(sessionId);
-    try {
-      const response = await fetch('/api/generate-title', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: firstUserMessage.content }),
-      });
-
-      if (response.ok) {
-        const { title } = await response.json();
-        updateChatSessionTitle(sessionId, title);
-        toast.success('제목이 생성되었습니다!');
-      } else {
-        throw new Error('제목 생성 실패');
-      }
-    } catch (error) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('제목 생성 실패:', error);
-      }
-      toast.error('제목 생성에 실패했습니다.');
-    } finally {
-      setGeneratingTitleFor(null);
-    }
-  }, [chatSessions, updateChatSessionTitle]);
 
   // **텍스트**를 bold 처리하고 ## 제목 처리하는 함수 (메모이제이션)
   const formatMessage = useCallback((text: string) => {
@@ -670,21 +605,6 @@ export const Chat: React.FC = () => {
                         className="flex-1 text-left text-sm text-gray-800 truncate font-normal"
                       >
                         {session.title}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateTitle(session.id);
-                        }}
-                        disabled={generatingTitleFor === session.id}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all text-purple-600 disabled:opacity-50"
-                        title="AI로 제목 자동 생성 (무료)"
-                      >
-                        {generatingTitleFor === session.id ? (
-                          <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <Wand2 className="w-4 h-4" />
-                        )}
                       </button>
                       <button
                         onClick={(e) => {
