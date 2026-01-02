@@ -675,6 +675,26 @@ export const useStore = create<AppState>()(
         return state.wallet.credits[modelId] || 0;
       },
       
+      deleteModelCredit: (modelId) => {
+        const state = get();
+        if (!state.wallet) return;
+        
+        const newCredits = { ...state.wallet.credits };
+        delete newCredits[modelId];
+        
+        const newTransactions = state.wallet.transactions.filter(
+          t => t.modelId !== modelId
+        );
+        
+        set({
+          wallet: {
+            ...state.wallet,
+            credits: newCredits,
+            transactions: newTransactions
+          }
+        });
+      },
+      
       // 채팅 관련 액션
       createChatSession: (title) => {
         const now = Date.now();
