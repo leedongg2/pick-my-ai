@@ -18,7 +18,7 @@ const AutoDeleteSettings = dynamic(() => import('@/components/AutoDeleteSettings
 const ExpertiseProfiles = dynamic(() => import('@/components/ExpertiseProfiles').then(mod => ({ default: mod.ExpertiseProfiles })), { ssr: false });
 
 export function SettingsForm() {
-  const { currentUser, setCurrentUser, themeSettings, setThemeColor } = useStore();
+  const { currentUser, setCurrentUser, themeSettings, setThemeSettings } = useStore();
   const router = useRouter();
   
   const [name, setName] = useState('');
