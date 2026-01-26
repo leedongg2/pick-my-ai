@@ -1,0 +1,13 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pick-My-AI Icon">
+  <defs>
+    <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5fe8ff" />
+      <stop offset="100%" stop-color="#7678ff" />
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#ringGradient)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 120c-66 0-120 24-120 54s54 54 120 54 120-24 120-54-54-54-120-54z" stroke-width="28" />
+    <path d="M256 208c-88 0-160 32-160 72s72 72 160 72 160-32 160-72-72-72-160-72z" stroke-width="24" opacity="0.9" />
+    <path d="M256 308c-102 0-188 36-188 82s86 82 188 82 188-36 188-82-86-82-188-82z" stroke-width="20" opacity="0.75" />
+  </g>
+</svg>

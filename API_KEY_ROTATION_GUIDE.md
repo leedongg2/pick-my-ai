@@ -1,8 +1,9 @@
-# API 키 로테이션 가이드
+# API 키 로테이션 및 보안 가이드
 
 ## 📋 개요
 
 이 시스템은 API Rate Limit을 자동으로 관리하고, 여러 개의 API 키를 순환하여 사용합니다.
+**보안 강화**: API 키 검증, 암호화, 요청 모니터링, IP 차단 등 다층 보안 시스템이 적용되어 있습니다.
 
 ## 🔑 API 키 설정
 
@@ -32,7 +33,27 @@ GOOGLE_API_KEY_3=AIzaSyzzzzz
 PERPLEXITY_API_KEY_1=pplx-xxxxx
 PERPLEXITY_API_KEY_2=pplx-yyyyy
 PERPLEXITY_API_KEY_3=pplx-zzzzz
+
+# 보안 설정 (필수)
+ENCRYPTION_KEY=your-64-character-encryption-key-here-minimum-64-chars
+NEXT_PUBLIC_ENABLE_CONSOLE=false
 ```
+
+### 보안 요구사항
+
+#### 1. 암호화 키 설정 (프로덕션 필수)
+```bash
+# 64자 이상의 랜덤 문자열 생성
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+```
+
+#### 2. API 키 형식 검증
+- **OpenAI**: `sk-[20자 이상]`
+- **Anthropic**: `sk-ant-[20자 이상]`
+- **Google**: `AIza[35자]`
+- **Perplexity**: `pplx-[20자 이상]`
+
+잘못된 형식의 API 키는 자동으로 거부됩니다.
 
 ### 하위 호환성
 

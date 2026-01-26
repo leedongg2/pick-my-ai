@@ -16,8 +16,8 @@ export const Badge: React.FC<BadgeProps> = ({
   const baseStyles = 'inline-flex items-center justify-center font-medium rounded-full';
   
   const variants = {
-    default: 'bg-gray-100 text-gray-800',
-    primary: 'bg-blue-100 text-blue-800',
+    default: 'bg-foreground/5 text-foreground',
+    primary: 'bg-primary/15 text-primary',
     success: 'bg-green-100 text-green-800',
     warning: 'bg-yellow-100 text-yellow-800',
     danger: 'bg-red-100 text-red-800',

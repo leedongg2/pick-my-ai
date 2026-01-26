@@ -42,7 +42,9 @@ export const Checkout: React.FC = React.memo(() => {
   // 페이지 진입 시 인증 확인
   useEffect(() => {
     if (!isAuthenticated || !currentUser) {
-      console.warn('⚠️ 인증되지 않은 사용자, 로그인 페이지로 이동');
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('⚠️ 인증되지 않은 사용자, 로그인 페이지로 이동');
+      }
       toast.error('로그인이 필요합니다.');
       router.push('/login');
     }
@@ -111,7 +113,7 @@ export const Checkout: React.FC = React.memo(() => {
       const orderId = `order_${Date.now()}`;
       const amount = Math.max(100, Math.round(priceCalculation.finalTotal));
       const orderName = selectedModels.length === 1
-        ? `${selectedModels[0].model.displayName} 외 0건`
+        ? `${selectedModels[0].model.displayName}`
         : `${selectedModels[0].model.displayName} 외 ${selectedModels.length - 1}건`;
 
       // 결제 후 지급할 크레딧을 localStorage에 임시 저장
@@ -129,7 +131,9 @@ export const Checkout: React.FC = React.memo(() => {
         customerName: currentUser?.name || currentUser?.email || '사용자'
       } as any);
     } catch (error: any) {
-      console.error('Toss payment start error:', error);
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Toss payment start error:', error);
+      }
       toast.error('결제 시작에 실패했습니다.');
     }
   };
@@ -150,7 +154,7 @@ export const Checkout: React.FC = React.memo(() => {
       const orderId = `order_${Date.now()}`;
       const amount = Math.max(100, Math.round(priceCalculation.finalTotal));
       const orderName = selectedModels.length === 1
-        ? `${selectedModels[0].model.displayName} 외 0건`
+        ? `${selectedModels[0].model.displayName}`
         : `${selectedModels[0].model.displayName} 외 ${selectedModels.length - 1}건`;
 
       const credits: { [modelId: string]: number } = {};
@@ -168,7 +172,9 @@ export const Checkout: React.FC = React.memo(() => {
         customerName: currentUser?.name || currentUser?.email || '사용자'
       } as any);
     } catch (error: any) {
-      console.error('KakaoPay start error:', error);
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('KakaoPay start error:', error);
+      }
       toast.error('카카오페이 시작에 실패했습니다.');
     }
   };
@@ -181,18 +187,22 @@ export const Checkout: React.FC = React.memo(() => {
   const handleConfirmPayment = async () => {
     // 먼저 상태 확인 (모달 닫기 전)
     const stateBeforeClose = useStore.getState();
-    
-    console.log('🛒 결제 시작:', { 
-      wallet, 
-      selections,
-      currentUser: currentUser?.email,
-      isAuthenticated,
-      stateCurrentUser: stateBeforeClose.currentUser?.email
-    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🛒 결제 시작:', { 
+        wallet, 
+        selections,
+        currentUser: currentUser?.email,
+        isAuthenticated,
+        stateCurrentUser: stateBeforeClose.currentUser?.email
+      });
+    }
     
     // 사용자 인증 확인 (store에서 직접 확인)
     if (!stateBeforeClose.isAuthenticated || !stateBeforeClose.currentUser) {
-      console.error('❌ 사용자 정보 없음!');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('❌ 사용자 정보 없음!');
+      }
       toast.error('로그인이 필요합니다. 다시 로그인해주세요.');
       setShowConfirmModal(false);
       setIsProcessing(false);
@@ -206,7 +216,9 @@ export const Checkout: React.FC = React.memo(() => {
     
     // 선택한 모델 확인
     if (selections.length === 0 || selections.every(s => s.quantity === 0)) {
-      console.error('❌ 선택한 모델이 없음!');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('❌ 선택한 모델이 없음!');
+      }
       toast.error('선택한 모델이 없습니다.');
       setIsProcessing(false);
       router.push('/configurator');
@@ -218,7 +230,9 @@ export const Checkout: React.FC = React.memo(() => {
     
     // 지갑 초기화 (없는 경우)
     if (!wallet) {
-      console.log('⚠️ 지갑이 없음, 초기화 중...');
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('⚠️ 지갑이 없음, 초기화 중...');
+      }
       initWallet(stateBeforeClose.currentUser!.id);
       // 지갑 초기화 후 대기
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -229,7 +243,9 @@ export const Checkout: React.FC = React.memo(() => {
         await new Promise(resolve => setTimeout(resolve, 100));
         const currentState = useStore.getState();
         if (currentState.wallet) {
-          console.log('✅ 지갑 초기화 완료:', currentState.wallet);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('✅ 지갑 초기화 완료:', currentState.wallet);
+          }
           break;
         }
         retries++;
@@ -238,7 +254,9 @@ export const Checkout: React.FC = React.memo(() => {
       // 최종 확인
       const stateAfterInit = useStore.getState();
       if (!stateAfterInit.wallet) {
-        console.error('❌ 지갑 초기화 실패! (타임아웃)');
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('❌ 지갑 초기화 실패! (타임아웃)');
+        }
         toast.error('지갑 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
         setIsProcessing(false);
         return;
@@ -253,10 +271,14 @@ export const Checkout: React.FC = React.memo(() => {
       }
     });
     
-    console.log('💳 추가할 크레딧:', credits);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('💳 추가할 크레딧:', credits);
+    }
     
     if (Object.keys(credits).length === 0) {
-      console.error('❌ 추가할 크레딧이 없음!');
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('❌ 추가할 크레딧이 없음!');
+      }
       toast.error('추가할 크레딧이 없습니다.');
       setIsProcessing(false);
       return;
@@ -274,7 +296,8 @@ export const Checkout: React.FC = React.memo(() => {
     
     // PMC 적립 처리
     if (pmcCalculation.earnAmount > 0) {
-      earnPMC(pmcCalculation.earnAmount, `결제 적립 (${priceCalculation.selectedModelsCount}개 모델)`, orderId);
+      const totalSelectedQuantity = selections.reduce((sum, sel) => sum + (sel.quantity || 0), 0);
+      earnPMC(pmcCalculation.earnAmount, `결제 적립 (총 선택 수량 ${totalSelectedQuantity})`, orderId);
     }
     
     // 저장 대기
@@ -282,7 +305,9 @@ export const Checkout: React.FC = React.memo(() => {
     
     // 크레딧이 제대로 추가되었는지 확인
     const updatedState = useStore.getState();
-    console.log('✅ 최종 지갑 상태:', updatedState.wallet);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('✅ 최종 지갑 상태:', updatedState.wallet);
+    }
     
     if (updatedState.wallet) {
       const hasCredits = Object.keys(credits).every(
@@ -290,7 +315,9 @@ export const Checkout: React.FC = React.memo(() => {
       );
       
       if (!hasCredits) {
-        console.warn('⚠️ 크레딧이 제대로 추가되지 않았을 수 있습니다!');
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('⚠️ 크레딧이 제대로 추가되지 않았을 수 있습니다!');
+        }
       }
     }
     
@@ -547,7 +574,7 @@ export const Checkout: React.FC = React.memo(() => {
                                   type="number"
                                   min="0"
                                   max={maxUsablePMC}
-                                  step="100"
+                                  step="1"
                                   value={pmcToUse}
                                   onChange={(e) => {
                                     const value = Number(e.target.value);
@@ -567,7 +594,7 @@ export const Checkout: React.FC = React.memo(() => {
                               type="range"
                               min="0"
                               max={maxUsablePMC}
-                              step="100"
+                              step="1"
                               value={pmcToUse}
                               onChange={(e) => setPmcToUse(Number(e.target.value))}
                               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-yellow-500"

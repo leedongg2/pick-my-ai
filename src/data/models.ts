@@ -10,7 +10,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '최신 GPT 모델, 빠르고 정확한 응답',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
   {
     id: 'gpt51',
@@ -20,7 +20,17 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '개선된 GPT-5 버전',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
+  },
+  {
+    id: 'gpt52',
+    series: 'gpt',
+    displayName: 'GPT-5.2',
+    piWon: 60,
+    tier: 'low',
+    enabled: true,
+    description: '개선된 GPT-5.2 버전',
+    maxCharacters: 2000,
   },
   {
     id: 'gpt4o',
@@ -30,7 +40,7 @@ export const initialModels: AIModel[] = [
     tier: 'mid',
     enabled: true,
     description: '최적화된 GPT-4o 모델',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
   {
     id: 'gpt41',
@@ -40,7 +50,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '개선된 GPT-4 버전',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
 
   // Claude 시리즈
@@ -52,7 +62,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '빠르고 효율적인 경량 모델',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
   },
   {
     id: 'sonnet45',
@@ -62,7 +72,7 @@ export const initialModels: AIModel[] = [
     tier: 'mid',
     enabled: true,
     description: '균형 잡힌 성능의 중급 모델',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
   {
     id: 'opus4',
@@ -72,7 +82,7 @@ export const initialModels: AIModel[] = [
     tier: 'high',
     enabled: true,
     description: '강력한 성능의 Opus 4 모델',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
   {
     id: 'opus41',
@@ -82,7 +92,7 @@ export const initialModels: AIModel[] = [
     tier: 'high',
     enabled: true,
     description: '최고 성능의 프리미엄 모델',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
   {
     id: 'opus45',
@@ -92,7 +102,7 @@ export const initialModels: AIModel[] = [
     tier: 'high',
     enabled: true,
     description: '최신 Opus 4.5, 최상급 추론 및 분석 능력',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
 
   // Perplexity 시리즈
@@ -104,7 +114,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '실시간 검색에 특화된 기능',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
   },
   {
     id: 'sonarPro',
@@ -114,7 +124,7 @@ export const initialModels: AIModel[] = [
     tier: 'mid',
     enabled: true,
     description: '고급 검색과 분석 기능',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
   {
     id: 'deepResearch',
@@ -124,7 +134,7 @@ export const initialModels: AIModel[] = [
     tier: 'mid',
     enabled: true,
     description: '심층 리서치와 전문 분석 모델',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
 
   // Gemini 시리즈
@@ -136,7 +146,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '최신 Gemini 3.0 모델, 향상된 멀티모달 성능',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
   {
     id: 'gemini3pro',
@@ -146,7 +156,7 @@ export const initialModels: AIModel[] = [
     tier: 'mid',
     enabled: true,
     description: '프리미엄 Gemini 3.0 Pro, 최고 수준의 추론 능력',
-    maxCharacters: 8000,
+    maxCharacters: 4000,
   },
 
   // 코딩
@@ -158,7 +168,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '코드 생성에 특화된 모델',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
   {
     id: 'gpt5codex',
@@ -168,7 +178,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '최신 GPT-5 기반 코딩 모델',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
   {
     id: 'gpt51codex',
@@ -178,7 +188,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '개선된 GPT-5.1 기반 코딩 모델',
-    maxCharacters: 4000,
+    maxCharacters: 2000,
   },
 
   // OpenAI o 시리즈
@@ -190,7 +200,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: 'OpenAI o3 모델',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
   },
   {
     id: 'o3mini',
@@ -200,7 +210,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '경량화된 o3 모델',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
   },
   {
     id: 'o4mini',
@@ -210,7 +220,7 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '경량화된 o4 모델',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
   },
 
   // 이미지 모델
@@ -222,7 +232,17 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '이미지 생성 전문 모델',
-    maxCharacters: 2500,
+    maxCharacters: 1250,
+  },
+  {
+    id: 'dalle3',
+    series: 'image',
+    displayName: 'DALL-E 3',
+    piWon: 50,
+    tier: 'low',
+    enabled: true,
+    description: 'OpenAI의 고품질 이미지 생성 모델',
+    maxCharacters: 1250,
   },
 ];
 

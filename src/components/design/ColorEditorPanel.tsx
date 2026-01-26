@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Check, Palette } from 'lucide-react';
 import { DesignElement } from '@/types/design';
 
@@ -46,11 +46,15 @@ export const ColorEditorPanel: React.FC<ColorEditorPanelProps> = ({
     }
   }, [element]);
 
-  // 색상이 변경될 때마다 미리보기에 반영
+  // 색상 변경 시 즉시 미리보기 (최소 debounce)
   useEffect(() => {
-    if (element && selectedColor) {
+    if (!element || !selectedColor) return;
+    
+    const timeoutId = setTimeout(() => {
       onPreview(element.id, selectedColor);
-    }
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedColor, element?.id]);
 
@@ -107,13 +111,7 @@ export const ColorEditorPanel: React.FC<ColorEditorPanelProps> = ({
             {presetColors.map((color) => (
               <button
                 key={color}
-                onClick={() => {
-                  setSelectedColor(color);
-                  setCustomColor(color);
-                  if (element) {
-                    onPreview(element.id, color);
-                  }
-                }}
+                onClick={() => setSelectedColor(color)}
                 className={`w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 ${
                   selectedColor === color
                     ? 'border-blue-500 ring-2 ring-blue-200'

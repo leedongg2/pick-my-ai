@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { PreviewFrame } from '@/components/design/PreviewFrame';
+import { LightweightPreview } from '@/components/design/LightweightPreview';
 import { ColorEditorPanel } from '@/components/design/ColorEditorPanel';
-import { DesignElement, DesignTheme, defaultTheme, elementClassMap } from '@/types/design';
+import { DesignElement, DesignTheme, defaultTheme } from '@/types/design';
 import { ArrowLeft, Save, RotateCcw, Eye, Code } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/store';
@@ -17,18 +17,32 @@ export default function DesignEditorPage() {
   const [selectedElement, setSelectedElement] = useState<DesignElement | null>(null);
   const [currentPage, setCurrentPage] = useState<'chat' | 'dashboard' | 'settings'>('chat');
   const [showCode, setShowCode] = useState(false);
+
+  const didInitRef = useRef(false);
+  const skipFirstSyncRef = useRef(true);
   
   // 컴포넌트 마운트 시 저장된 커스텀 테마 불러오기
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
     if (customDesignTheme.theme) {
       setTheme({ ...customDesignTheme.theme });
+    } else {
+      setTheme({ ...defaultTheme });
     }
+
     if (customDesignTheme.elementColors) {
       setElementColors({ ...customDesignTheme.elementColors });
+    } else {
+      setElementColors({});
     }
-  }, []);
+  }, [customDesignTheme.theme, customDesignTheme.elementColors]);
 
-  const handleElementClick = (element: DesignElement) => {
+  // 스토어 동기화는 저장 버튼 클릭 시에만 (실시간 동기화 제거로 성능 향상)
+  // 실시간 미리보기는 로컬 state만 사용
+
+  const handleElementClick = useCallback((element: DesignElement) => {
     const resolvedScope: 'element' | 'global' =
       element.scope ?? (element.type === 'button' ? 'element' : 'global');
 
@@ -59,10 +73,10 @@ export default function DesignEditorPage() {
       scope: resolvedScope,
       currentColor,
     });
-  };
+  }, [elementColors, theme]);
 
   // 실시간 미리보기 - 바로 상태 업데이트
-  const handleColorPreview = (elementId: string, color: string) => {
+  const handleColorPreview = useCallback((elementId: string, color: string) => {
     if (!selectedElement) return;
 
     if (selectedElement.scope === 'element') {
@@ -94,55 +108,41 @@ export default function DesignEditorPage() {
 
     // 선택된 요소의 currentColor도 업데이트
     setSelectedElement(prev => prev ? { ...prev, currentColor: color } : null);
-  };
+  }, [selectedElement]);
 
   // 최종 적용 (적용 버튼 클릭) - 이미 미리보기로 상태 업데이트됨
-  const handleColorApply = (elementId: string, color: string) => {
+  const handleColorApply = useCallback((elementId: string, color: string) => {
     if (!selectedElement) return;
 
     // 패널 닫기
     setSelectedElement(null);
     
     toast.success('색상이 적용되었습니다!');
-  };
+  }, [selectedElement]);
 
   // 패널 닫기
-  const handlePanelClose = () => {
+  const handlePanelClose = useCallback(() => {
     setSelectedElement(null);
-  };
+  }, []);
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     setTheme({ ...defaultTheme });
     setElementColors({});
     setSelectedElement(null);
     
     toast.info('기본 테마로 초기화되었습니다.');
-  };
+  }, []);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     // Zustand 스토어에 테마 및 개별 요소 색상 저장
     setCustomDesignTheme(theme, elementColors);
     
     toast.success('디자인이 저장되었습니다! 실제 페이지에 적용됩니다.');
-  };
+  }, [theme, elementColors, setCustomDesignTheme]);
 
-  const generateCSSCode = () => {
+  const cssCode = useMemo(() => {
     const elementColorCss = Object.entries(elementColors)
-      .map(([id, value]) => {
-        const selector = elementClassMap[id];
-        if (!selector) return '';
-
-        if (selector.type === 'background') {
-          return `${selector.selector} { background-color: ${value}; }`;
-        }
-
-        if (selector.type === 'border') {
-          return `${selector.selector} { border-color: ${value}; }`;
-        }
-
-        return `${selector.selector} { color: ${value}; }`;
-      })
-      .filter(Boolean)
+      .map(([id, value]) => `.${id} { background-color: ${value}; }`)
       .join('\n');
 
     return `:root {
@@ -161,7 +161,7 @@ header {
 }
 
 /* 버튼 스타일 */
-button {
+.btn-primary {
   background-color: var(--button-color);
 }
 
@@ -178,7 +178,7 @@ body {
 
 /* Custom element overrides */
 ${elementColorCss}`;
-  };
+  }, [theme, elementColors]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
@@ -226,13 +226,47 @@ ${elementColorCss}`;
       {/* 메인 콘텐츠 */}
       <div className="max-w-[1400px] mx-auto px-8 py-10">
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-200">
-          {/* 안내 메시지 */}
+          {/* 안내 메시지 및 페이지 전환 탭 */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
-            <div className="flex items-center space-x-3">
-              <Eye className="w-5 h-5 text-white" />
-              <p className="text-white font-medium">
-                요소를 클릭하여 색상을 변경하세요. 변경사항은 실시간으로 적용됩니다.
-              </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Eye className="w-5 h-5 text-white" />
+                <p className="text-white font-medium">
+                  요소를 클릭하여 색상을 변경하세요. 변경사항은 실시간으로 적용됩니다.
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCurrentPage('chat')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    currentPage === 'chat'
+                      ? 'bg-white text-blue-600'
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                >
+                  채팅
+                </button>
+                <button
+                  onClick={() => setCurrentPage('dashboard')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    currentPage === 'dashboard'
+                      ? 'bg-white text-blue-600'
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                >
+                  대시보드
+                </button>
+                <button
+                  onClick={() => setCurrentPage('settings')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                    currentPage === 'settings'
+                      ? 'bg-white text-blue-600'
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                >
+                  설정
+                </button>
+              </div>
             </div>
           </div>
 
@@ -241,17 +275,16 @@ ${elementColorCss}`;
             {showCode ? (
               <div className="bg-gray-900 rounded-lg p-6 overflow-auto max-h-[600px]">
                 <pre className="text-green-400 font-mono text-sm">
-                  <code>{generateCSSCode()}</code>
+                  <code>{cssCode}</code>
                 </pre>
               </div>
             ) : (
               <div className="bg-white rounded-2xl shadow-xl overflow-hidden" style={{ minHeight: '620px' }}>
-                <PreviewFrame
+                <LightweightPreview
+                  currentPage={currentPage}
                   theme={theme}
                   elementColors={elementColors}
                   onElementClick={handleElementClick}
-                  currentPage={currentPage}
-                  onPageChange={setCurrentPage}
                 />
               </div>
             )}

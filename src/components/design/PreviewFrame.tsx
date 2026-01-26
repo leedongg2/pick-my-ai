@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { DesignElement, DesignTheme } from '@/types/design';
+import { DesignElement, DesignTheme, elementClassMap } from '@/types/design';
 import { MessageSquare, LayoutDashboard, Settings, Sparkles, ArrowRight } from 'lucide-react';
+import { LogoMark } from '@/components/LogoMark';
 
 const previewFeatures = [
   {
@@ -47,6 +48,15 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
     return elementColors[elementId] || fallback;
   };
 
+  const resolveScope = (element: DesignElement): 'global' | 'element' => {
+    if (element.scope) return element.scope;
+
+    const selector = elementClassMap[element.id]?.selector;
+    if (selector?.startsWith('.')) return 'element';
+
+    return element.type === 'button' ? 'element' : 'global';
+  };
+
   const getContrastColor = (hexColor: string) => {
     const hex = hexColor?.replace('#', '');
     if (hex.length !== 6) return '#ffffff';
@@ -57,20 +67,16 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
     return luminance > 0.6 ? '#111827' : '#ffffff';
   };
 
-  const headerTextColor = getContrastColor(theme.headerColor || '#ffffff');
+  const headerBackgroundColor = getElementColor('header', theme.headerColor || '#ffffff');
+  const headerTextColor = getContrastColor(headerBackgroundColor);
   const primaryButtonTextColor = getContrastColor(theme.buttonColor || '#3b82f6');
 
   const createClickHandler = (element: DesignElement) => (e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    // 설정 페이지 요소는 편집 불가
-    if (currentPage === 'settings' && element.id.startsWith('settings')) {
-      return;
-    }
-    
+
     onElementClick({
       ...element,
-      scope: element.scope ?? (element.type === 'button' ? 'element' : 'global'),
+      scope: resolveScope(element),
     });
   };
 
@@ -78,11 +84,6 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
     element: DesignElement,
     action?: () => void
   ) => (e: React.MouseEvent) => {
-    // 설정 페이지 요소는 편집 불가
-    if (currentPage === 'settings' && element.id.startsWith('settings')) {
-      e.stopPropagation();
-      return;
-    }
     createClickHandler(element)(e);
     action?.();
   };
@@ -92,24 +93,23 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
       {/* 헤더 */}
       <header
         className="border-b border-gray-200 shadow-sm"
-        style={{ backgroundColor: '#ffffff' }}
+        style={{ backgroundColor: headerBackgroundColor }}
         onClick={createClickHandler({
           id: 'header',
           type: 'header',
           label: '헤더 배경',
           selector: 'header',
-          currentColor: '#ffffff',
-          scope: elementColors['header'] ? 'element' : 'global',
+          currentColor: headerBackgroundColor,
+          scope: 'global',
         })}
       >
         <div className="max-w-5xl mx-auto px-6 py-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div
-                className="preview-nav-logo h-12 w-12 flex items-center justify-center rounded-xl bg-primary-600 hover:bg-primary-700 text-white shadow-sm transition-all duration-200 hover:scale-105"
+                className="preview-nav-logo h-12 w-12 flex items-center justify-center rounded-xl shadow-sm transition-all duration-200 hover:scale-105"
                 style={{
-                  backgroundColor: getElementColor('nav-logo', '#667eea'),
-                  color: '#ffffff',
+                  backgroundColor: getElementColor('nav-logo', '#f3f4f6'),
                 }}
                 onClick={createClickHandler({
                   id: 'nav-logo',
@@ -120,7 +120,7 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
                   scope: elementColors['nav-logo'] ? 'element' : 'global',
                 })}
               >
-                <Sparkles className="w-5 h-5" />
+                <LogoMark className="w-9 h-9" />
               </div>
               <span
                 className="preview-nav-title text-2xl font-black text-gray-900 cursor-pointer hover:opacity-80 transition-opacity"
@@ -268,6 +268,14 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
       <main
         className="p-10 min-h-[520px]"
         style={{ backgroundColor: theme.backgroundColor }}
+        onClick={createClickHandler({
+          id: 'background',
+          type: 'background',
+          label: '배경',
+          selector: 'body',
+          currentColor: theme.backgroundColor,
+          scope: 'global',
+        })}
       >
         {currentPage === 'chat' && (
           <div className="space-y-6">
@@ -289,13 +297,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               {/* 채팅 목록 */}
               <div
                 className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                style={{ backgroundColor: theme.cardColor }}
+                style={{ backgroundColor: getElementColor('chat-list-card', theme.cardColor) }}
                 onClick={createClickHandler({
                   id: 'chat-list-card',
                   type: 'card',
                   label: '채팅 목록 카드',
                   selector: '.chat-list-card',
-                  currentColor: theme.cardColor,
+                  currentColor: getElementColor('chat-list-card', theme.cardColor),
                 })}
               >
                 <h3 className="text-lg font-bold mb-3" style={{ color: theme.textColor }}>
@@ -317,13 +325,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               <div className="space-y-4">
                 <div
                   className="p-6 rounded-lg shadow-md min-h-[400px] cursor-pointer hover:shadow-lg transition-all"
-                  style={{ backgroundColor: theme.cardColor }}
+                  style={{ backgroundColor: getElementColor('chat-message-card', theme.cardColor) }}
                   onClick={createClickHandler({
                     id: 'chat-message-card',
                     type: 'card',
                     label: '채팅 메시지 카드',
                     selector: '.chat-message-card',
-                    currentColor: theme.cardColor,
+                    currentColor: getElementColor('chat-message-card', theme.cardColor),
                   })}
                 >
                   <div className="space-y-4">
@@ -351,13 +359,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
                 {/* 입력 영역 */}
                 <div
                   className="p-4 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                  style={{ backgroundColor: theme.cardColor }}
+                  style={{ backgroundColor: getElementColor('chat-input-card', theme.cardColor) }}
                   onClick={createClickHandler({
                     id: 'chat-input-card',
                     type: 'card',
                     label: '채팅 입력 카드',
                     selector: '.chat-input-card',
-                    currentColor: theme.cardColor,
+                    currentColor: getElementColor('chat-input-card', theme.cardColor),
                   })}
                 >
                   <div className="flex gap-2">
@@ -783,13 +791,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               {/* 크레딧 구매 카드 */}
               <div
                 className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                style={{ backgroundColor: theme.cardColor }}
+                style={{ backgroundColor: getElementColor('dashboard-credit-card', theme.cardColor) }}
                 onClick={createClickHandler({
                   id: 'dashboard-credit-card',
                   type: 'card',
                   label: '크레딧 구매 카드',
                   selector: '.dashboard-credit-card',
-                  currentColor: theme.cardColor,
+                  currentColor: getElementColor('dashboard-credit-card', theme.cardColor),
                 })}
               >
                 <h3
@@ -819,13 +827,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               {/* 채팅 시작 카드 */}
               <div
                 className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                style={{ backgroundColor: theme.cardColor }}
+                style={{ backgroundColor: getElementColor('dashboard-chat-card', theme.cardColor) }}
                 onClick={createClickHandler({
                   id: 'dashboard-chat-card',
                   type: 'card',
                   label: '채팅 카드',
                   selector: '.dashboard-chat-card',
-                  currentColor: theme.cardColor,
+                  currentColor: getElementColor('dashboard-chat-card', theme.cardColor),
                 })}
               >
                 <h3
@@ -855,13 +863,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               {/* 사용량 카드 */}
               <div
                 className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                style={{ backgroundColor: theme.cardColor }}
+                style={{ backgroundColor: getElementColor('dashboard-usage-card', theme.cardColor) }}
                 onClick={createClickHandler({
                   id: 'dashboard-usage-card',
                   type: 'card',
                   label: '사용량 카드',
                   selector: '.dashboard-usage-card',
-                  currentColor: theme.cardColor,
+                  currentColor: getElementColor('dashboard-usage-card', theme.cardColor),
                 })}
               >
                 <h3
@@ -881,13 +889,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
               {/* 최근 활동 카드 */}
               <div
                 className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                style={{ backgroundColor: theme.cardColor }}
+                style={{ backgroundColor: getElementColor('dashboard-activity-card', theme.cardColor) }}
                 onClick={createClickHandler({
                   id: 'dashboard-activity-card',
                   type: 'card',
                   label: '최근 활동 카드',
                   selector: '.dashboard-activity-card',
-                  currentColor: theme.cardColor,
+                  currentColor: getElementColor('dashboard-activity-card', theme.cardColor),
                 })}
               >
                 <h3
@@ -925,13 +933,13 @@ export const PreviewFrame: React.FC<PreviewFrameProps> = ({
             
             <div
               className="p-6 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-              style={{ backgroundColor: theme.cardColor }}
+              style={{ backgroundColor: getElementColor('settings-card', theme.cardColor) }}
               onClick={createClickHandler({
                 id: 'settings-card',
                 type: 'card',
                 label: '설정 카드 배경',
                 selector: '.settings-card',
-                currentColor: theme.cardColor,
+                currentColor: getElementColor('settings-card', theme.cardColor),
               })}
             >
               <h3

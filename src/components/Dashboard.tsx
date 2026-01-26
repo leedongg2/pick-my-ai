@@ -25,14 +25,26 @@ import dynamic from 'next/dynamic';
 const CreditGift = dynamic(() => import('@/components/CreditGift').then(mod => ({ default: mod.CreditGift })), { ssr: false });
 import { formatWon, getFixedDisplayPriceOrFallback } from '@/utils/pricing';
 import { cn } from '@/utils/cn';
+import { useTranslation } from '@/utils/translations';
 
 export const Dashboard: React.FC = () => {
   const router = useRouter();
   const { models, wallet, chatSessions, getAvailablePMC, pmcBalance } = useStore();
   const [showGiftModal, setShowGiftModal] = React.useState(false);
+  const { t } = useTranslation();
   
   // PMC 잔액
   const availablePMC = getAvailablePMC();
+  
+  // PMC로 아낀 금액 계산 (사용한 PMC 총액)
+  const savedAmount = useMemo(() => {
+    if (!wallet || !pmcBalance?.history) return 0;
+    // 사용한 PMC만 합산 (type === 'use'인 거래의 절댓값)
+    const usedPMC = pmcBalance.history
+      .filter(tx => tx.type === 'use')
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    return usedPMC;
+  }, [wallet, pmcBalance]);
   
   // 크레딧 통계 계산
   const creditStats = useMemo(() => {
@@ -138,29 +150,29 @@ export const Dashboard: React.FC = () => {
         {/* 헤더 */}
         <div className="mb-8 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-semibold text-gray-900 mb-1">대시보드</h1>
-            <p className="text-gray-600 text-sm">크레딧 사용 현황을 확인하세요</p>
+            <h1 className="text-3xl font-semibold text-gray-900 mb-1">{t.dashboard.title}</h1>
+            <p className="text-gray-600 text-sm">{t.dashboard.description}</p>
           </div>
           <div className="flex gap-3">
             <button
               onClick={handleStartChat}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+              className="dashboard-start-chat-button px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
             >
               <MessageSquare className="w-4 h-4" />
-              채팅 시작
+              {t.dashboard.startChat}
             </button>
             <button
               onClick={handleRefill}
-              className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+              className="dashboard-buy-credit-button px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              크레딧 충전
+              {t.dashboard.buyCreditsButton}
             </button>
           </div>
         </div>
         
         {/* 통계 카드 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
           {/* PMC 잔액 카드 */}
           <div className="bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
@@ -169,18 +181,30 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
             <p className="text-2xl font-bold mb-1 text-yellow-700">{availablePMC.toLocaleString()}</p>
-            <p className="text-sm text-yellow-600 font-medium">보유 PMC</p>
-            <p className="text-xs text-yellow-500 mt-1">1 PMC = 1원</p>
+            <p className="text-sm text-yellow-600 font-medium">{t.dashboard.pmcBalance}</p>
+            <p className="text-xs text-yellow-500 mt-1">{t.dashboard.pmcRate}</p>
           </div>
           
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
+          {/* PMC로 아낀 금액 카드 */}
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-green-600" />
+              </div>
+            </div>
+            <p className="text-2xl font-bold mb-1 text-green-700">{formatWon(savedAmount)}</p>
+            <p className="text-sm text-green-600 font-medium">{t.dashboard.pmcSaved}</p>
+            <p className="text-xs text-green-500 mt-1">💰 {t.dashboard.pmcRate}</p>
+          </div>
+          
+          <div className="dashboard-credit-card bg-white border border-gray-200 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
                 <CreditCard className="w-5 h-5 text-blue-600" />
               </div>
             </div>
             <p className="text-2xl font-semibold mb-1 text-gray-900">{creditStats.total}</p>
-            <p className="text-sm text-gray-600">총 크레딧</p>
+            <p className="text-sm text-gray-600">{t.dashboard.totalCredits}</p>
           </div>
           
           <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -190,7 +214,7 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
             <p className="text-2xl font-semibold text-gray-900 mb-1">{creditStats.used}</p>
-            <p className="text-sm text-gray-600">사용한 크레딧</p>
+            <p className="text-sm text-gray-600">{t.dashboard.usedCredits}</p>
           </div>
           
           <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -200,32 +224,32 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
             <p className="text-2xl font-semibold text-gray-900 mb-1">{creditStats.remaining}</p>
-            <p className="text-sm text-gray-600">남은 크레딧</p>
+            <p className="text-sm text-gray-600">{t.dashboard.remainingCredits}</p>
           </div>
           
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="dashboard-chat-card bg-white border border-gray-200 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center">
                 <MessageSquare className="w-5 h-5 text-orange-600" />
               </div>
             </div>
             <p className="text-2xl font-semibold text-gray-900 mb-1">{chatSessions.length}</p>
-            <p className="text-sm text-gray-600">총 대화 수</p>
+            <p className="text-sm text-gray-600">{t.dashboard.totalChats}</p>
           </div>
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 모델별 크레딧 현황 */}
           <div className="lg:col-span-2">
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="dashboard-usage-card bg-white border border-gray-200 rounded-xl p-6">
               <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-semibold text-gray-900">모델별 크레딧 현황</h2>
+                <h2 className="text-lg font-semibold text-gray-900">{t.dashboard.modelCredits}</h2>
                 <BarChart3 className="w-5 h-5 text-gray-400" />
               </div>
               <div>
                 {creditStats.models.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-500">구매한 크레딧이 없습니다.</p>
+                    <p className="text-gray-500">{t.dashboard.noModelCredits}</p>
                   </div>
                 ) : (
                   <div className="space-y-5">
@@ -234,9 +258,6 @@ export const Dashboard: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
                             <h4 className="text-sm font-medium text-gray-900">{stat.model.displayName}</h4>
-                            <span className="text-xs text-gray-500">
-                              {formatWon(getFixedDisplayPriceOrFallback(stat.model.id, stat.model.piWon).price)}/회
-                            </span>
                           </div>
                           <span className="text-sm text-gray-600">
                             {stat.remaining} / {stat.total}
@@ -258,10 +279,10 @@ export const Dashboard: React.FC = () => {
                     <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
                     <div className="text-sm">
                       <p className="font-medium text-yellow-900">
-                        크레딧이 얼마 남지 않았습니다
+                        {t.dashboard.lowCredits}
                       </p>
                       <p className="text-yellow-700 text-xs mt-0.5">
-                        원활한 서비스 이용을 위해 충전을 권장합니다.
+                        {t.dashboard.refillCredits}
                       </p>
                     </div>
                   </div>
@@ -272,12 +293,12 @@ export const Dashboard: React.FC = () => {
           
           {/* 최근 거래 내역 */}
           <div>
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-5">최근 활동</h2>
+            <div className="dashboard-activity-card bg-white border border-gray-200 rounded-xl p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-5">{t.dashboard.recentActivity}</h2>
               <div>
                 {recentTransactions.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-500">거래 내역이 없습니다.</p>
+                    <p className="text-gray-500">{t.dashboard.noActivity}</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -316,6 +337,7 @@ export const Dashboard: React.FC = () => {
                               <p className="text-xs text-gray-500 truncate">
                                 {Object.entries(transaction.credits)
                                   .map(([id, amount]) => {
+                                    if (!amount || amount <= 0) return '';
                                     const m = models.find(model => model.id === id);
                                     return m ? `${m.displayName}: ${amount}회` : '';
                                   })

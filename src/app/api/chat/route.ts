@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
+
+const isStaticExportPhase =
+  process.env.NEXT_PHASE === PHASE_EXPORT ||
+  process.env.NEXT_PHASE === PHASE_PRODUCTION_BUILD;
 
 // Rate Limiter 인스턴스 생성 (분당 20회 제한)
 const chatRateLimiter = new RateLimiter(20, 60 * 1000);
@@ -70,9 +75,9 @@ async function callDALLE(prompt: string): Promise<string> {
 }
 
 // OpenAI API 호출 (키 로테이션 및 큐 시스템 지원) - 스트리밍 Response 반환
-async function callOpenAIStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any): Promise<Response> {
-  // GPT-Image-1 모델인 경우 DALL-E API 사용 (스트리밍 불필요)
-  if (model === 'gptimage1') {
+async function callOpenAIStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string): Promise<Response> {
+  // 이미지 생성 모델인 경우 DALL-E API 사용 (스트리밍 불필요)
+  if (model === 'gptimage1' || model === 'dalle3') {
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
     const prompt = typeof lastUserMessage?.content === 'string' 
       ? lastUserMessage.content 
@@ -104,28 +109,30 @@ async function callOpenAIStreaming(model: string, messages: any[], userAttachmen
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
-  return await executeOpenAIStreamingRequest(model, messages, apiKey, userAttachments, persona);
+  return await executeOpenAIStreamingRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction);
 }
 
 // OpenAI 실제 요청 실행 - 스트리밍 Response 반환
-async function executeOpenAIStreamingRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0): Promise<Response> {
+async function executeOpenAIStreamingRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string): Promise<Response> {
 
   const modelMap: { [key: string]: string } = {
     // GPT 시리즈
-    'gpt5': process.env.GPT5_MODEL || 'gpt-5',
-    'gpt51': process.env.GPT51_MODEL || 'gpt-5.1',
-    'gpt4o': process.env.GPT4O_MODEL || 'gpt-4o',
-    'gpt41': process.env.GPT41_MODEL || 'gpt-4.1',
+    'gpt5': 'gpt-5',
+    'gpt51': 'gpt-5.1',
+    'gpt52': 'gpt-5.2',
+    'gpt4o': 'gpt-4o',
+    'gpt41': 'gpt-4.1',
     // OpenAI o 시리즈
-    'o3': process.env.O3_MODEL || 'o3',
-    'o3mini': process.env.O3_MINI_MODEL || 'o3-mini',
-    'o4mini': process.env.O4_MINI_MODEL || 'o4-mini',
+    'o3': 'o3',
+    'o3mini': 'o3-mini',
+    'o4mini': 'o4-mini',
     // 코딩 모델
-    'codex': process.env.CODEX_MODEL || 'gpt-5-codex',
-    'gpt5codex': process.env.GPT5_CODEX_MODEL || 'gpt-5-codex',
-    'gpt51codex': process.env.GPT51_CODEX_MODEL || 'gpt-5.1-codex',
+    'codex': 'gpt-5-codex',
+    'gpt5codex': 'gpt-5-codex',
+    'gpt51codex': 'gpt-5.1-codex',
     // 이미지 모델
-    'gptimage1': process.env.GPT_IMAGE_1_MODEL || 'dall-e-3',
+    'gptimage1': 'gpt-image-1',
+    'dalle3': 'dall-e-3',
   };
 
   // If there are image attachments, convert the LAST user message content to a multimodal array
@@ -193,19 +200,30 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
   };
   
   // GPT-5/5.1 및 코딩 모델용 시스템 메시지 추가
-  const isGPT5Series = model === 'gpt5' || model === 'gpt51';
+  const isGPT5Series = model === 'gpt5' || model === 'gpt51' || model === 'gpt52';
   const isCodingModel = model === 'codex' || model === 'gpt5codex' || model === 'gpt51codex';
   
-  const baseSystemPrompt = isGPT5Series
-    ? '당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 최대한 상세하고 포괄적으로 답변하세요.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용\n\n답변을 구조화할 때 ## 제목을 적극 활용하세요.'
-    : isCodingModel
-    ? '당신은 전문 프로그래밍 어시스턴트입니다. 코드 작성, 디버깅, 최적화, 설명에 특화되어 있습니다.\n\n서식 규칙:\n- 코드는 명확하고 효율적으로 작성하며 주석 포함\n- 중요한 부분: **강조**\n- 섹션 제목: ## 제목\n\n답변을 구조화할 때 ## 제목을 사용하세요.'
+  // 대화의 첫 메시지인지 확인 (시스템 메시지 제외하고 사용자 메시지가 1개인 경우)
+  const isFirstMessage = transformedMessages.filter((m: any) => m.role === 'user').length === 1;
+  
+  // 코드 블록 규칙 (첫 메시지에만 포함)
+  const codeBlockRule = isFirstMessage 
+    ? '\n\n코드를 출력할 때는 반드시 ///로 코드를 둘러싸세요.\n예시:\n///\nfunction example() {\n  return "code here";\n}\n///'
     : '';
   
-  const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
-  const systemContent = personaPrompt ? `${baseSystemPrompt}\n\n${personaPrompt}` : baseSystemPrompt;
+  const baseSystemPrompt = isGPT5Series
+    ? `당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 최대한 상세하고 포괄적으로 답변하세요.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}\n\n답변을 구조화할 때 ## 제목을 적극 활용하세요.`
+    : isCodingModel
+    ? `당신은 전문 프로그래밍 어시스턴트입니다. 코드 작성, 디버깅, 최적화, 설명에 특화되어 있습니다.\n\n서식 규칙:${codeBlockRule}\n- 중요한 부분: **강조**\n- 섹션 제목: ## 제목\n\n답변을 구조화할 때 ## 제목을 사용하세요.`
+    : `당신은 도움이 되는 AI 어시스턴트입니다.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}`;
   
-  const finalMessages = (isGPT5Series || isCodingModel) && systemContent
+  const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
+
+  const systemContent = [baseSystemPrompt, personaPrompt, languageInstruction]
+    .filter(Boolean)
+    .join('\n\n');
+  
+  const finalMessages = systemContent
     ? [
         {
           role: 'system',
@@ -219,7 +237,7 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: isGPT5Series ? 2000 : 1500 // 속도 개선을 위해 토큰 수 감소
+    max_completion_tokens: 4096 // GPT 시리즈 최대 출력 토큰
   };
   
   // GPT-5 시리즈가 아닌 경우에만 temperature 추가
@@ -311,7 +329,7 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
           if (process.env.NODE_ENV !== 'production') {
             console.log(`OpenAI Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return executeOpenAIStreamingRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1);
+          return executeOpenAIStreamingRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction);
         }
         
         // 모든 키가 제한된 경우
@@ -386,18 +404,18 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
 }
 
 // Google AI Studio (Gemini) 호출 (키 로테이션 지원)
-async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0): Promise<string> {
+async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
     throw new Error('Gemini API 키가 설정되지 않았습니다. GOOGLE_API_KEY 또는 GEMINI_API_KEY를 설정하세요.');
   }
 
   const geminiModelMap: { [key: string]: string } = {
-    'gemini3': process.env.GEMINI_3_MODEL || 'gemini-3.0-flash',
-    'gemini3pro': process.env.GEMINI_3_PRO_MODEL || 'gemini-3.0-pro',
+    'gemini3': 'gemini-3.0-flash',
+    'gemini3pro': 'gemini-3.0-pro',
     // 레거시 매핑
-    'gemini-flash': process.env.GEMINI_FLASH_MODEL || 'gemini-1.5-flash',
-    'gemini-pro': process.env.GEMINI_PRO_MODEL || 'gemini-1.5-pro',
+    'gemini-flash': 'gemini-1.5-flash',
+    'gemini-pro': 'gemini-1.5-pro',
   };
 
   const selectedModel = geminiModelMap[model] || 'gemini-1.5-flash';
@@ -454,7 +472,12 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+      generationConfig: { 
+        temperature: temperature ?? 0.7,
+        maxOutputTokens: 2048,
+        topP: 0.95,
+        topK: 40
+      },
     }),
   });
 
@@ -477,7 +500,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Gemini Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callGemini(model, messages, userAttachments, retryCount + 1);
+          return callGemini(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
@@ -496,7 +519,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
 
 // Anthropic API 호출 (키 로테이션 지원)
-async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0): Promise<string> {
+async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
@@ -504,15 +527,15 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   }
 
   const modelMap: { [key: string]: string } = {
-    'haiku35': process.env.HAIKU_35_MODEL || 'claude-3-5-haiku-20241022',
-    'sonnet45': process.env.SONNET_45_MODEL || 'claude-3-5-sonnet-20241022',
-    'opus4': process.env.OPUS_4_MODEL || 'claude-opus-4-20250514',
-    'opus41': process.env.OPUS_41_MODEL || 'claude-opus-4.1-20250514',
-    'opus45': process.env.OPUS_45_MODEL || 'claude-opus-4.5-20250514',
+    'haiku35': 'claude-3-5-haiku-20241022',
+    'sonnet45': 'claude-3-5-sonnet-20241022',
+    'opus4': 'claude-opus-4-20250514',
+    'opus41': 'claude-opus-4.1-20250514',
+    'opus45': 'claude-opus-4.5-20250514',
     // 레거시 매핑
-    'claude-haiku': process.env.CLAUDE_HAIKU_MODEL || 'claude-3-haiku-20240307',
-    'claude-sonnet': process.env.CLAUDE_SONNET_MODEL || 'claude-3-5-sonnet-20241022',
-    'claude-opus': process.env.CLAUDE_OPUS_MODEL || 'claude-3-opus-20240229'
+    'claude-haiku': 'claude-3-haiku-20240307',
+    'claude-sonnet': 'claude-3-5-sonnet-20241022',
+    'claude-opus': 'claude-3-opus-20240229',
   };
 
   // Anthropic 형식으로 변환 (system 메시지 분리)
@@ -557,7 +580,9 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     },
     body: JSON.stringify({
       model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: 2000,
+      max_tokens: 4096, // Claude 최대 출력 토큰
+      temperature: temperature ?? 1.0,
+      top_p: 0.9,
       system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
       messages: transformed
     })
@@ -581,7 +606,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Anthropic Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callAnthropic(model, messages, userAttachments, retryCount + 1);
+          return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
@@ -597,7 +622,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
 }
 
 // Perplexity API 호출 (키 로테이션 지원)
-async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0): Promise<string> {
+async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
@@ -605,13 +630,13 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   }
 
   const modelMap: { [key: string]: string } = {
-    'sonar': process.env.SONAR_MODEL || 'sonar',
-    'sonarPro': process.env.SONAR_PRO_MODEL || 'sonar-pro',
-    'deepResearch': process.env.DEEP_RESEARCH_MODEL || 'sonar-reasoning',
+    'sonar': 'sonar',
+    'sonarPro': 'sonar-pro',
+    'deepResearch': 'sonar-reasoning',
     // 레거시 매핑
-    'perplexity-sonar': process.env.PERPLEXITY_SONAR_MODEL || 'sonar',
-    'perplexity-sonar-pro': process.env.PERPLEXITY_SONAR_PRO_MODEL || 'sonar-pro',
-    'perplexity-deep-research': process.env.PERPLEXITY_DEEP_RESEARCH_MODEL || 'sonar-reasoning'
+    'perplexity-sonar': 'sonar',
+    'perplexity-sonar-pro': 'sonar-pro',
+    'perplexity-deep-research': 'sonar-reasoning'
   };
 
   const response = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -633,7 +658,15 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
         const note = `\n\n[첨부 ${userAttachments.length}개는 이 모델에서 직접 처리되지 않아 제외되었습니다.]`;
         msgs[idx] = { ...last, content: `${last.content || ''}${note}` };
         return msgs;
-      })()
+      })(),
+      // 답변 품질 향상 파라미터
+      max_tokens: 2048,  // Perplexity 최대 출력 토큰
+      temperature: temperature ?? 0.7,  // 사용자 설정 temperature (기본값 0.7)
+      top_p: 0.9,  // 응답 다양성
+      // 웹 검색 옵션
+      search_recency_filter: 'month',  // 최근 1개월 결과 우선
+      return_images: true,  // 이미지 URL 포함
+      return_related_questions: true  // 관련 질문 제안
     })
   });
 
@@ -655,7 +688,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Perplexity Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callPerplexity(model, messages, userAttachments, retryCount + 1);
+          return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
@@ -671,6 +704,20 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
 }
 
 export async function POST(request: NextRequest) {
+  if (isStaticExportPhase) {
+    return NextResponse.json(
+      { error: '정적 내보내기 환경에서는 Chat API를 사용할 수 없습니다.' },
+      {
+        status: 501,
+        headers: {
+          'Cache-Control': 'no-store',
+          Pragma: 'no-cache',
+          Expires: '0',
+        },
+      }
+    );
+  }
+
   try {
     // Rate Limiting 체크
     const clientIp = getClientIp(request);
@@ -694,7 +741,68 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona } = await request.json();
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts } = await request.json();
+
+    const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
+    const languageInstruction = resolvedLanguage === 'en'
+      ? 'Always respond in English.'
+      : resolvedLanguage === 'ja'
+      ? '必ず日本語で回答してください。'
+      : '반드시 한국어로 답변해주세요.';
+
+    const normalizeStoredFact = (fact: unknown) => {
+      if (typeof fact !== 'string') return '';
+      const cleaned = fact.trim().replace(/\s+/g, ' ');
+      return cleaned.slice(0, 200);
+    };
+
+    const storedFactsList: string[] = Array.isArray(storedFacts)
+      ? Array.from(new Set(storedFacts.map(normalizeStoredFact).filter(Boolean))).slice(0, 50)
+      : [];
+
+    const storedFactsContext = storedFactsList.length
+      ? ['[저장된 사용자 사실(참고용, 출력 금지)]', ...storedFactsList].join('\n')
+      : '';
+
+    const memoryInstruction = [
+      '아래 규칙을 반드시 준수하세요.',
+      '1) 답변 본문을 먼저 출력한 뒤, 반드시 답변의 맨 마지막에만 숨김 메모리 블록을 추가하세요.',
+      '2) 숨김 메모리 블록 형식은 정확히 다음과 같습니다(따옴표/코드블록/마크다운 금지):',
+      '@@MEM@@',
+      '<새롭게 학습한, 일반화 가능한 사용자 사실을 한 줄에 하나씩>',
+      '@@END@@',
+      '3) 새 사실이 없으면 빈 블록을 출력하세요:',
+      '@@MEM@@',
+      '@@END@@',
+      '4) 메모리에는 인사/농담/감정표현/말투/이모지 선호/요청 반복/추측/민감정보/개인식별 가능한 세부정보를 쓰지 마세요.',
+      '5) 메모리는 매우 간결하게, 각 줄 120자 이내로 작성하고, 메모리 줄의 언어는 현재 답변 언어와 동일하게 하세요.',
+    ].join('\n');
+
+    const languageInstructionWithMemory = [languageInstruction, storedFactsContext, memoryInstruction]
+      .filter(Boolean)
+      .join('\n\n');
+
+    // 기본 프롬프트 추가
+    const basePrompt = 'Energetic. Friendly.\nReact big. Use emojis.\nGive practical lists.';
+
+    const applyLanguageInstruction = (inputMessages: any[]) => {
+      const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
+      const systemContent = [basePrompt, languageInstructionWithMemory].filter(Boolean).join('\n\n');
+      
+      if (idx === -1) {
+        return [{ role: 'system', content: systemContent }, ...inputMessages];
+      }
+      
+      const existing = inputMessages[idx];
+      const existingContent = typeof existing?.content === 'string' ? existing.content : '';
+      const merged = [existingContent, systemContent].filter(Boolean).join('\n\n');
+      
+      return [
+        ...inputMessages.slice(0, idx),
+        { ...existing, content: merged },
+        ...inputMessages.slice(idx + 1),
+      ];
+    };
 
     // 입력 검증
     if (!modelId || !messages || !Array.isArray(messages)) {
@@ -747,11 +855,11 @@ export async function POST(request: NextRequest) {
     }
 
     // 모델 시리즈별로 API 호출 - OpenAI는 스트리밍 응답 반환
-    if (modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex') || modelId === 'gptimage1') {
+    if (modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex') || modelId === 'gptimage1' || modelId === 'dalle3') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log(`[Chat API] Calling OpenAI API (Streaming)${modelId === 'gptimage1' ? ' (DALL-E)' : ''}`);
+        console.log(`[Chat API] Calling OpenAI API (Streaming)${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
       }
-      const streamResponse = await callOpenAIStreaming(modelId, messages, userAttachments, persona);
+      const streamResponse = await callOpenAIStreaming(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
       return streamResponse;
     }
     
@@ -762,23 +870,23 @@ export async function POST(request: NextRequest) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Gemini API');
       }
-      response = await callGemini(modelId, messages, userAttachments);
-    } else if (modelId.startsWith('claude')) {
+      response = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+    } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45') {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Anthropic API');
       }
-      response = await callAnthropic(modelId, messages, userAttachments);
-    } else if (modelId.startsWith('perplexity')) {
+      response = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+    } else if (modelId.startsWith('perplexity') || modelId === 'sonar' || modelId === 'sonarPro' || modelId === 'deepResearch') {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Perplexity API');
       }
-      response = await callPerplexity(modelId, messages, userAttachments);
+      response = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
       }
       // API 키가 없으면 데모 응답
-      response = `[${modelId}] 안녕하세요! 질문에 답변드리겠습니다. (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
+      response = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
     }
 
     if (process.env.NODE_ENV !== 'production') {

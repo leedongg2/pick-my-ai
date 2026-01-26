@@ -27,6 +27,7 @@ export const ChatTemplates: React.FC = () => {
     addChatTemplate,
     toggleFavoriteTemplate,
     incrementTemplateUsage,
+    setActiveTemplate,
   } = useStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -111,11 +112,10 @@ export const ChatTemplates: React.FC = () => {
   const handleUseTemplate = useCallback((template: any) => {
     incrementTemplateUsage(template.id);
     setSelectedTemplate(template);
-    
-    // 클립보드에 템플릿 복사
-    navigator.clipboard.writeText(template.prompt);
-    toast.success(`"${template.name}" 템플릿이 클립보드에 복사되었습니다.`);
-  }, [incrementTemplateUsage]);
+
+    setActiveTemplate(template);
+    toast.success(`"${template.name}" 템플릿이 적용되었습니다.`);
+  }, [incrementTemplateUsage, setActiveTemplate]);
 
   // 변수 추가
   const handleAddVariable = useCallback(() => {

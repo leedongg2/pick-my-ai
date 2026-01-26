@@ -1,7 +1,10 @@
 /**
  * API 키 로테이션 및 Rate Limit 관리 시스템
  * 고급 큐 시스템 및 429 에러 방지 기능 포함
+ * 보안 강화: 키 검증, 마스킹, 암호화 지원
  */
+
+import { validateApiKey, maskApiKey, securityLog } from './security';
 
 interface ApiKeyStatus {
   key: string;
@@ -71,10 +74,16 @@ class ApiKeyRotationManager {
     for (let i = 1; i <= 3; i++) {
       const key = process.env[`OPENAI_API_KEY_${i}`] || (i === 1 ? process.env.OPENAI_API_KEY : '');
       if (key) {
+        // API 키 유효성 검증
+        if (!validateApiKey(key, 'openai')) {
+          securityLog('warn', `OpenAI API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
+          continue;
+        }
         this.keyPools.openai.push({
           key,
           isAvailable: true,
         });
+        securityLog('info', `OpenAI API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
 
@@ -82,10 +91,15 @@ class ApiKeyRotationManager {
     for (let i = 1; i <= 3; i++) {
       const key = process.env[`ANTHROPIC_API_KEY_${i}`] || (i === 1 ? process.env.ANTHROPIC_API_KEY : '');
       if (key) {
+        if (!validateApiKey(key, 'anthropic')) {
+          securityLog('warn', `Anthropic API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
+          continue;
+        }
         this.keyPools.anthropic.push({
           key,
           isAvailable: true,
         });
+        securityLog('info', `Anthropic API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
 
@@ -93,10 +107,15 @@ class ApiKeyRotationManager {
     for (let i = 1; i <= 3; i++) {
       const key = process.env[`GOOGLE_API_KEY_${i}`] || (i === 1 ? process.env.GOOGLE_API_KEY : '');
       if (key) {
+        if (!validateApiKey(key, 'google')) {
+          securityLog('warn', `Google API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
+          continue;
+        }
         this.keyPools.gemini.push({
           key,
           isAvailable: true,
         });
+        securityLog('info', `Google API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
 
@@ -104,10 +123,15 @@ class ApiKeyRotationManager {
     for (let i = 1; i <= 3; i++) {
       const key = process.env[`PERPLEXITY_API_KEY_${i}`] || (i === 1 ? process.env.PERPLEXITY_API_KEY : '');
       if (key) {
+        if (!validateApiKey(key, 'perplexity')) {
+          securityLog('warn', `Perplexity API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
+          continue;
+        }
         this.keyPools.perplexity.push({
           key,
           isAvailable: true,
         });
+        securityLog('info', `Perplexity API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
   }

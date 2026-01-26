@@ -1,5 +1,10 @@
 export type PriceTier = 'low' | 'mid' | 'high';
 
+export interface TokenBudget {
+  input: number;  // 입력 토큰 예산
+  output: number; // 출력 토큰 예산
+}
+
 export interface AIModel {
   id: string;
   series: 'gpt' | 'claude' | 'perplexity' | 'coding' | 'image' | 'gemini';
@@ -9,6 +14,7 @@ export interface AIModel {
   description?: string;
   tier: PriceTier; // 가격대 (low/mid/high)
   maxCharacters: number; // 최대 입력 글자 수
+  tokenBudget?: TokenBudget; // 토큰 예산 (1회 기준)
 }
 
 export interface ModelSelection {
@@ -105,7 +111,6 @@ export interface ComparisonSession {
       latency: number;
     };
   };
-  winner?: string;
   createdAt: Date;
 }
 
@@ -318,10 +323,10 @@ export interface PMCTransaction {
 }
 
 export interface PMCCalculation {
-  baseRate: number; // 기본 적립률 (모델 개수 기반)
+  baseRate: number; // 기본 적립률 (총 선택 수량 기반)
   planBonusRate: number; // 플랜 추가 적립률
   totalRate: number; // 총 적립률
-  earnAmount: number; // 적립될 PMC
+  earnAmount: number; // 적립될 PMC 금액
   maxUsable: number; // 사용 가능한 최대 PMC (결제금액의 30%)
 }
 

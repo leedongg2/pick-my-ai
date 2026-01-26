@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { X, ThumbsUp, ThumbsDown, Calendar, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from '@/utils/translations';
 
 interface PollModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ interface PollModalProps {
 export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
   const { activePolls, currentUser, votePoll, cancelVote, checkExpiredPolls } = useStore();
   const [selectedPoll, setSelectedPoll] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (isOpen) {
@@ -67,7 +69,7 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-gray-900">커뮤니티 투표</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t.poll.title}</h2>
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -80,7 +82,7 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
           {activePolls.length === 0 ? (
             <div className="text-center py-12">
               <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-              <p className="text-gray-500">진행 중인 투표가 없습니다.</p>
+              <p className="text-gray-500">{t.poll.noPolls}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -104,11 +106,11 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
                           <div className="flex items-center gap-4 text-xs text-gray-500">
                             <div className="flex items-center gap-1">
                               <Calendar className="w-3 h-3" />
-                              <span>{daysLeft}일 남음</span>
+                              <span>{daysLeft > 0 ? `${daysLeft}${t.poll.daysLeft}` : t.poll.closingToday}</span>
                             </div>
                             <div className="flex items-center gap-1">
                               <Users className="w-3 h-3" />
-                              <span>총 {totalVotes}표</span>
+                              <span>{t.poll.totalVotes} {totalVotes}{t.poll.totalVotes}</span>
                             </div>
                           </div>
                         </div>
@@ -118,16 +120,14 @@ export const PollModal: React.FC<PollModalProps> = ({ isOpen, onClose }) => {
                       {hasVoted ? (
                         <div className="space-y-4">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-gray-700">
-                              투표 완료 {userVote === 'agree' ? '(찬성)' : '(반대)'}
-                            </span>
+                            <span className="text-sm font-medium text-gray-700">{t.poll.agree} {t.poll.vote} 완료 {userVote === 'agree' ? '(찬성)' : '(반대)'}</span>
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => handleCancelVote(poll.id)}
                               className="text-xs"
                             >
-                              투표 취소
+                              {t.poll.cancelVote}
                             </Button>
                           </div>
                           

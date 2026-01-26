@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
+import { useTranslation } from '@/utils/translations';
 
 export default function FeedbackPage() {
   const [type, setType] = useState<'question' | 'suggestion' | 'bug' | 'roast'>('question');
@@ -16,6 +17,7 @@ export default function FeedbackPage() {
   const [screenshots, setScreenshots] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const { submitFeedback } = useStore();
+  const { t } = useTranslation();
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +25,7 @@ export default function FeedbackPage() {
     try {
       const ok = await submitFeedback({ type, title, content, screenshots });
       if (!ok) {
-        toast.error('로그인이 필요합니다.');
+        toast.error(t.feedback.loginRequired);
         return;
       }
       setSent(true);
@@ -33,17 +35,10 @@ export default function FeedbackPage() {
       
       // 개발자 욕하기 선택 시 특별 메시지
       if (type === 'roast') {
-        const roastMessages = [
-          '개발자가 눈물을 흘리며 읽었습니다... 😭',
-          '개발자: "죄송합니다... 더 열심히 하겠습니다..." 🙇',
-          '개발자가 반성문을 쓰고 있습니다... 📝',
-          '개발자: "제가 잘못했습니다... 용서해주세요..." 🥺',
-          '개발자가 코드를 다시 보고 있습니다... 💻',
-        ];
-        const randomMessage = roastMessages[Math.floor(Math.random() * roastMessages.length)];
+        const randomMessage = t.feedback.roastMessages[Math.floor(Math.random() * t.feedback.roastMessages.length)];
         toast.success(randomMessage);
       } else {
-        toast.success('의견이 접수되었습니다. 감사합니다!');
+        toast.success(t.feedback.feedbackReceived);
       }
     } finally {
       setIsSending(false);
@@ -92,8 +87,8 @@ export default function FeedbackPage() {
       <div className="min-h-screen bg-white">
         <div className="max-w-3xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-3xl font-semibold text-gray-900 mb-2">의견 보내기</h1>
-            <p className="text-gray-600 text-sm">제품 관련 문의, 개선 제안, 버그 제보를 남겨주세요.</p>
+            <h1 className="text-3xl font-semibold text-gray-900 mb-2">{t.feedback.title}</h1>
+            <p className="text-gray-600 text-sm">{t.feedback.subtitle}</p>
           </div>
           
           <div className="bg-white rounded-xl border border-gray-200">
@@ -101,42 +96,42 @@ export default function FeedbackPage() {
               {sent && (
                 <div className="mb-6 p-4 rounded-lg bg-green-50 border border-green-200">
                   <p className="text-sm font-medium text-green-800">
-                    감사합니다! 의견이 접수되었습니다.
+                    {t.feedback.successMessage}
                   </p>
                 </div>
               )}
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">종류</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.type}</label>
                   <select
                     value={type}
                     onChange={handleTypeChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
-                    <option value="question">고객 문의</option>
-                    <option value="suggestion">의견/개선 제안</option>
-                    <option value="bug">버그 제보</option>
-                    <option value="roast">개발자 욕하기</option>
+                    <option value="question">{t.feedback.typeQuestion}</option>
+                    <option value="suggestion">{t.feedback.typeSuggestion}</option>
+                    <option value="bug">{t.feedback.typeBug}</option>
+                    <option value="roast">{t.feedback.typeRoast}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.titleLabel}</label>
                   <input
                     value={title}
                     onChange={handleTitleChange}
-                    placeholder="제목을 입력하세요"
+                    placeholder={t.feedback.titlePlaceholder}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">내용</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.content}</label>
                   <textarea
                     value={content}
                     onChange={handleContentChange}
-                    placeholder="자세한 내용을 입력하세요"
+                    placeholder={t.feedback.contentPlaceholder}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[140px] resize-none"
                     maxLength={900}
                     required
@@ -145,7 +140,7 @@ export default function FeedbackPage() {
 
                 {/* 스크린샷 업로드 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">스크린샷 (최대 5개)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.screenshots}</label>
                   <input
                     ref={fileRef}
                     type="file"
@@ -174,7 +169,7 @@ export default function FeedbackPage() {
                         onClick={handleFileClick}
                         className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        스크린샷 추가
+                        {t.feedback.addScreenshot}
                       </button>
                     )}
                   </div>
@@ -186,7 +181,7 @@ export default function FeedbackPage() {
                     disabled={isSending}
                     className="px-6 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
-                    {isSending ? '전송 중...' : '보내기'}
+                    {isSending ? t.feedback.sending : t.feedback.submit}
                   </button>
                 </div>
               </form>

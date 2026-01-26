@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/Card';
+import { csrfFetch } from '@/lib/csrfFetch';
 import { toast } from 'sonner';
 
 export default function AdminLoginPage() {
@@ -13,15 +14,37 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsLoading(true);
     
-    if (password === 'jason120510^^') {
-      // Store admin session
+    try {
+      const response = await csrfFetch('/api/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast.error(data.error || '로그인에 실패했습니다.');
+        return;
+      }
+
+      // 토큰과 만료 시간 저장
       localStorage.setItem('adminAuthenticated', 'true');
+      localStorage.setItem('adminToken', data.token);
+      localStorage.setItem('adminTokenExpiry', (Date.now() + data.expiresIn).toString());
+      
+      toast.success('로그인 성공!');
       router.push('/admin');
-    } else {
-toast.error('관리자 비밀번호가 올바르지 않습니다.');
+    } catch (error: any) {
+      toast.error('로그인 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
     }
   };
 

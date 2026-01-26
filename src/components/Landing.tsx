@@ -10,6 +10,7 @@ import { Sparkles, ArrowRight, Zap, Users, TrendingDown, MessageSquare, CreditCa
 import { initialModels, seriesInfo } from '@/data/models';
 import { formatWon, getFixedDisplayPriceOrFallback } from '@/utils/pricing';
 import { useCustomTheme } from '@/hooks/useCustomTheme';
+import { LogoMark } from './LogoMark';
 
 const features = [
   {
@@ -105,10 +106,10 @@ export const Landing: React.FC = () => {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <div 
-              className="preview-nav-logo flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all duration-200 hover:scale-105"
+              className="preview-nav-logo flex h-12 w-12 items-center justify-center rounded-xl transition-all duration-200 hover:scale-105 bg-transparent"
               style={getElementStyle('nav-logo', {})}
             >
-              <Sparkles className="h-6 w-6" />
+              <LogoMark className="h-10 w-10" />
             </div>
             <span className="preview-nav-title text-2xl font-black text-gray-900" style={getElementStyle('nav-title', {})}>Pick-My-AI</span>
           </div>
@@ -165,7 +166,7 @@ export const Landing: React.FC = () => {
                   <Button
                     size="lg"
                     onClick={handleGetStarted}
-                    className="preview-hero-primary-button bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 text-lg font-bold transition-all duration-200 hover-lift"
+                    className="preview-hero-primary-button bg-primary text-primary-foreground hover:opacity-90 px-8 py-4 text-lg font-bold transition-all duration-200 hover-lift"
                     style={getElementStyle('hero-primary-button', {})}
                   >
                     {isAuthenticated ? '지금 시작하기' : '무료로 시작하기'}
@@ -255,7 +256,7 @@ export const Landing: React.FC = () => {
               {features.map((feature, index) => (
                 <div key={feature.title} className="neo-card p-8 hover-float card-tilt group">
                   <div className="space-y-5">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 group-hover:bg-blue-700 transition-colors duration-300">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary group-hover:opacity-90 transition-all duration-300">
                       <div className="text-white">{feature.icon}</div>
                     </div>
                     <div>
@@ -354,7 +355,7 @@ export const Landing: React.FC = () => {
           </div>
         </section>
 
-        <section className="relative overflow-hidden px-4 py-20 bg-blue-600 text-white sm:px-6 lg:px-8">
+        <section className="relative overflow-hidden px-4 py-20 bg-primary text-primary-foreground sm:px-6 lg:px-8">
           <div className="relative mx-auto max-w-4xl text-center">
             <h2 className="text-4xl font-extrabold sm:text-5xl">지금 바로 시작하세요</h2>
             <p className="mt-4 text-xl opacity-95">복잡한 구독 없이, 필요한 AI만 골라 사용하세요.</p>

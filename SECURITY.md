@@ -34,6 +34,7 @@ cp .env.example .env
 # - API 키
 # - 데이터베이스 자격 증명
 # - JWT 시크릿 (최소 32자)
+# - 암호화 키 (64자 이상, 프로덕션 필수)
 ```
 
 ### 프로덕션 환경
@@ -41,6 +42,26 @@ cp .env.example .env
 - 환경 변수는 호스팅 플랫폼의 환경 변수 설정을 사용하세요
 - Vercel, Netlify, AWS 등에서 제공하는 환경 변수 관리 기능 활용
 - 정기적으로 API 키를 로테이션하세요
+
+### 🔒 API 키 암호화
+
+**프로덕션 필수 설정**:
+
+```bash
+# 64자 이상의 암호화 키 생성
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+
+# .env 파일에 추가
+ENCRYPTION_KEY=your-generated-key-here
+```
+
+**API 키 형식 검증**:
+- OpenAI: `sk-[20자 이상]`
+- Anthropic: `sk-ant-[20자 이상]`
+- Google: `AIza[35자]`
+- Perplexity: `pplx-[20자 이상]`
+
+잘못된 형식의 API 키는 시스템 시작 시 자동으로 거부되며 경고 로그가 기록됩니다.
 
 ---
 
@@ -71,18 +92,41 @@ const isAdmin = await verifyAdmin(userId);
 
 ## 🛡️ API 보안
 
-### Rate Limiting
+### Rate Limiting 강화
 
-모든 API 엔드포인트에 Rate Limiting이 적용됩니다:
+모든 API 엔드포인트에 고급 Rate Limiting이 적용됩니다:
 
 - **Chat API**: 분당 20회
 - **기본 API**: 15분당 100회
+- **자동 차단**: 3회 위반 시 1시간 차단
+- **IP 모니터링**: 의심스러운 활동 자동 감지
 
 ```typescript
 import { RateLimiter } from '@/lib/rateLimit';
 
 const limiter = new RateLimiter(20, 60 * 1000); // 분당 20회
 const result = limiter.check(clientIp);
+
+if (!result.success) {
+  // 3회 위반 시 자동 차단
+  // 차단 해제: 1시간 후
+}
+```
+
+### 🚫 IP 보안 및 차단
+
+**자동 차단 시스템**:
+- 1분 내 100회 이상 요청 시 자동 차단
+- 의심스러운 User-Agent 감지 및 차단
+- 차단된 IP는 보안 로그에 기록
+
+```typescript
+import { checkIPSecurity, recordIPActivity } from '@/lib/security';
+
+const ipCheck = checkIPSecurity(clientIp);
+if (!ipCheck.allowed) {
+  return new Response('Access denied', { status: 403 });
+}
 ```
 
 ### 인증 미들웨어
@@ -105,6 +149,31 @@ export const POST = withAuth(async (request, userId) => {
 - 메시지 길이 제한: 최대 50,000자
 - 첨부파일 개수 제한: 최대 10개
 - 첨부파일 크기 제한: 최대 10MB
+
+### 🔍 요청 헤더 검증
+
+**자동 검증 항목**:
+- User-Agent 필수 확인
+- 의심스러운 봇/크롤러 차단
+- Origin 헤더 검증 (프로덕션)
+- 허용된 도메인만 접근 가능
+
+### 📊 보안 로깅
+
+**모든 보안 이벤트 기록**:
+- API 키 로드 및 검증 결과
+- Rate limit 위반 및 차단
+- IP 차단 및 해제
+- 의심스러운 요청 패턴
+
+프로덕션 환경에서는 민감한 정보가 자동으로 마스킹됩니다:
+```typescript
+import { securityLog, maskApiKey } from '@/lib/security';
+
+securityLog('warn', 'API 키 검증 실패', { 
+  keyMask: maskApiKey(apiKey) // sk-ab...xy
+});
+```
 
 ---
 
@@ -183,7 +252,7 @@ if (!validateUrl(url)) {
 
 ### 적용된 헤더
 
-`next.config.js`에 다음 헤더가 설정되어 있습니다:
+`next.config.js` 및 `middleware.ts`에 다음 헤더가 설정되어 있습니다:
 
 ```javascript
 {
@@ -193,9 +262,18 @@ if (!validateUrl(url)) {
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Content-Security-Policy': '...',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+  'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
 }
 ```
+
+### 🛡️ 미들웨어 보안
+
+`src/middleware.ts`에서 모든 요청에 대해:
+- IP 보안 체크
+- 요청 헤더 검증
+- CSRF 토큰 검증
+- 보안 헤더 자동 추가
+- Content Security Policy 강화
 
 ### Content Security Policy (CSP)
 
@@ -301,14 +379,19 @@ fetch('/api/endpoint', {
 
 - [ ] `.env` 파일이 `.gitignore`에 포함되어 있는가?
 - [ ] 모든 API 키가 환경 변수로 관리되는가?
+- [ ] **ENCRYPTION_KEY가 64자 이상으로 설정되어 있는가? (프로덕션 필수)**
+- [ ] **API 키 형식 검증이 통과되는가?**
 - [ ] HTTPS가 활성화되어 있는가?
 - [ ] Supabase RLS 정책이 적용되어 있는가?
 - [ ] Rate Limiting이 모든 API에 적용되어 있는가?
+- [ ] **IP 차단 시스템이 활성화되어 있는가?**
 - [ ] CSRF 보호가 활성화되어 있는가?
 - [ ] 보안 헤더가 설정되어 있는가?
 - [ ] 비밀번호 정책이 적용되어 있는가?
 - [ ] 입력 검증이 모든 폼에 적용되어 있는가?
 - [ ] 에러 메시지에 민감한 정보가 포함되지 않는가?
+- [ ] **보안 로깅이 정상 작동하는가?**
+- [ ] **콘솔 로그가 프로덕션에서 비활성화되어 있는가?**
 
 ### 정기 점검
 
@@ -350,7 +433,17 @@ fetch('/api/endpoint', {
 - 보안 헤더 설정
 - 입력 검증 강화
 
+### 2026-01-05
+- **API 키 암호화 시스템 추가**
+- **API 키 형식 검증 자동화**
+- **Rate Limiting 강화**: 3회 위반 시 자동 차단
+- **IP 보안 시스템**: 의심스러운 활동 자동 감지 및 차단
+- **요청 헤더 검증**: User-Agent, Origin 검증
+- **보안 로깅 시스템**: 모든 보안 이벤트 기록
+- **미들웨어 보안 강화**: IP 체크, 헤더 검증 추가
+- **응답 데이터 Sanitization**: API 키 노출 방지
+
 ---
 
-**마지막 업데이트**: 2025-10-18
-**버전**: 1.0.0
+**마지막 업데이트**: 2026-01-05
+**버전**: 2.0.0

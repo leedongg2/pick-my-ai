@@ -9,10 +9,6 @@ import {
   Moon, 
   User, 
   Gift, 
-  Bell, 
-  CreditCard, 
-  Trash2, 
-  Award,
   ArrowLeft
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -24,21 +20,13 @@ const ChatTemplates = dynamic(() => import('@/components/ChatTemplates').then(mo
 const DarkModeToggle = dynamic(() => import('@/components/DarkModeToggle').then(mod => ({ default: mod.DarkModeToggle })), { ssr: false });
 const PersonaSettings = dynamic(() => import('@/components/PersonaSettings').then(mod => ({ default: mod.PersonaSettings })), { ssr: false });
 const CreditGift = dynamic(() => import('@/components/CreditGift').then(mod => ({ default: mod.CreditGift })), { ssr: false });
-const UsageAlerts = dynamic(() => import('@/components/UsageAlerts').then(mod => ({ default: mod.UsageAlerts })), { ssr: false });
-const AutoRechargeSettings = dynamic(() => import('@/components/AutoRechargeSettings').then(mod => ({ default: mod.AutoRechargeSettings })), { ssr: false });
-const AutoDeleteSettings = dynamic(() => import('@/components/AutoDeleteSettings').then(mod => ({ default: mod.AutoDeleteSettings })), { ssr: false });
-const ExpertiseProfiles = dynamic(() => import('@/components/ExpertiseProfiles').then(mod => ({ default: mod.ExpertiseProfiles })), { ssr: false });
 
 type FeatureKey = 
   | 'comparison' 
   | 'templates' 
   | 'darkmode' 
   | 'persona' 
-  | 'gift' 
-  | 'alerts' 
-  | 'recharge' 
-  | 'autodelete' 
-  | 'expertise';
+  | 'gift';
 
 interface Feature {
   key: FeatureKey;
@@ -83,34 +71,6 @@ const features: Feature[] = [
     description: '다른 사용자에게 크레딧을 선물하고 받으세요',
     icon: <Gift className="h-6 w-6" />,
     component: CreditGift,
-  },
-  {
-    key: 'alerts',
-    title: '사용량 알림',
-    description: '크레딧 사용량을 모니터링하고 알림을 받으세요',
-    icon: <Bell className="h-6 w-6" />,
-    component: UsageAlerts,
-  },
-  {
-    key: 'recharge',
-    title: '자동 충전',
-    description: '크레딧이 부족할 때 자동으로 충전되도록 설정하세요',
-    icon: <CreditCard className="h-6 w-6" />,
-    component: AutoRechargeSettings,
-  },
-  {
-    key: 'autodelete',
-    title: '자동 삭제',
-    description: '오래된 대화를 자동으로 정리하여 저장 공간을 관리하세요',
-    icon: <Trash2 className="h-6 w-6" />,
-    component: AutoDeleteSettings,
-  },
-  {
-    key: 'expertise',
-    title: '전문 분야 프로필',
-    description: 'AI의 전문 분야와 지식을 상세하게 설정하세요',
-    icon: <Award className="h-6 w-6" />,
-    component: ExpertiseProfiles,
   },
 ];
 

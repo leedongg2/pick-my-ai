@@ -12,9 +12,9 @@ export const Card: React.FC<CardProps> = ({
   ...props
 }) => {
   const variants = {
-    default: 'bg-white rounded-lg',
-    bordered: 'bg-white rounded-lg border border-gray-200',
-    elevated: 'bg-white rounded-lg shadow-lg',
+    default: 'bg-card text-card-foreground rounded-lg',
+    bordered: 'bg-card text-card-foreground rounded-lg border border-border',
+    elevated: 'bg-card text-card-foreground rounded-lg shadow-lg',
   };
   
   return (
@@ -30,7 +30,7 @@ export const CardHeader: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
   ...props
 }) => {
   return (
-    <div className={cn('px-6 py-4 border-b border-gray-200', className)} {...props}>
+    <div className={cn('px-6 py-4 border-b border-border', className)} {...props}>
       {children}
     </div>
   );
@@ -54,7 +54,7 @@ export const CardFooter: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
   ...props
 }) => {
   return (
-    <div className={cn('px-6 py-4 border-t border-gray-200', className)} {...props}>
+    <div className={cn('px-6 py-4 border-t border-border', className)} {...props}>
       {children}
     </div>
   );

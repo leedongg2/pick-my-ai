@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { CheckCircle } from 'lucide-react';
 import { useStore } from '@/store';
+import { csrfFetch } from '@/lib/csrfFetch';
 import { toast } from 'sonner';
 
 export default function CheckoutSuccessPage() {
@@ -22,7 +23,7 @@ export default function CheckoutSuccessPage() {
 
       if (paymentKey && amount && orderId) {
         try {
-          const res = await fetch('/api/payments/toss/confirm', {
+          const res = await csrfFetch('/api/payments/toss/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentKey, orderId, amount: Number(amount) })

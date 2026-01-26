@@ -1,5 +1,5 @@
-﻿import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import { 
   AIModel, 
   ModelSelection, 
@@ -36,6 +36,11 @@ type FeedbackPayload = Omit<FeedbackItem, 'id' | 'status' | 'createdAt' | 'creat
 
 import { initialModels } from '@/data/models';
 import { defaultPolicy } from '@/utils/pricing';
+import { recordChatPerfLsSetItem } from '@/utils/chatPerf';
+
+type AppLanguage = 'ko' | 'en' | 'ja';
+
+const MAX_STORED_FACTS = 50;
 
 interface AppState {
   // 설정 관련
@@ -43,6 +48,8 @@ interface AppState {
     showDeleteConfirmation: boolean;
     showSuccessNotifications: boolean;
   };
+
+  language: AppLanguage;
   
   // 커스텀 디자인 테마
   customDesignTheme: {
@@ -52,6 +59,7 @@ interface AppState {
   
   // Actions
   toggleSuccessNotifications: () => void;
+  setLanguage: (language: AppLanguage) => void;
   setCurrentUser: (user: User | null) => void;
   setTheme: (theme: ThemeColor) => void;
   setCustomDesignTheme: (theme: DesignTheme, elementColors: Record<string, string>) => void;
@@ -143,6 +151,8 @@ interface AppState {
   }>;
   currentSessionId: string | null;
   lastChatSessionCreatedAt?: number;
+
+  storedFacts: string[];
   
   // 관리자 설정
   isAdmin: boolean;
@@ -162,14 +172,18 @@ interface AppState {
   clearSelections: () => void;
   setPolicy: (policy: PricingPolicy) => void;
   initWallet: (userId: string) => void;
-  addCredits: (credits: { [modelId: string]: number }) => void;
-  deductCredit: (modelId: string) => boolean;
+  addCredits: (credits: { [modelId: string]: number }) => Promise<void>;
+  deductCredit: (modelId: string) => Promise<boolean>;
   getCredits: (modelId: string) => number;
   createChatSession: (title: string) => string | null;
   updateChatSessionTitle: (sessionId: string, newTitle: string) => void;
   deleteChatSession: (sessionId: string) => void;
   setCurrentSession: (sessionId: string | null) => void;
   addMessage: (sessionId: string, message: any) => void;
+  updateMessageContent: (sessionId: string, messageId: string, content: string) => void;
+  finalizeMessageContent: (sessionId: string, messageId: string, content: string) => void;
+  addStoredFacts: (facts: string[]) => void;
+  clearStoredFacts: () => void;
   setAdminMode: (isAdmin: boolean) => void;
   setExchangeRateMemo: (memo: string) => void;
   setPaymentFeeMemo: (memo: string) => void;
@@ -184,12 +198,13 @@ interface AppState {
   // 모델 비교 관련
   startComparison: (models: string[], prompt: string) => string;
   updateComparisonResponse: (sessionId: string, modelId: string, response: any) => void;
-  setComparisonWinner: (sessionId: string, winner: string) => void;
   
   // 대화 템플릿 관련
   addChatTemplate: (template: Omit<ChatTemplate, 'id' | 'createdAt' | 'updatedAt' | 'usage'>) => void;
   toggleFavoriteTemplate: (templateId: string) => void;
   incrementTemplateUsage: (templateId: string) => void;
+  setActiveTemplate: (template: ChatTemplate | null) => void;
+  clearActiveTemplate: () => void;
   
   // 페르소나 관련
   createPersona: (persona: Omit<PersonaSettings, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -274,6 +289,7 @@ export const useStore = create<AppState>()(
         showDeleteConfirmation: true, // 삭제 확인 대화상자 표시 여부
         showSuccessNotifications: true, // 성공 알림 표시 여부
       },
+      language: 'ko',
       customDesignTheme: {
         theme: null,
         elementColors: {},
@@ -361,6 +377,7 @@ export const useStore = create<AppState>()(
       
       chatSessions: [],
       currentSessionId: null,
+      storedFacts: [],
       isAdmin: false,
       exchangeRateMemo: '',
       paymentFeeMemo: '',
@@ -370,7 +387,63 @@ export const useStore = create<AppState>()(
       // 인증 액션
       login: async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
         try {
-          // Simulate API call
+          // Supabase 로그인 시도
+          if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+            const { AuthService } = await import('@/lib/auth');
+            const result = await AuthService.login(email, password);
+            
+            if (result.success && result.user) {
+              const currentUser: User = {
+                id: result.user.id,
+                email: result.user.email,
+                name: result.user.name,
+                credits: 100,
+                subscription: 'free',
+                theme: 'blue',
+                createdAt: result.user.createdAt,
+              };
+              
+              set({ currentUser, isAuthenticated: true, storedFacts: [] });
+              
+              // Supabase에서 크레딧 로드
+              try {
+                const { supabase } = await import('@/lib/supabase');
+                const { data: { session } } = await supabase.auth.getSession();
+                
+                if (session?.access_token) {
+                  const walletResponse = await fetch('/api/wallet', {
+                    headers: {
+                      'Authorization': `Bearer ${session.access_token}`
+                    }
+                  });
+                  
+                  if (walletResponse.ok) {
+                    const { wallet } = await walletResponse.json();
+                    set({
+                      wallet: {
+                        userId: currentUser.id,
+                        credits: wallet.credits || {},
+                        transactions: []
+                      }
+                    });
+                  } else {
+                    get().initWallet(currentUser.id);
+                  }
+                }
+              } catch (error) {
+                if (process.env.NODE_ENV !== 'production') {
+                  console.error('크레딧 로드 실패:', error);
+                }
+                get().initWallet(currentUser.id);
+              }
+              
+              return { success: true, message: '로그인 성공' };
+            }
+            
+            return { success: false, message: result.error || '이메일 또는 비밀번호가 올바르지 않습니다.' };
+          }
+          
+          // Fallback: 로컬 로그인
           await new Promise(resolve => setTimeout(resolve, 300));
           
           const user = userDatabase.find(
@@ -378,7 +451,6 @@ export const useStore = create<AppState>()(
           );
           
           if (user) {
-            // 고유한 사용자 ID 생성 (이메일 기반)
             const userId = user.id || btoa(email).replace(/=/g, '');
             
             const currentUser: User = {
@@ -391,9 +463,9 @@ export const useStore = create<AppState>()(
               createdAt: new Date(),
             };
             
-            set({ currentUser, isAuthenticated: true });
+            set({ currentUser, isAuthenticated: true, storedFacts: [] });
             
-            // 사용자별 데이터 로드
+            // 로컬 스토리지에서 데이터 로드
             const storage = localStorage.getItem('pick-my-ai-storage');
             if (storage) {
               try {
@@ -406,19 +478,18 @@ export const useStore = create<AppState>()(
                   hasFirstPurchase: persistedState[`user_${userId}_hasFirstPurchase`] || false,
                   chatSessions: persistedState[`user_${userId}_chatSessions`] || [],
                   currentSessionId: persistedState[`user_${userId}_currentSessionId`] || null,
+                  storedFacts: persistedState[`user_${userId}_storedFacts`] || [],
                 });
               } catch (error) {
                 console.error('Failed to load user data:', error);
               }
             }
             
-            // 지갑이 없으면 초기화
             const state = get();
             if (!state.wallet) {
               get().initWallet(currentUser.id);
             }
             
-            // 받은 선물 로드 (allGifts에서 현재 사용자 이메일로 온 선물 필터링)
             const receivedGifts = state.allGifts.filter(gift => 
               gift.to.toLowerCase() === user.email.toLowerCase()
             );
@@ -499,7 +570,7 @@ export const useStore = create<AppState>()(
           createdAt: new Date(),
         };
         
-        set({ currentUser: newUser, isAuthenticated: true });
+        set({ currentUser: newUser, isAuthenticated: true, storedFacts: [] });
         
         // 지갑 초기화
         get().initWallet(userId);
@@ -535,6 +606,7 @@ export const useStore = create<AppState>()(
           hasFirstPurchase: false,
           chatSessions: [],
           currentSessionId: null,
+          storedFacts: [],
           pmcBalance: { amount: 0, history: [] },
           userPlan: 'free',
         });
@@ -572,7 +644,7 @@ export const useStore = create<AppState>()(
         }
       }),
       
-      addCredits: (credits: { [modelId: string]: number }) => {
+      addCredits: async (credits: { [modelId: string]: number }) => {
         const state = get();
         
         if (!state.wallet) {
@@ -626,6 +698,33 @@ export const useStore = create<AppState>()(
           wallet: updatedWallet
         });
         
+        // Supabase에 동기화
+        if (process.env.NEXT_PUBLIC_SUPABASE_URL && state.currentUser) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (session?.access_token) {
+              await fetch('/api/wallet', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                  credits,
+                  type: 'purchase',
+                  description: '크레딧 구매'
+                })
+              });
+            }
+          } catch (error) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.error('Supabase 크레딧 동기화 실패:', error);
+            }
+          }
+        }
+        
         // 강제로 로컬 스토리지에 즉시 저장
         setTimeout(() => {
           if (process.env.NODE_ENV !== 'production') {
@@ -635,7 +734,7 @@ export const useStore = create<AppState>()(
         }, 100);
       },
       
-      deductCredit: (modelId) => {
+      deductCredit: async (modelId) => {
         const state = get();
         if (!state.wallet) return false;
         
@@ -665,6 +764,33 @@ export const useStore = create<AppState>()(
             }
           };
         });
+        
+        // Supabase에 동기화
+        if (process.env.NEXT_PUBLIC_SUPABASE_URL && state.currentUser) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (session?.access_token) {
+              await fetch('/api/wallet', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                  credits: { [modelId]: -1 },
+                  type: 'usage',
+                  description: '크레딧 사용'
+                })
+              });
+            }
+          } catch (error) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.error('Supabase 크레딧 사용 동기화 실패:', error);
+            }
+          }
+        }
         
         return true;
       },
@@ -705,11 +831,22 @@ export const useStore = create<AppState>()(
           return null;
         }
         
+        // 언어별 기본 제목 설정
+        const language = get().language;
+        let defaultTitle = title;
+        if (title.startsWith('새 대화')) {
+          if (language === 'en') {
+            defaultTitle = title.replace('새 대화', 'New Chat');
+          } else if (language === 'ja') {
+            defaultTitle = title.replace('새 대화', '新しいチャット');
+          }
+        }
+        
         const sessionId = now.toString();
         set((state) => ({
           chatSessions: [...state.chatSessions, {
             id: sessionId,
-            title,
+            title: defaultTitle,
             messages: [],
             createdAt: new Date(now),
             updatedAt: new Date(now)
@@ -739,9 +876,17 @@ export const useStore = create<AppState>()(
         
         // If no sessions left, create a new one
         if (!newCurrentSessionId) {
+          const language = state.language;
+          let title = '새 대화';
+          if (language === 'en') {
+            title = 'New Chat';
+          } else if (language === 'ja') {
+            title = '新しいチャット';
+          }
+          
           const newSession = {
             id: `session-${Date.now()}`,
-            title: '새 대화',
+            title,
             messages: [],
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -768,12 +913,83 @@ export const useStore = create<AppState>()(
           session.id === sessionId
             ? {
                 ...session,
-                messages: [...session.messages, { ...message, id: Date.now().toString() }],
+                messages: [...session.messages, { ...message, id: message?.id ?? Date.now().toString() }],
                 updatedAt: new Date()
               }
             : session
         )
       })),
+
+      updateMessageContent: (sessionId, messageId, content) =>
+        set((state) => ({
+          chatSessions: state.chatSessions.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messages: session.messages.map((msg: any) =>
+                    msg.id === messageId ? { ...msg, content } : msg
+                  ),
+                  updatedAt: new Date(),
+                }
+              : session
+          ),
+        })),
+
+      finalizeMessageContent: (sessionId, messageId, content) =>
+        set((state) => ({
+          chatSessions: state.chatSessions.map((session) =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messages: session.messages.map((msg: any) =>
+                    msg.id === messageId ? { ...msg, content } : msg
+                  ),
+                  updatedAt: new Date(),
+                }
+              : session
+          ),
+        })),
+
+      addStoredFacts: (facts) => {
+        const normalizeStoredFact = (fact: unknown) => {
+          if (typeof fact !== 'string') return '';
+          const trimmed = fact.trim();
+          if (!trimmed) return '';
+          const unbulleted = trimmed
+            .replace(/^[-*•]\s+/, '')
+            .replace(/^\d+[\.)]\s+/, '');
+          const compact = unbulleted.replace(/\s+/g, ' ');
+          return compact.slice(0, 200);
+        };
+
+        set((state) => {
+          if (!Array.isArray(facts) || facts.length === 0) return state;
+
+          const normalized = facts.map(normalizeStoredFact).filter(Boolean);
+          if (normalized.length === 0) return state;
+
+          const existing = Array.isArray(state.storedFacts) ? state.storedFacts : [];
+          const merged: string[] = [...existing];
+          const existingKeys = new Set(
+            existing
+              .map((f) => normalizeStoredFact(f).toLowerCase())
+              .filter(Boolean)
+          );
+
+          for (const fact of normalized) {
+            const key = fact.toLowerCase();
+            if (existingKeys.has(key)) continue;
+            existingKeys.add(key);
+            merged.push(fact);
+          }
+
+          return { storedFacts: merged.slice(-MAX_STORED_FACTS) };
+        });
+      },
+
+      clearStoredFacts: () => {
+        set({ storedFacts: [] });
+      },
       
       // 관리자 관련 액션
       setAdminMode: (isAdmin) => set({ isAdmin }),
@@ -885,14 +1101,6 @@ export const useStore = create<AppState>()(
         }));
       },
       
-      setComparisonWinner: (sessionId: string, winner: string) => {
-        set((state) => ({
-          comparisonSessions: state.comparisonSessions.map(s => 
-            s.id === sessionId ? { ...s, winner } : s
-          ),
-        }));
-      },
-      
       // 대화 템플릿 관련 액션
       addChatTemplate: (template: Omit<ChatTemplate, 'id' | 'createdAt' | 'updatedAt' | 'usage'>) => {
         const newTemplate: ChatTemplate = {
@@ -924,6 +1132,14 @@ export const useStore = create<AppState>()(
             t.id === templateId ? { ...t, usage: t.usage + 1 } : t
           ),
         }));
+      },
+
+      setActiveTemplate: (template: ChatTemplate | null) => {
+        set({ activeTemplate: template });
+      },
+
+      clearActiveTemplate: () => {
+        set({ activeTemplate: null });
       },
       
       // 페르소나 관련 액션
@@ -1517,6 +1733,10 @@ export const useStore = create<AppState>()(
           }
         }));
       },
+
+      setLanguage: (language) => {
+        set({ language });
+      },
       
       setCustomDesignTheme: (theme, elementColors) => {
         set({ customDesignTheme: { theme, elementColors } });
@@ -1547,6 +1767,7 @@ export const useStore = create<AppState>()(
           isAuthenticated: true,
           isAdmin: true,
           userPlan: 'max',
+          storedFacts: [],
         });
         
         // 지갑 초기화
@@ -1573,12 +1794,29 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'pick-my-ai-storage',
+      storage: createJSONStorage(() => {
+        const storage = localStorage;
+
+        return {
+          getItem: storage.getItem.bind(storage),
+          setItem: (key: string, value: string) => {
+            const start = performance.now();
+            try {
+              storage.setItem(key, value);
+            } finally {
+              recordChatPerfLsSetItem(key, value, performance.now() - start);
+            }
+          },
+          removeItem: storage.removeItem.bind(storage),
+        };
+      }),
       partialize: (state) => {
         // 사용자별로 데이터 분리하여 저장
         if (!state.currentUser) {
           return {
             currentUser: null,
             isAuthenticated: false,
+            language: state.language,
           };
         }
         
@@ -1591,6 +1829,7 @@ export const useStore = create<AppState>()(
           [`user_${state.currentUser.id}_hasFirstPurchase`]: state.hasFirstPurchase,
           [`user_${state.currentUser.id}_chatSessions`]: state.chatSessions,
           [`user_${state.currentUser.id}_currentSessionId`]: state.currentSessionId,
+          [`user_${state.currentUser.id}_storedFacts`]: state.storedFacts,
           [`user_${state.currentUser.id}_themeSettings`]: state.themeSettings,
           [`user_${state.currentUser.id}_comparisonSessions`]: state.comparisonSessions,
           [`user_${state.currentUser.id}_chatTemplates`]: state.chatTemplates,
@@ -1618,6 +1857,7 @@ export const useStore = create<AppState>()(
           paymentFeeMemo: state.paymentFeeMemo,
           customDesignTheme: state.customDesignTheme,
           settings: state.settings,
+          language: state.language,
         };
       },
       // 데이터 복원 시 사용자별 데이터 로드
@@ -1630,6 +1870,7 @@ export const useStore = create<AppState>()(
             try {
               const parsed = JSON.parse(storage);
               const persistedState = parsed.state;
+              state.language = persistedState.language || 'ko';
               
               // 사용자별 데이터 복원
               state.selections = persistedState[`user_${userId}_selections`] || [];
@@ -1637,6 +1878,7 @@ export const useStore = create<AppState>()(
               state.hasFirstPurchase = persistedState[`user_${userId}_hasFirstPurchase`] || false;
               state.chatSessions = persistedState[`user_${userId}_chatSessions`] || [];
               state.currentSessionId = persistedState[`user_${userId}_currentSessionId`] || null;
+              state.storedFacts = persistedState[`user_${userId}_storedFacts`] || [];
               state.themeSettings = persistedState[`user_${userId}_themeSettings`] || { mode: 'system', color: 'blue' };
               state.comparisonSessions = persistedState[`user_${userId}_comparisonSessions`] || [];
               state.chatTemplates = persistedState[`user_${userId}_chatTemplates`] || [];

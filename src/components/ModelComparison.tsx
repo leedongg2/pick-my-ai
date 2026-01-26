@@ -3,19 +3,18 @@
 import React, { useState, useCallback } from 'react';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
-import { Sparkles, Trophy, Clock, Zap, Copy, Check, RefreshCw, ArrowRight } from 'lucide-react';
+import { Sparkles, Clock, Zap, Copy, Check, RefreshCw, ArrowRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export const ModelComparison: React.FC = () => {
   const { 
     models, 
     activeComparison,
-    comparisonSessions,
     startComparison,
     updateComparisonResponse,
-    setComparisonWinner,
     wallet,
     deductCredit,
+    language,
   } = useStore();
 
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
@@ -53,38 +52,99 @@ export const ModelComparison: React.FC = () => {
     setIsComparing(true);
     const sessionId = startComparison(selectedModels, prompt);
     const startTime = Date.now();
-    
-    for (const modelId of selectedModels) {
+
+    const tasks = selectedModels.map(async (modelId) => {
       try {
         if (!deductCredit(modelId)) {
-          toast.error(`${modelId} 크레딧 부족`);
-          continue;
+          updateComparisonResponse(sessionId, modelId, {
+            content: `${modelId} 크레딧 부족`,
+            timestamp: new Date(),
+            tokens: 0,
+            cost: 0,
+            latency: 0,
+          });
+          return;
         }
 
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: modelId,
+            modelId: modelId,
             messages: [{ role: 'user', content: prompt }],
-            stream: false,
+            language,
           }),
         });
 
-        const data = await response.json();
+        let content = '';
+        const contentType = response.headers.get('content-type') || '';
+        const isEventStream = contentType.includes('text/event-stream');
+
+        if (!response.ok) {
+          let errorData: any = null;
+          try {
+            errorData = await response.json();
+          } catch {
+            // ignore
+          }
+          throw new Error(errorData?.error || `API 호출 실패 (상태 코드: ${response.status})`);
+        }
+
+        if (isEventStream) {
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error('스트리밍 응답을 읽을 수 없습니다.');
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            for (const raw of lines) {
+              const line = raw.trim();
+              if (!line) continue;
+              if (!line.startsWith('data:')) continue;
+
+              const data = line.replace(/^data:\s*/, '');
+              if (data === '[DONE]') {
+                buffer = '';
+                break;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed?.content) content += parsed.content;
+              } catch {
+                // ignore
+              }
+            }
+          }
+        } else {
+          const data = await response.json();
+          content = data.content || data.error || '응답 생성 실패';
+        }
         const endTime = Date.now();
 
         updateComparisonResponse(sessionId, modelId, {
-          content: data.content || data.error || '응답 생성 실패',
+          content: content || '응답 생성 실패',
           timestamp: new Date(),
-          tokens: data.tokens || 0,
+          tokens: 0,
           cost: 1,
           latency: endTime - startTime,
         });
 
         toast.success(`${models.find(m => m.id === modelId)?.displayName} 응답 완료`);
       } catch (error) {
-        console.error(`Error with ${modelId}:`, error);
+        if (process.env.NODE_ENV !== 'production') {
+          console.error(`Error with ${modelId}:`, error);
+        }
         updateComparisonResponse(sessionId, modelId, {
           content: '오류가 발생했습니다.',
           timestamp: new Date(),
@@ -93,7 +153,9 @@ export const ModelComparison: React.FC = () => {
           latency: 0,
         });
       }
-    }
+    });
+
+    await Promise.allSettled(tasks);
 
     setIsComparing(false);
     toast.success('모든 모델 비교 완료!');
@@ -107,15 +169,6 @@ export const ModelComparison: React.FC = () => {
       setCopied(prev => ({ ...prev, [modelId]: false }));
     }, 2000);
   }, []);
-
-  const handleSelectWinner = (modelId: string) => {
-    if (activeComparison) {
-      setComparisonWinner(activeComparison.id, modelId);
-      toast.success('승자가 선택되었습니다!', {
-        icon: <Trophy className="w-4 h-4 text-yellow-500" />,
-      });
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -157,9 +210,11 @@ export const ModelComparison: React.FC = () => {
                   <div className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
                     {model.displayName}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {wallet?.credits[model.id] || 0}회 남음
-                  </div>
+                  {((wallet?.credits[model.id] || 0) > 0) ? (
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {wallet?.credits[model.id] || 0}회 남음
+                    </div>
+                  ) : null}
                 </div>
               </button>
             );
@@ -209,32 +264,21 @@ export const ModelComparison: React.FC = () => {
       {/* 비교 결과 */}
       {activeComparison && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-yellow-500" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">비교 결과</h3>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">비교 결과</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {Object.entries(activeComparison.responses).map(([modelId, response]) => {
+            {activeComparison.models.map((modelId) => {
               const model = models.find(m => m.id === modelId);
-              const isWinner = activeComparison.winner === modelId;
+              const response = activeComparison.responses[modelId];
               
               return (
                 <div
                   key={modelId}
                   className={cn(
                     "relative bg-white dark:bg-gray-800 rounded-lg p-6 border-2 transition-colors",
-                    isWinner
-                      ? "border-yellow-500"
-                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                    "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                   )}
                 >
-                  {isWinner && (
-                    <div className="absolute -top-3 -right-3 w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center">
-                      <Trophy className="w-5 h-5 text-white" />
-                    </div>
-                  )}
-                  
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
@@ -246,30 +290,23 @@ export const ModelComparison: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                           <Clock className="w-3 h-3" />
-                          {response.latency}ms
+                          {response ? `${response.latency}ms` : '생성 중...'}
                         </div>
                       </div>
                     </div>
                     
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => handleCopy(modelId, response.content)}
-                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        title="복사"
-                      >
-                        {copied[modelId] ? (
-                          <Check className="w-4 h-4 text-green-500" />
-                        ) : (
-                          <Copy className="w-4 h-4 text-gray-500" />
-                        )}
-                      </button>
-                      
-                      {!isWinner && (
+                      {response && (
                         <button
-                          onClick={() => handleSelectWinner(modelId)}
-                          className="px-3 py-1 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-xs font-medium hover:bg-yellow-200 dark:hover:bg-yellow-900/50"
+                          onClick={() => handleCopy(modelId, response.content)}
+                          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          title="복사"
                         >
-                          승자 선택
+                          {copied[modelId] ? (
+                            <Check className="w-4 h-4 text-green-500" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-gray-500" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -277,43 +314,12 @@ export const ModelComparison: React.FC = () => {
                   
                   <div className="prose prose-sm dark:prose-invert max-w-none">
                     <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                      {response.content}
+                      {response ? response.content : '응답 생성 중...'}
                     </p>
                   </div>
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-
-      {/* 비교 히스토리 */}
-      {comparisonSessions.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">최근 비교</h3>
-          <div className="space-y-3">
-            {comparisonSessions.slice(0, 3).map(session => (
-              <div
-                key={session.id}
-                className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 transition-colors cursor-pointer"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white line-clamp-1">
-                      {session.prompt}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      <span>{session.models.length}개 모델</span>
-                      <span>•</span>
-                      <span>{new Date(session.createdAt).toLocaleDateString('ko-KR')}</span>
-                    </div>
-                  </div>
-                  {session.winner && (
-                    <Trophy className="w-4 h-4 text-yellow-500 flex-shrink-0 ml-2" />
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}

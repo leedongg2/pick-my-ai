@@ -15,9 +15,13 @@ import {
   AlertCircle,
   Vote,
   Plus,
-  X
+  X,
+  Users,
+  Edit2,
+  Check
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { csrfFetch } from '@/lib/csrfFetch';
 import { getDisplayPrice, formatWon } from '@/utils/pricing';
 import { cn } from '@/utils/cn';
 import { useMemo, useState as useReactState } from 'react';
@@ -48,7 +52,11 @@ export const Admin: React.FC = () => {
   const [localPaymentFee, setLocalPaymentFee] = useState(paymentFeeMemo);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useReactState<'settings' | 'inbox' | 'polls'>('settings');
+  const [activeTab, setActiveTab] = useReactState<'settings' | 'inbox' | 'polls' | 'users'>('settings');
+  const [users, setUsers] = useState<any[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingCredits, setEditingCredits] = useState<Record<string, number>>({});
   const [newPollTitle, setNewPollTitle] = useState('');
   const [newPollDescription, setNewPollDescription] = useState('');
   const [showPollForm, setShowPollForm] = useState(false);
@@ -57,6 +65,18 @@ export const Admin: React.FC = () => {
   // Check admin authentication on component mount
   useEffect(() => {
     const isAdminAuthenticated = localStorage.getItem('adminAuthenticated') === 'true';
+    const tokenExpiry = localStorage.getItem('adminTokenExpiry');
+    
+    // 토큰 만료 체크
+    if (tokenExpiry && Date.now() > parseInt(tokenExpiry)) {
+      localStorage.removeItem('adminAuthenticated');
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('adminTokenExpiry');
+      toast.error('세션이 만료되었습니다. 다시 로그인해주세요.');
+      router.push('/admin/login');
+      return;
+    }
+    
     if (!isAdminAuthenticated) {
       router.push('/admin/login');
     } else {
@@ -64,9 +84,22 @@ export const Admin: React.FC = () => {
       setAdminMode(true);
     }
     
+    // 주기적으로 토큰 만료 체크 (1분마다)
+    const interval = setInterval(() => {
+      const expiry = localStorage.getItem('adminTokenExpiry');
+      if (expiry && Date.now() > parseInt(expiry)) {
+        localStorage.removeItem('adminAuthenticated');
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('adminTokenExpiry');
+        toast.error('세션이 만료되었습니다. 다시 로그인해주세요.');
+        router.push('/admin/login');
+      }
+    }, 60000); // 1분마다 체크
+    
     // Clean up function to ensure admin mode is turned off when component unmounts
     return () => {
       setAdminMode(false);
+      clearInterval(interval);
     };
   }, [router, setAdminMode]);
   
@@ -146,6 +179,54 @@ export const Admin: React.FC = () => {
     setPaymentFeeMemo(localPaymentFee);
     
     toast.success('설정이 저장되었습니다.');
+  };
+
+  // 유저 목록 조회
+  const fetchUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const response = await fetch('/api/admin/users', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('adminToken') || 'admin-token'}`
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error('유저 정보를 불러올 수 없습니다.');
+      }
+      
+      const data = await response.json();
+      setUsers(data.users || []);
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // 유저 크레딧 수정
+  const updateUserCredits = async (userId: string, credits: Record<string, number>) => {
+    try {
+      const response = await csrfFetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('adminToken') || 'admin-token'}`
+        },
+        body: JSON.stringify({ userId, credits })
+      });
+      
+      if (!response.ok) {
+        throw new Error('크레딧 수정에 실패했습니다.');
+      }
+      
+      toast.success('크레딧이 수정되었습니다.');
+      setEditingUserId(null);
+      setEditingCredits({});
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.message);
+    }
   };
   
   if (!isAdmin) {
@@ -240,6 +321,15 @@ export const Admin: React.FC = () => {
             onClick={() => setActiveTab('polls')}
           >
             투표 관리
+          </button>
+          <button
+            className={cn('px-4 py-2 rounded-lg text-sm font-semibold', activeTab === 'users' ? 'bg-primary-600 text-white' : 'hover:bg-gray-100')}
+            onClick={() => {
+              setActiveTab('users');
+              fetchUsers();
+            }}
+          >
+            유저 크레딧 관리
           </button>
         </div>
         
@@ -482,6 +572,116 @@ export const Admin: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'users' && (
+          <Card variant="bordered">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <Users className="w-5 h-5" />
+                    유저 크레딧 관리
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">총 {users.length}명의 유저</p>
+                </div>
+                <Button variant="primary" size="sm" onClick={fetchUsers} disabled={loadingUsers}>
+                  {loadingUsers ? '로딩 중...' : '새로고침'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6">
+              {loadingUsers ? (
+                <div className="text-center py-12 text-gray-500">로딩 중...</div>
+              ) : users.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">등록된 유저가 없습니다.</div>
+              ) : (
+                <div className="space-y-4">
+                  {users.map((user) => {
+                    const wallet = user.user_wallets?.[0];
+                    const credits = wallet?.credits || {};
+                    const isEditing = editingUserId === user.id;
+                    const currentCredits = isEditing ? editingCredits : credits;
+                    
+                    return (
+                      <div key={user.id} className="border rounded-lg p-4 bg-white">
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <div className="font-semibold text-gray-900">{user.name}</div>
+                            <div className="text-sm text-gray-500">{user.email}</div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              가입일: {new Date(user.created_at).toLocaleDateString()}
+                              {wallet?.updated_at && ` • 마지막 수정: ${new Date(wallet.updated_at).toLocaleDateString()}`}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            {!isEditing ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingUserId(user.id);
+                                  setEditingCredits(credits);
+                                }}
+                              >
+                                <Edit2 className="w-4 h-4 mr-1" />
+                                수정
+                              </Button>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingUserId(null);
+                                    setEditingCredits({});
+                                  }}
+                                >
+                                  <X className="w-4 h-4 mr-1" />
+                                  취소
+                                </Button>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => updateUserCredits(user.id, currentCredits)}
+                                >
+                                  <Check className="w-4 h-4 mr-1" />
+                                  저장
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="mt-4 pt-4 border-t">
+                          <div className="text-sm font-medium text-gray-700 mb-2">크레딧 정보 (JSON)</div>
+                          {isEditing ? (
+                            <textarea
+                              value={JSON.stringify(currentCredits, null, 2)}
+                              onChange={(e) => {
+                                try {
+                                  const parsed = JSON.parse(e.target.value);
+                                  setEditingCredits(parsed);
+                                } catch (error) {
+                                  // JSON 파싱 에러는 무시 (입력 중일 수 있음)
+                                }
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                              rows={10}
+                            />
+                          ) : (
+                            <pre className="bg-gray-50 p-3 rounded-lg overflow-x-auto text-xs font-mono border border-gray-200">
+                              {JSON.stringify(credits, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

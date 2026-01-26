@@ -10,6 +10,7 @@ import { seriesInfo } from '@/data/models';
 import { cn } from '@/utils/cn';
 import { Gift, Percent, Sparkles, TrendingDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from '@/utils/translations';
 
 const categories = [
   { id: 'all', name: '전체' },
@@ -24,6 +25,7 @@ export const Configurator: React.FC = () => {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('all');
   const { models, selections, policy, hasFirstPurchase, updateSelection, userPlan } = useStore();
+  const { t } = useTranslation();
   
   const filteredModels = useMemo(() => {
     if (activeCategory === 'all') {
@@ -73,8 +75,8 @@ export const Configurator: React.FC = () => {
     <div className="min-h-screen bg-white dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-semibold text-gray-900 dark:text-white mb-2">AI 모델 선택</h1>
-          <p className="text-gray-600 dark:text-gray-400">필요한 AI 모델을 선택하고 크레딧을 충전하세요</p>
+          <h1 className="text-3xl font-semibold text-gray-900 dark:text-white mb-2">{t.configurator.title}</h1>
+          <p className="text-gray-600 dark:text-gray-400">{t.configurator.subtitle}</p>
         </div>
         
         {/* PMC 광고 배너 */}
@@ -87,25 +89,25 @@ export const Configurator: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold text-gray-900 mb-1">
-                    🎉 모델을 많이 선택할수록 더 많은 PMC 적립!
+                    {t.configurator.pmcBanner}
                   </h3>
                   <p className="text-sm text-gray-600">
-                    2개 이상 선택 시 <span className="font-bold text-orange-600">최대 30% PMC 적립</span> • 1 PMC = 1원으로 다음 결제 시 사용 가능
+                    {t.configurator.pmcDescription} <span className="font-bold text-orange-600">{t.configurator.pmcMax}</span> • {t.configurator.pmcInfo}
                   </p>
                 </div>
               </div>
               <div className="flex flex-col items-end gap-3">
                 <div className="bg-gradient-to-r from-yellow-100 to-orange-100 px-4 py-2 rounded-lg border-2 border-yellow-400">
-                  <p className="text-xs text-gray-600 mb-1">예상 적립</p>
+                  <p className="text-xs text-gray-600 mb-1">{t.configurator.expectedEarn}</p>
                   <p className="text-2xl font-bold text-orange-600">
-                    {pmcCalculation.earnAmount > 0 ? `+${pmcCalculation.earnAmount.toLocaleString()}` : '0'} PMC
+                    {pmcCalculation.earnAmount > 0 ? `+${pmcCalculation.earnAmount.toLocaleString()} PMC` : t.price.noEarn}
                   </p>
                 </div>
                 <button
                   onClick={() => router.push('/docs')}
                   className="group flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white text-xs font-semibold rounded-lg shadow-md hover:shadow-lg transition-all duration-200"
                 >
-                  <span>PMC 가이드 보기</span>
+                  <span>{t.configurator.pmcGuide}</span>
                   <svg className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge';
 import { getFixedDisplayPriceOrFallback, formatWon } from '@/utils/pricing';
 import { cn } from '@/utils/cn';
 import { X } from 'lucide-react';
+import { useTranslation } from '@/utils/translations';
 
 interface ModelCardProps {
   model: AIModel;
@@ -19,6 +20,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
   onQuantityChange,
   isSelected,
 }) => {
+  const { t } = useTranslation();
   const priceData = getFixedDisplayPriceOrFallback(model.id, model.piWon);
   const displayPrice = priceData.price;
   
@@ -57,7 +59,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
                 onClick={handleClear}
                 className="text-xs text-blue-600 hover:text-blue-700 font-medium"
               >
-                선택 해제
+                {t.configurator.clearSelection}
               </button>
             )}
           </div>
@@ -67,11 +69,13 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
         </div>
         
         {model.description && (
-          <p className="text-sm text-gray-600 mb-2">{model.description}</p>
+          <p className="text-sm text-gray-600 mb-2">
+            {(t.modelDesc as any)[model.id] || model.description}
+          </p>
         )}
         
         <div className="text-xs text-gray-500 mb-4">
-          최대 입력: {model.maxCharacters.toLocaleString()}자
+          {t.configurator.maxInput}: {model.maxCharacters.toLocaleString()}{t.configurator.characters}
         </div>
         
         <div className="flex items-center space-x-2">
@@ -101,7 +105,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
               placeholder="0"
             />
             <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 pointer-events-none">
-              회/월
+              {t.configurator.perMonth}
             </span>
           </div>
           

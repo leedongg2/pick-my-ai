@@ -3,17 +3,80 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useStore } from '@/store';
-import { Card, CardContent } from '@/components/ui/Card';
+import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Sparkles, Send, Plus, Settings, LayoutDashboard, LogOut, Trash2, Upload, X, Download, Pencil, Check, User, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Pin } from 'lucide-react';
+import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
-import type { ChatTemplate } from '@/types';
+import { useTranslation } from '@/utils/translations';
+import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
 
 // Constants
 const MAX_ATTACHMENTS = 5;
+const STREAMING_DRAFT_V2 = process.env.NEXT_PUBLIC_STREAMING_DRAFT_V2 === 'true';
+const STREAMING_DRAFT_UI_THROTTLE_MS = 50;
+
+const MEM_BLOCK_START = '@@MEM@@';
+const MEM_BLOCK_END = '@@END@@';
+
+const removeAllOccurrences = (text: string, needle: string) => {
+  if (!text || !needle) return text;
+  return text.split(needle).join('');
+};
+
+const stripTrailingPartialMarkers = (text: string) => {
+  const markers = [MEM_BLOCK_START, MEM_BLOCK_END];
+  const maxHold = Math.max(...markers.map((m) => m.length - 1));
+  const maxCheck = Math.min(maxHold, text.length);
+
+  let cut = 0;
+  for (let i = 1; i <= maxCheck; i++) {
+    const suffix = text.slice(-i);
+    if (markers.some((m) => m.startsWith(suffix))) {
+      cut = i;
+    }
+  }
+
+  return cut ? text.slice(0, -cut) : text;
+};
+
+const extractMemoryForDisplay = (text: string) => {
+  let facts: string[] = [];
+  const cleanedParts: string[] = [];
+  let cursor = 0;
+
+  while (true) {
+    const start = text.indexOf(MEM_BLOCK_START, cursor);
+    if (start === -1) {
+      cleanedParts.push(text.slice(cursor));
+      break;
+    }
+
+    cleanedParts.push(text.slice(cursor, start));
+    const afterStart = start + MEM_BLOCK_START.length;
+    const end = text.indexOf(MEM_BLOCK_END, afterStart);
+    if (end === -1) {
+      cursor = text.length;
+      break;
+    }
+
+    const block = text.slice(afterStart, end);
+    const lines = block
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    facts = facts.concat(lines);
+    cursor = end + MEM_BLOCK_END.length;
+  }
+
+  let displayText = cleanedParts.join('');
+  displayText = stripTrailingPartialMarkers(displayText);
+  displayText = removeAllOccurrences(displayText, MEM_BLOCK_START);
+  displayText = removeAllOccurrences(displayText, MEM_BLOCK_END);
+
+  return { displayText, facts };
+};
 
 // Types
 type Attachment = {
@@ -23,6 +86,93 @@ type Attachment = {
   dataUrl?: string;
   content?: string;
 };
+
+ type ChatMessageRowProps = {
+   msg: any;
+   msgIndex: number;
+   overrideContent?: string;
+   modelById: Map<string, any>;
+   formatMessage: (text: string) => React.ReactNode;
+   onDownloadImage: (imageUrl: string, filename?: string) => void;
+ };
+
+ const ChatMessageRow = React.memo((props: ChatMessageRowProps) => {
+   const { msg, msgIndex, overrideContent, modelById, formatMessage, onDownloadImage } = props;
+   const model = msg.modelId ? (modelById.get(msg.modelId) ?? null) : null;
+
+   const content = (overrideContent ?? (msg.content as unknown as string)) as unknown as string;
+   const isImage = typeof content === 'string' && (
+     content.startsWith('http://') ||
+     content.startsWith('https://') ||
+     content.startsWith('data:image')
+   );
+
+   return (
+     <div className={cn('group mb-4', msgIndex === 0 ? 'mt-2' : '')}>
+       {msg.role === 'user' ? (
+         <div className="flex justify-end">
+           <div className="inline-block bg-blue-100 text-gray-900 rounded-2xl px-4 py-3 max-w-[80%]">
+             <div className="text-[15px] leading-6">
+               {isImage ? (
+                 <div className="relative group">
+                   {/* eslint-disable-next-line @next/next/no-img-element */}
+                   <img
+                     src={content}
+                     alt="AI 생성 이미지"
+                     className="max-w-full rounded border"
+                   />
+                   <button
+                     onClick={() => onDownloadImage(content, `ai-image-${Date.now()}.png`)}
+                     className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                     title="이미지 다운로드"
+                   >
+                     <Download className="w-4 h-4 text-gray-700" />
+                   </button>
+                 </div>
+               ) : (
+                 <div className="whitespace-pre-wrap">{formatMessage(content)}</div>
+               )}
+             </div>
+           </div>
+         </div>
+       ) : (
+         <div className="flex items-start space-x-3">
+           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white">
+             <Bot className="w-5 h-5" />
+           </div>
+           <div className="flex-1 pt-1">
+             <div className="font-semibold text-gray-900 text-sm mb-1">
+               {model?.displayName || 'ChatGPT'}
+             </div>
+             <div className="text-gray-800 text-[15px] leading-7">
+               {isImage ? (
+                 <div className="relative group">
+                   {/* eslint-disable-next-line @next/next/no-img-element */}
+                   <img
+                     src={content}
+                     alt="AI 생성 이미지"
+                     className="max-w-full rounded border"
+                   />
+                   <button
+                     onClick={() => onDownloadImage(content, `ai-image-${Date.now()}.png`)}
+                     className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                     title="이미지 다운로드"
+                   >
+                     <Download className="w-4 h-4 text-gray-700" />
+                   </button>
+                 </div>
+               ) : (
+                 <div className="whitespace-pre-wrap">{formatMessage(content)}</div>
+               )}
+             </div>
+           </div>
+         </div>
+       )}
+     </div>
+   );
+ });
+
+ ChatMessageRow.displayName = 'ChatMessageRow';
 
 export const Chat: React.FC = () => {
   const router = useRouter();
@@ -39,12 +189,15 @@ export const Chat: React.FC = () => {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showPersona, setShowPersona] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
-  const [generatingTitleFor, setGeneratingTitleFor] = useState<string | null>(null);
-  const [streamingContent, setStreamingContent] = useState<string>('');
-  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+  const streamingRef = useRef(false);
+  const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
+  const [draftContent, setDraftContent] = useState('');
+  const draftContentRef = useRef('');
+  const lastDraftFlushRef = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   const {
     chatSessions,
@@ -53,15 +206,121 @@ export const Chat: React.FC = () => {
     updateChatSessionTitle,
     deleteChatSession,
     addMessage,
-    getCredits,
+    updateMessageContent,
+    finalizeMessageContent,
+    storedFacts,
+    addStoredFacts,
     deductCredit,
     setCurrentSession,
     models,
+    walletCredits,
+    activeTemplate,
+    clearActiveTemplate,
     activePersona,
-    settings: {
-      showDeleteConfirmation,
+    language,
+    streaming,
+    showDeleteConfirmation,
+  } = useStore(
+    (state) => ({
+      chatSessions: state.chatSessions,
+      currentSessionId: state.currentSessionId,
+      createChatSession: state.createChatSession,
+      updateChatSessionTitle: state.updateChatSessionTitle,
+      deleteChatSession: state.deleteChatSession,
+      addMessage: state.addMessage,
+      updateMessageContent: state.updateMessageContent,
+      finalizeMessageContent: state.finalizeMessageContent,
+      storedFacts: state.storedFacts,
+      addStoredFacts: state.addStoredFacts,
+      deductCredit: state.deductCredit,
+      setCurrentSession: state.setCurrentSession,
+      models: state.models,
+      walletCredits: state.wallet?.credits ?? null,
+      activeTemplate: state.activeTemplate,
+      clearActiveTemplate: state.clearActiveTemplate,
+      activePersona: state.activePersona,
+      language: state.language,
+      streaming: state.streaming,
+      showDeleteConfirmation: state.settings.showDeleteConfirmation,
+    }),
+    shallow
+  );
+
+  const { t } = useTranslation();
+
+  const chatPerfEnabled = useMemo(() => isChatPerfEnabled(), []);
+
+  useEffect(() => {
+    initChatPerfOnce();
+  }, []);
+
+  // 스트리밍 중 페이지 이탈 방지
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (streamingRef.current || isLoading) {
+        e.preventDefault();
+        e.returnValue = 'AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다.';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isLoading]);
+
+  // Next.js 라우터 이동 시 경고
+  useEffect(() => {
+    const handleRouteChange = () => {
+      if (streamingRef.current || isLoading) {
+        const confirmLeave = window.confirm('AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다. 계속하시겠습니까?');
+        if (!confirmLeave) {
+          router.push(window.location.pathname);
+          throw 'Route change aborted';
+        }
+      }
+    };
+
+    // Next.js 라우터 이벤트는 직접 감지할 수 없으므로 링크 클릭 감지
+    const handleLinkClick = (e: MouseEvent) => {
+      if (streamingRef.current || isLoading) {
+        const target = e.target as HTMLElement;
+        const link = target.closest('a');
+        if (link && link.href && !link.href.startsWith('javascript:')) {
+          const confirmLeave = window.confirm('AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다. 계속하시겠습니까?');
+          if (!confirmLeave) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('click', handleLinkClick, true);
+    return () => {
+      document.removeEventListener('click', handleLinkClick, true);
+    };
+  }, [isLoading, router]);
+
+  const handleReactProfilerRender = useCallback<React.ProfilerOnRenderCallback>(
+    (id, _phase, actualDuration) => {
+      recordChatPerfReactCommit(id, actualDuration);
     },
-  } = useStore();
+    []
+  );
+
+  const wrapWithProfiler = useCallback(
+    (id: string, node: React.ReactNode) => {
+      if (!chatPerfEnabled) return node;
+      return (
+        <React.Profiler id={id} onRender={handleReactProfilerRender}>
+          {node}
+        </React.Profiler>
+      );
+    },
+    [chatPerfEnabled, handleReactProfilerRender]
+  );
 
   const temperaturePresets = [
     { label: '정확 (0.3)', value: 0.3, description: '정확하고 사실적인 답변' },
@@ -75,13 +334,30 @@ export const Chat: React.FC = () => {
     chatSessions.find(s => s.id === currentSessionId), 
     [chatSessions, currentSessionId]
   );
-  
+
+  const modelById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const m of models) {
+      map.set(m.id, m);
+    }
+    return map;
+  }, [models]);
+
+  const selectedModel = useMemo(() => {
+    if (!selectedModelId) return null;
+    return modelById.get(selectedModelId) ?? null;
+  }, [modelById, selectedModelId]);
+
+  const selectedModelMaxCharacters = useMemo(() => {
+    return selectedModel?.maxCharacters || 2500;
+  }, [selectedModel]);
+
   const availableModels = useMemo(
     () => models.filter(m => {
-      const credits = getCredits(m.id);
+      const credits = walletCredits?.[m.id] || 0;
       return credits > 0 && m.enabled;
     }),
-    [models, getCredits]
+    [models, walletCredits]
   );
   
   // Close plus menu when clicking outside
@@ -112,14 +388,42 @@ export const Chat: React.FC = () => {
     }
   }, [availableModels, selectedModelId]);
 
+  // 템플릿에서 "사용하기" 선택 시: 입력창 자동 채움 + 모달 닫기
+  useEffect(() => {
+    if (!activeTemplate) return;
+
+    setMessage(activeTemplate.prompt || '');
+    setShowTemplates(false);
+    clearActiveTemplate();
+  }, [activeTemplate, clearActiveTemplate]);
+
+  const scrollToBottom = useCallback((force: boolean = false) => {
+    const behavior = force || (streaming?.smoothScrolling && !streamingRef.current) ? 'smooth' : 'auto';
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+  }, [streaming?.smoothScrolling]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom();
-  }, [currentSession?.messages]);
-  
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  }, [currentSession?.messages.length, scrollToBottom]);
+
+  // textarea 자동 높이 조절
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const maxHeight = 200; // maxHeight와 동일
+
+    if (scrollHeight > maxHeight) {
+      textarea.style.height = `${maxHeight}px`;
+      textarea.style.overflowY = 'auto';
+    } else {
+      textarea.style.height = `${scrollHeight}px`;
+      textarea.style.overflowY = 'hidden';
+    }
+  }, [message]);
 
   const onPickFiles = useCallback(() => {
     if (attachments.length >= MAX_ATTACHMENTS) {
@@ -190,17 +494,36 @@ export const Chat: React.FC = () => {
 
   const handleDownloadImage = useCallback(async (imageUrl: string, filename: string = 'ai-generated-image.png') => {
     try {
-      const response = await fetch(imageUrl);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-      toast.success('이미지를 다운로드했습니다!');
+      // data URL인 경우 직접 다운로드
+      if (imageUrl.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = imageUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success('이미지를 다운로드했습니다!');
+        return;
+      }
+
+      // 외부 URL인 경우 fetch 시도
+      try {
+        const response = await fetch(imageUrl, { mode: 'cors' });
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        toast.success('이미지를 다운로드했습니다!');
+      } catch (fetchError) {
+        // CORS 오류 시 새 탭에서 열기
+        window.open(imageUrl, '_blank');
+        toast.info('새 탭에서 이미지를 열었습니다. 우클릭하여 저장하세요.');
+      }
     } catch (error) {
       console.error('이미지 다운로드 실패:', error);
       toast.error('이미지 다운로드에 실패했습니다.');
@@ -210,24 +533,34 @@ export const Chat: React.FC = () => {
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim() || !selectedModelId) return;
-    
-    const model = models.find(m => m.id === selectedModelId);
-    if (!model) return;
-    
-    const credits = getCredits(selectedModelId);
-    if (credits <= 0) {
-      toast.error(`${model.displayName} 크레딧이 부족합니다.`);
+
+    if (!selectedModel) return;
+
+    // 이미지 생성 중에는 메시지 전송 차단
+    if (isLoading && (selectedModelId === 'gptimage1' || selectedModelId === 'dalle3')) {
+      toast.error('이미지 생성 중입니다. 잠시만 기다려주세요.');
       return;
     }
+
+    const credits = walletCredits?.[selectedModelId] || 0;
+    if (credits <= 0) {
+      toast.error(`${selectedModel.displayName} 크레딧이 부족합니다.`);
+      return;
+    }
+
+    const chatPerfRunId = startChatPerfRun('handleSendMessage', STREAMING_DRAFT_V2);
     
     setIsLoading(true);
+    
+    // 현재 선택된 모델 ID를 고정 (출력 중 모델 선택이 바뀌어도 메시지의 모델은 유지)
+    const currentModelId = selectedModelId;
     
     try {
       const msg = message;
       setMessage('');
       
       // 크레딧 차감 시도 (store에서 가져온 함수 사용)
-      deductCredit(selectedModelId);
+      await deductCredit(selectedModelId);
       
       // API 호출을 위한 메시지 준비 (현재 메시지 포함)
       const currentMessages = currentSession?.messages || [];
@@ -244,42 +577,32 @@ export const Chat: React.FC = () => {
         })),
         newUserMessage
       ];
-      
-      console.log('[Chat] Sending messages to API:', {
-        totalMessages: apiMessages.length,
-        lastMessage: apiMessages[apiMessages.length - 1]
-      });
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[Chat] Sending messages to API:', {
+          totalMessages: apiMessages.length,
+          lastMessage: apiMessages[apiMessages.length - 1]
+        });
+      }
       
       // 사용자 메시지를 세션에 추가
       if (currentSessionId) {
-        console.log('[Chat] Adding user message to session:', currentSessionId);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('[Chat] Adding user message to session:', currentSessionId);
+        }
         addMessage(currentSessionId, {
           id: crypto.randomUUID(),
           role: 'user' as const,
           content: msg,
           timestamp: new Date().toISOString(),
         });
+        // 사용자 메시지 추가 직후 스크롤
+        setTimeout(() => scrollToBottom(true), 100);
       } else {
-        console.error('[Chat] No session ID - cannot add user message');
-      }
-      
-      // CSRF 토큰 가져오기
-      const getCsrfToken = () => {
-        try {
-          const cookies = document.cookie.split(';');
-          const csrfCookie = cookies.find(cookie => cookie.trim().startsWith('csrf-token='));
-          if (!csrfCookie) {
-            console.log('CSRF cookie not found, available cookies:', document.cookie);
-            return null;
-          }
-          const token = csrfCookie.split('=')[1];
-          console.log('CSRF token extracted:', token);
-          return token;
-        } catch (error) {
-          console.error('Error extracting CSRF token:', error);
-          return null;
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('[Chat] No session ID - cannot add user message');
         }
-      };
+      }
 
       // API 호출
       const controller = new AbortController();
@@ -291,12 +614,14 @@ export const Chat: React.FC = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-csrf-token': getCsrfToken() || '',
           },
           body: JSON.stringify({
             messages: apiMessages,
             modelId: selectedModelId,
             temperature: temperature,
+            maxTokens: 4096,
+            language,
+            storedFacts,
             persona: activePersona ? {
               name: activePersona.name,
               personality: activePersona.personality,
@@ -320,27 +645,35 @@ export const Chat: React.FC = () => {
         throw new Error(`네트워크 연결 실패: ${fetchError.message}. 인터넷 연결을 확인해주세요.`);
       }
       clearTimeout(timeoutId);
-      
-      console.log('API Response status:', response.status);
-      console.log('Content-Type:', response.headers.get('content-type'));
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('API Response status:', response.status);
+        console.log('Content-Type:', response.headers.get('content-type'));
+      }
       
       if (!response.ok) {
         let errorData;
         try {
           errorData = await response.json();
         } catch (e) {
-          console.error('Failed to parse error response:', e);
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Failed to parse error response:', e);
+          }
           throw new Error(`API 호출 실패 (상태 코드: ${response.status})`);
         }
-        console.error('API Error response:', errorData);
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('API Error response:', errorData);
+        }
         throw new Error(errorData.error || `API 호출 실패 (상태 코드: ${response.status})`);
       }
       
       // 스트리밍 응답 처리 (OpenAI 모델)
-      const isStreaming = response.headers.get('content-type')?.includes('text/event-stream');
+      const isEventStream = response.headers.get('content-type')?.includes('text/event-stream');
       
-      if (isStreaming && currentSessionId) {
-        console.log('Processing streaming response...');
+      if (isEventStream && currentSessionId) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('Processing streaming response...');
+        }
         
         // 빈 메시지 먼저 추가
         const messageId = crypto.randomUUID();
@@ -352,53 +685,111 @@ export const Chat: React.FC = () => {
           timestamp: new Date().toISOString(),
           creditUsed: 1
         });
+        // AI 메시지 추가 직후 스크롤
+        setTimeout(() => scrollToBottom(true), 100);
+
+        if (STREAMING_DRAFT_V2) {
+          setDraftMessageId(messageId);
+          setDraftContent('');
+          draftContentRef.current = '';
+          lastDraftFlushRef.current = 0;
+        }
         
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
+        // 스트리밍 시작 시 로딩 상태 해제
+        setIsLoading(false);
+        
+        let rawContent = '';
         let fullContent = '';
-        
-        if (reader) {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              
-              const chunk = decoder.decode(value, { stream: true });
-              const lines = chunk.split('\n');
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6);
-                  if (data === '[DONE]') continue;
-                  
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.content) {
-                      fullContent += parsed.content;
-                      
-                      // 세션의 마지막 메시지 업데이트
-                      const session = chatSessions.find(s => s.id === currentSessionId);
-                      if (session) {
-                        const lastMsg = session.messages[session.messages.length - 1];
-                        if (lastMsg && lastMsg.id === messageId) {
-                          lastMsg.content = fullContent;
-                        }
-                      }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error('스트리밍 응답을 읽을 수 없습니다.');
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        streamingRef.current = true;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() ?? '';
+
+            for (const raw of lines) {
+              const line = raw.trim();
+              if (!line) continue;
+              if (!line.startsWith('data:')) continue;
+
+              const data = line.replace(/^data:\s*/, '');
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed?.content) {
+                  rawContent += parsed.content;
+                  const extracted = extractMemoryForDisplay(rawContent);
+                  fullContent = extracted.displayText;
+
+                  if (extracted.facts.length) {
+                    addStoredFacts(extracted.facts);
+                  }
+
+                  if (STREAMING_DRAFT_V2) {
+                    draftContentRef.current = fullContent;
+                    const now = performance.now();
+                    if (now - lastDraftFlushRef.current >= STREAMING_DRAFT_UI_THROTTLE_MS) {
+                      lastDraftFlushRef.current = now;
+                      setDraftContent(draftContentRef.current);
+                      requestAnimationFrame(() => scrollToBottom());
                     }
-                  } catch (e) {
-                    // 파싱 에러 무시
+                  } else {
+                    updateMessageContent(currentSessionId, messageId, fullContent);
+                    requestAnimationFrame(() => scrollToBottom());
+                  }
+
+                  if (streaming?.chunkDelay && streaming.chunkDelay > 0) {
+                    await new Promise(resolve => setTimeout(resolve, streaming.chunkDelay));
                   }
                 }
+              } catch {
+                // ignore
               }
             }
-          } catch (error) {
-            console.error('Streaming error:', error);
-            throw new Error('스트리밍 중 오류가 발생했습니다.');
           }
+        } catch (error) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Streaming error:', error);
+          }
+
+          if (STREAMING_DRAFT_V2) {
+            if (fullContent) {
+              setDraftContent(fullContent);
+              finalizeMessageContent(currentSessionId, messageId, fullContent);
+            }
+            setDraftMessageId(null);
+            draftContentRef.current = '';
+            lastDraftFlushRef.current = 0;
+          }
+          throw new Error('스트리밍 중 오류가 발생했습니다.');
+        } finally {
+          streamingRef.current = false;
         }
         
         if (!fullContent) {
           throw new Error('AI로부터 응답을 받지 못했습니다.');
+        }
+
+        if (STREAMING_DRAFT_V2) {
+          setDraftContent(fullContent);
+          finalizeMessageContent(currentSessionId, messageId, fullContent);
+          setDraftMessageId(null);
+          draftContentRef.current = '';
+          lastDraftFlushRef.current = 0;
+          setTimeout(() => scrollToBottom(true), 100);
         }
       } else {
         // 일반 JSON 응답 처리 (다른 모델)
@@ -406,29 +797,44 @@ export const Chat: React.FC = () => {
         try {
           data = await response.json();
         } catch (e) {
-          console.error('Failed to parse response:', e);
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Failed to parse response:', e);
+          }
           throw new Error('서버 응답을 파싱할 수 없습니다.');
         }
-        
-        console.log('API Response data:', data);
+
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('API Response data:', data);
+        }
         
         // 응답이 없는 경우 에러 처리
         if (!data || !data.content) {
-          console.error('Empty response from API:', data);
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Empty response from API:', data);
+          }
           throw new Error('AI로부터 응답을 받지 못했습니다. 서버 로그를 확인하세요.');
         }
         
+        const extracted = extractMemoryForDisplay(data.content);
+        if (extracted.facts.length) {
+          addStoredFacts(extracted.facts);
+        }
+
         // AI 응답 추가
         if (currentSessionId) {
-          console.log('Adding AI message to session:', currentSessionId);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('Adding AI message to session:', currentSessionId);
+          }
           addMessage(currentSessionId, {
             id: crypto.randomUUID(),
             role: 'assistant' as const,
-            content: data.content,
+            content: extracted.displayText,
             modelId: selectedModelId,
             timestamp: new Date().toISOString(),
             creditUsed: 1
           });
+          // 비스트리밍 응답 후 스크롤
+          setTimeout(() => scrollToBottom(true), 100);
         }
       }
       
@@ -437,7 +843,9 @@ export const Chat: React.FC = () => {
       // toast.success(`${model.displayName} 크레딧 1회 사용 (잔여: ${credits - 1}회)`);
       
     } catch (error: any) {
-      console.error('Chat error:', error);
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Chat error:', error);
+      }
       
       const errorMessage = error.message || '알 수 없는 오류가 발생했습니다.';
       
@@ -456,8 +864,13 @@ export const Chat: React.FC = () => {
       toast.error(`응답 생성 실패: ${errorMessage}`);
     } finally {
       setIsLoading(false);
+      if (chatPerfRunId) {
+        requestAnimationFrame(() => {
+          endChatPerfRun(chatPerfRunId);
+        });
+      }
     }
-  }, [message, selectedModelId, models, getCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, streaming, scrollToBottom]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
@@ -489,49 +902,197 @@ export const Chat: React.FC = () => {
     setAttachments(prev => prev.filter(att => att.id !== id));
   }, []);
 
-  // **텍스트**를 bold 처리하고 ## 제목 처리하는 함수 (메모이제이션)
+  // 코드 복사 핸들러
+  const handleCopyCode = useCallback((code: string) => {
+    navigator.clipboard.writeText(code);
+    toast.success('코드가 복사되었습니다');
+  }, []);
+
+  // **텍스트**를 bold 처리하고 ## 제목, /// 코드 블록 처리하는 함수 (메모이제이션)
   const formatMessage = useCallback((text: string) => {
-    // 줄 단위로 분리
-    const lines = text.split('\n');
+    const safeText = extractMemoryForDisplay(text).displayText;
+    const elements: JSX.Element[] = [];
+    let currentIndex = 0;
     
-    return (
-      <>
-        {lines.map((line, lineIndex) => {
-          // ## 제목 처리
-          if (line.trim().startsWith('##')) {
-            const titleText = line.trim().slice(2).trim();
-            return (
-              <h2 key={lineIndex} className="text-xl font-bold mt-4 mb-2">
-                {titleText}
-              </h2>
-            );
+    // /// 코드 블록 찾기
+    const codeBlockRegex = /\/\/\/([\s\S]*?)\/\/\//g;
+    let match;
+    
+    while ((match = codeBlockRegex.exec(safeText)) !== null) {
+      // 코드 블록 이전 텍스트 처리
+      if (match.index > currentIndex) {
+        const beforeText = safeText.slice(currentIndex, match.index);
+        elements.push(
+          <div key={`text-${currentIndex}`}>
+            {formatNormalText(beforeText)}
+          </div>
+        );
+      }
+      
+      // 코드 블록 처리
+      const code = match[1].trim();
+      elements.push(
+        <div key={`code-${match.index}`} className="relative my-3 group">
+          <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-300 dark:border-gray-600">
+            <code className="text-sm font-mono text-gray-800 dark:text-gray-200">
+              {code}
+            </code>
+          </pre>
+          <button
+            onClick={() => handleCopyCode(code)}
+            className="absolute top-2 right-2 p-2 bg-white dark:bg-gray-700 rounded-md shadow-sm border border-gray-300 dark:border-gray-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-50 dark:hover:bg-gray-600"
+            title="코드 복사"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600 dark:text-gray-300">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+            </svg>
+          </button>
+        </div>
+      );
+      
+      currentIndex = match.index + match[0].length;
+    }
+    
+    // 마지막 텍스트 처리
+    if (currentIndex < safeText.length) {
+      const remainingText = safeText.slice(currentIndex);
+      elements.push(
+        <div key={`text-${currentIndex}`}>
+          {formatNormalText(remainingText)}
+        </div>
+      );
+    }
+    
+    return <>{elements}</>;
+  }, [handleCopyCode]);
+  
+  // 일반 텍스트 포맷팅 (볼드, 제목, 표)
+  const formatNormalText = (text: string) => {
+    const lines = text.split('\n');
+    const elements: JSX.Element[] = [];
+    let i = 0;
+    
+    while (i < lines.length) {
+      const line = lines[i];
+      
+      // 마크다운 표 감지 (|로 시작하는 줄)
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        const tableLines: string[] = [];
+        let j = i;
+        
+        // 연속된 표 줄 수집
+        while (j < lines.length && lines[j].trim().startsWith('|') && lines[j].trim().endsWith('|')) {
+          tableLines.push(lines[j]);
+          j++;
+        }
+        
+        // 표가 최소 2줄 이상이어야 함 (헤더 + 구분선 또는 헤더 + 데이터)
+        if (tableLines.length >= 2) {
+          const headers = tableLines[0].split('|').map(h => h.trim()).filter(Boolean);
+          const rows: string[][] = [];
+          
+          // 구분선(---)이 있는지 확인하고 건너뛰기
+          let dataStartIndex = 1;
+          if (tableLines[1].includes('---') || tableLines[1].includes('--')) {
+            dataStartIndex = 2;
           }
           
-          // **텍스트** bold 처리
-          const parts = line.split(/(\*\*.*?\*\*)/g);
-          const formattedParts = parts.map((part, index) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-              const boldText = part.slice(2, -2);
-              return <strong key={index} className="font-bold">{boldText}</strong>;
+          // 데이터 행 파싱
+          for (let k = dataStartIndex; k < tableLines.length; k++) {
+            const cells = tableLines[k].split('|').map(c => c.trim()).filter(Boolean);
+            if (cells.length > 0) {
+              rows.push(cells);
             }
-            return <span key={index}>{part}</span>;
-          });
+          }
           
-          return (
-            <div key={lineIndex}>
-              {formattedParts}
-              {lineIndex < lines.length - 1 && <br />}
+          // 셀 내용 포맷팅 함수 (볼드 처리)
+          const formatCellContent = (text: string) => {
+            const parts = text.split(/(\*\*.*?\*\*)/g);
+            return parts.map((part, index) => {
+              if (part.startsWith('**') && part.endsWith('**')) {
+                const boldText = part.slice(2, -2);
+                return <strong key={index} className="font-bold">{boldText}</strong>;
+              }
+              return <span key={index}>{part}</span>;
+            });
+          };
+          
+          // 표 렌더링
+          elements.push(
+            <div key={`table-${i}`} className="my-4 overflow-x-auto">
+              <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
+                <thead className="bg-gray-100 dark:bg-gray-800">
+                  <tr>
+                    {headers.map((header, idx) => (
+                      <th key={idx} className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-left font-semibold text-gray-900 dark:text-gray-100">
+                        {formatCellContent(header)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, rowIdx) => (
+                    <tr key={rowIdx} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                      {row.map((cell, cellIdx) => (
+                        <td key={cellIdx} className="border border-gray-300 dark:border-gray-600 px-4 py-2 text-gray-800 dark:text-gray-200">
+                          {formatCellContent(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           );
-        })}
-      </>
-    );
-  }, []);
+          
+          i = j;
+          continue;
+        }
+      }
+      
+      // ## 제목 처리
+      if (line.trim().startsWith('##')) {
+        const titleText = line.trim().slice(2).trim();
+        elements.push(
+          <h2 key={i} className="text-xl font-bold mt-4 mb-2">
+            {titleText}
+          </h2>
+        );
+        i++;
+        continue;
+      }
+      
+      // **텍스트** bold 처리
+      const parts = line.split(/(\*\*.*?\*\*)/g);
+      const formattedParts = parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const boldText = part.slice(2, -2);
+          return <strong key={index} className="font-bold">{boldText}</strong>;
+        }
+        return <span key={index}>{part}</span>;
+      });
+      
+      elements.push(
+        <div key={i}>
+          {formattedParts}
+          {i < lines.length - 1 && <br />}
+        </div>
+      );
+      
+      i++;
+    }
+    
+    return <>{elements}</>;
+  };
   
-  return (
+  return wrapWithProfiler(
+    'ChatRoot',
     <div className="flex h-[calc(100vh-3.5rem)] bg-white dark:bg-gray-900 overflow-hidden">
       {/* 사이드바 */}
-      <div className="w-64 flex-shrink-0 bg-[#f9f9f9] dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+      {wrapWithProfiler(
+        'ChatSidebar',
+        <div className="w-64 flex-shrink-0 bg-[#f9f9f9] dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col chat-list-card">
         {/* 새 채팅 버튼 */}
         <div className="p-2">
           <button
@@ -542,7 +1103,7 @@ export const Chat: React.FC = () => {
               isOnCooldown && "opacity-50 cursor-not-allowed"
             )}
           >
-            <span className="text-sm font-normal">{isOnCooldown ? '잠시만 기다려 주세요' : '새 채팅'}</span>
+            <span className="text-sm font-normal">{isOnCooldown ? t.chat.pleaseWait : t.chat.newChat}</span>
             <Plus className="w-4 h-4" />
           </button>
         </div>
@@ -644,120 +1205,73 @@ export const Chat: React.FC = () => {
             className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
           >
             <LayoutDashboard className="w-4 h-4" />
-            <span>대시보드</span>
+            <span>{t.chat.dashboard}</span>
           </button>
           <button
             onClick={() => router.push('/settings')}
             className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
           >
             <Settings className="w-4 h-4" />
-            <span>설정</span>
+            <span>{t.chat.settings}</span>
           </button>
         </div>
       </div>
+      )}
       
       {/* 메인 채팅 영역 */}
       <div className="flex-1 flex flex-col">
         {/* 메시지 영역 */}
-        <div className={cn(
-          "flex-1",
-          currentSession?.messages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
-        )}>
+        {wrapWithProfiler(
+          'ChatMessages',
+          <div className={cn(
+            "flex-1 chat-message-card",
+            currentSession?.messages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
+          )}>
           {currentSession?.messages.length === 0 ? (
             <div className="text-center px-4 flex items-center justify-center h-full">
-              <h1 className="text-4xl font-bold text-gray-800">환영합니다!</h1>
+              <h1 className="text-4xl font-bold text-gray-800">{t.chat.welcome}</h1>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto px-6">
-              {currentSession?.messages.map((msg) => {
-                const model = msg.modelId ? models.find(m => m.id === msg.modelId) : null;
-                
-                return (
-                  <div key={msg.id} className="group mb-4">
-                    {msg.role === 'user' ? (
-                      // 사용자 메시지 - 파란색 말풍선
-                      <div className="flex items-start">
-                        <div className="flex-1">
-                          <div className="inline-block bg-blue-100 text-gray-900 rounded-2xl px-4 py-3 max-w-[80%]">
-                            <div className="text-[15px] leading-6">
-                              {(() => {
-                                const content = msg.content as unknown as string;
-                                const isImage = typeof content === 'string' && (
-                                  content.startsWith('http://') ||
-                                  content.startsWith('https://') ||
-                                  content.startsWith('data:image')
-                                );
-                                if (isImage) {
-                                  return (
-                                    <div className="relative group">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={content}
-                                        alt="AI 생성 이미지"
-                                        className="max-w-full rounded border"
-                                      />
-                                      <button
-                                        onClick={() => handleDownloadImage(content, `ai-image-${Date.now()}.png`)}
-                                        className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                        title="이미지 다운로드"
-                                      >
-                                        <Download className="w-4 h-4 text-gray-700" />
-                                      </button>
-                                    </div>
-                                  );
-                                }
-                                return <div className="whitespace-pre-wrap">{formatMessage(content)}</div>;
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      // AI 메시지 - 말풍선 없이
-                      <div className="flex items-start space-x-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white">
-                          <Bot className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1 pt-1">
-                          <div className="font-semibold text-gray-900 text-sm mb-1">
-                            {model?.displayName || 'ChatGPT'}
-                          </div>
-                          <div className="text-gray-800 text-[15px] leading-7">
-                            {(() => {
-                              const content = msg.content as unknown as string;
-                              const isImage = typeof content === 'string' && (
-                                content.startsWith('http://') ||
-                                content.startsWith('https://') ||
-                                content.startsWith('data:image')
-                              );
-                              if (isImage) {
-                                return (
-                                  <div className="relative group">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={content}
-                                      alt="AI 생성 이미지"
-                                      className="max-w-full rounded border"
-                                    />
-                                    <button
-                                      onClick={() => handleDownloadImage(content, `ai-image-${Date.now()}.png`)}
-                                      className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                      title="이미지 다운로드"
-                                    >
-                                      <Download className="w-4 h-4 text-gray-700" />
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              return <div className="whitespace-pre-wrap">{formatMessage(content)}</div>;
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+            <div className="max-w-3xl mx-auto px-6 pt-6">
+              {(() => {
+                const messages = currentSession?.messages || [];
+                const shouldUseDraftSplit = STREAMING_DRAFT_V2 && !!draftMessageId;
+                const draftIndex = shouldUseDraftSplit
+                  ? messages.findIndex((m) => m.id === draftMessageId)
+                  : -1;
+                const hasDraftInMessages = shouldUseDraftSplit && draftIndex >= 0;
+
+                const renderMessage = (msg: any, msgIndex: number, overrideContent?: string) => (
+                  <ChatMessageRow
+                    key={msg.id}
+                    msg={msg}
+                    msgIndex={msgIndex}
+                    overrideContent={overrideContent}
+                    modelById={modelById}
+                    formatMessage={formatMessage}
+                    onDownloadImage={handleDownloadImage}
+                  />
                 );
-              })}
+
+                if (!hasDraftInMessages) {
+                  return <>{messages.map((msg, msgIndex) => renderMessage(msg, msgIndex))}</>;
+                }
+
+                const beforeDraft = messages.slice(0, draftIndex);
+                const draftMsg = messages[draftIndex];
+                const afterDraft = messages.slice(draftIndex + 1);
+
+                const beforeDraftNodes = beforeDraft.map((msg, idx) => renderMessage(msg, idx));
+                const afterDraftNodes = afterDraft.map((msg, idx) => renderMessage(msg, draftIndex + 1 + idx));
+
+                return (
+                  <>
+                    {beforeDraftNodes}
+                    {renderMessage(draftMsg, draftIndex, draftContent)}
+                    {afterDraftNodes}
+                  </>
+                );
+              })()}
               
               {isLoading && (
                 <div className="group mb-4">
@@ -767,7 +1281,13 @@ export const Chat: React.FC = () => {
                     </div>
                     <div className="flex-1 pt-1">
                       <div className="font-semibold text-gray-900 text-sm mb-1">
-                        {models.find(m => m.id === selectedModelId)?.displayName || 'ChatGPT'}
+                        {(() => {
+                          const lastMsg = currentSession?.messages?.[currentSession.messages.length - 1];
+                          if (lastMsg?.role === 'assistant' && lastMsg.modelId) {
+                            return modelById.get(lastMsg.modelId)?.displayName || 'ChatGPT';
+                          }
+                          return selectedModel?.displayName || 'ChatGPT';
+                        })()}
                       </div>
                       {(() => {
                         const isReasoningModel = selectedModelId?.startsWith('o3') || selectedModelId?.startsWith('o4');
@@ -797,9 +1317,12 @@ export const Chat: React.FC = () => {
             </div>
           )}
         </div>
+        )}
         
         {/* 입력 영역 */}
-        <div className="border-t border-gray-200 p-4">
+        {wrapWithProfiler(
+          'ChatInput',
+          <div className="border-t border-gray-200 p-4">
           <div className="max-w-3xl mx-auto">
             {/* 모델 선택 */}
             <div className="mb-3">
@@ -808,44 +1331,18 @@ export const Chat: React.FC = () => {
                 onChange={(e) => setSelectedModelId(e.target.value)}
                 className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 text-sm bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
               >
-                <option value="">모델 선택</option>
-                {availableModels.map(model => (
-                  <option key={model.id} value={model.id}>
-                    {model.displayName} (잔여: {getCredits(model.id)}회)
-                  </option>
-                ))}
+                <option value="">{t.chat.selectModel}</option>
+                {availableModels.map(model => {
+                  const credits = walletCredits?.[model.id] || 0;
+                  return (
+                    <option key={model.id} value={model.id}>
+                      {model.displayName} (잔여 {credits}회)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
-            {/* 빠른 템플릿 (첫 메시지 전까지만 표시) */}
-            {currentSession && currentSession.messages.length === 0 && (
-              <div className="mb-3 flex flex-wrap gap-2">
-                <button
-                  onClick={() => setMessage('이 글 요약해줘')}
-                  className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
-                >
-                  이 글 요약해줘
-                </button>
-                <button
-                  onClick={() => setMessage('장단점 비교해줘')}
-                  className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
-                >
-                  장단점 비교해줘
-                </button>
-                <button
-                  onClick={() => setMessage('보고서 구조 짜줘')}
-                  className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
-                >
-                  보고서 구조 짜줘
-                </button>
-                <button
-                  onClick={() => setMessage('이 코드 설명해줘')}
-                  className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
-                >
-                  이 코드 설명해줘
-                </button>
-              </div>
-            )}
 
             {/* 첨부 미리보기 */}
             {attachments.length > 0 && (
@@ -879,7 +1376,7 @@ export const Chat: React.FC = () => {
             />
 
             {/* 메인 입력창 */}
-            <div className="relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+            <div className="relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-3xl shadow-sm hover:shadow-md transition-shadow chat-input-card">
               <div className="flex items-end p-3 gap-2">
                 {/* Plus 버튼 */}
                 <div className="relative" ref={plusMenuRef}>
@@ -972,7 +1469,7 @@ export const Chat: React.FC = () => {
                                 <span className="text-sm font-semibold text-gray-900">응답 스타일</span>
                                 <span className="text-sm text-gray-600">{temperature.toFixed(1)}</span>
                               </div>
-                              {(selectedModelId === 'gpt5' || selectedModelId === 'gpt51') && (
+                              {(selectedModelId === 'gpt5' || selectedModelId === 'gpt51' || selectedModelId === 'gpt52') && (
                                 <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded mt-1">
                                   ⚠️ GPT-5 시리즈 모델은 응답 스타일 조절을 지원하지 않습니다
                                 </div>
@@ -981,14 +1478,14 @@ export const Chat: React.FC = () => {
                             <input
                               type="range"
                               min="0"
-                              max="2"
+                              max="1.9"
                               step="0.1"
                               value={temperature}
                               onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                              disabled={selectedModelId === 'gpt5' || selectedModelId === 'gpt51'}
+                              disabled={selectedModelId === 'gpt5' || selectedModelId === 'gpt51' || selectedModelId === 'gpt52'}
                               className={cn(
                                 "w-full h-1 bg-gray-200 rounded-lg appearance-none",
-                                (selectedModelId === 'gpt5' || selectedModelId === 'gpt51')
+                                (selectedModelId === 'gpt5' || selectedModelId === 'gpt51' || selectedModelId === 'gpt52')
                                   ? "cursor-not-allowed opacity-50" 
                                   : "cursor-pointer"
                               )}
@@ -1006,14 +1503,15 @@ export const Chat: React.FC = () => {
 
                 {/* 텍스트 입력 */}
                 <textarea
+                  ref={textareaRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="무엇이든 물어보세요"
-                  className="flex-1 px-2 py-2 focus:outline-none resize-none text-gray-900 placeholder-gray-400"
+                  placeholder={t.chat.askAnything}
+                  className="flex-1 px-2 py-2 bg-transparent focus:outline-none resize-none text-gray-900 placeholder-gray-400 dark:text-white dark:placeholder-gray-500"
                   rows={1}
-                  style={{ minHeight: '24px', maxHeight: '200px' }}
-                  maxLength={models.find(m => m.id === selectedModelId)?.maxCharacters || 2500}
+                  style={{ minHeight: '24px', maxHeight: '200px', overflowY: 'hidden' }}
+                  maxLength={selectedModelMaxCharacters}
                   disabled={isLoading}
                 />
 
@@ -1025,7 +1523,7 @@ export const Chat: React.FC = () => {
                     "p-2 rounded-full transition-all",
                     !message.trim() || isLoading || !selectedModelId
                       ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                      : "bg-black text-white hover:bg-gray-800"
+                      : "bg-primary text-primary-foreground hover:opacity-90"
                   )}
                 >
                   {isLoading ? (
@@ -1040,7 +1538,7 @@ export const Chat: React.FC = () => {
             {/* 글자 수 표시 */}
             {selectedModelId && (
               <div className="mt-2 text-xs text-gray-500 text-right">
-                {message.length} / {models.find(m => m.id === selectedModelId)?.maxCharacters || 2500}자
+                {message.length} / {selectedModelMaxCharacters}{t.chat.characterCount}
               </div>
             )}
 
@@ -1049,13 +1547,14 @@ export const Chat: React.FC = () => {
                 <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-xs font-medium text-yellow-800">
-                    사용 가능한 크레딧이 없습니다. 크레딧을 구매해주세요.
+                    {t.chat.noCredits}
                   </p>
                 </div>
               </div>
             )}
           </div>
         </div>
+        )}
       </div>
       
       {/* Delete Confirmation Dialog */}
@@ -1069,8 +1568,8 @@ export const Chat: React.FC = () => {
           }}
         >
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4 dark:text-white">대화 삭제</h3>
-            <p className="mb-6 dark:text-gray-300">정말로 이 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</p>
+            <h3 className="text-lg font-semibold mb-4 dark:text-white">{t.chat.deleteTitle}</h3>
+            <p className="mb-6 dark:text-gray-300">{t.chat.deleteConfirm}</p>
             <div className="flex justify-end space-x-3">
               <Button
                 variant="outline"
@@ -1079,7 +1578,7 @@ export const Chat: React.FC = () => {
                   setShowDeleteConfirm(null);
                 }}
               >
-                취소
+                {t.cancel}
               </Button>
               <Button
                 variant="danger"
@@ -1089,7 +1588,7 @@ export const Chat: React.FC = () => {
                   setShowDeleteConfirm(null);
                 }}
               >
-                삭제
+                {t.delete}
               </Button>
             </div>
           </div>
@@ -1101,7 +1600,7 @@ export const Chat: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowTemplates(false)}>
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">대화 템플릿</h2>
+              <h2 className="text-2xl font-bold text-gray-900">{t.chat.templates}</h2>
               <button onClick={() => setShowTemplates(false)} className="p-2 hover:bg-gray-100 rounded-full">
                 <X className="w-5 h-5" />
               </button>
@@ -1118,7 +1617,7 @@ export const Chat: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowComparison(false)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">모델 비교</h2>
+              <h2 className="text-2xl font-bold text-gray-900">{t.chat.modelComparison}</h2>
               <button onClick={() => setShowComparison(false)} className="p-2 hover:bg-gray-100 rounded-full">
                 <X className="w-5 h-5" />
               </button>
@@ -1135,7 +1634,7 @@ export const Chat: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowPersona(false)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">페르소나 설정</h2>
+              <h2 className="text-2xl font-bold text-gray-900">{t.chat.persona}</h2>
               <button onClick={() => setShowPersona(false)} className="p-2 hover:bg-gray-100 rounded-full">
                 <X className="w-5 h-5" />
               </button>
