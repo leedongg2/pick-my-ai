@@ -11,10 +11,6 @@ const Header = dynamic(() => import('@/components/Header').then(mod => ({ defaul
   loading: () => <div className="h-16 bg-white border-b border-gray-200" />
 });
 
-const TempAutoLogin = dynamic(() => import('@/components/TempAutoLogin').then(mod => ({ default: mod.TempAutoLogin })), {
-  ssr: false
-});
-
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
@@ -34,9 +30,6 @@ export default function RootLayout({
     <html lang="ko">
       <body className={inter.className}>
         <ThemeProvider>
-          {/* TEMP_ENABLED_START - 임시 자동 로그인 (복구 시 아래 라인 제거) */}
-          <TempAutoLogin />
-          {/* TEMP_ENABLED_END */}
           <Header />
           {children}
           <Toaster 
