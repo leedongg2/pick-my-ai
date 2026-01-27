@@ -207,6 +207,8 @@ export const Chat: React.FC = () => {
   const lastDraftFlushRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([]);
+  const userScrolledUpRef = useRef(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   
   const {
     chatSessions,
@@ -407,6 +409,10 @@ export const Chat: React.FC = () => {
   }, [activeTemplate, clearActiveTemplate]);
 
   const scrollToBottom = useCallback((force: boolean = false) => {
+    // 사용자가 위로 스크롤했으면 자동 스크롤 중단
+    if (!force && userScrolledUpRef.current) {
+      return;
+    }
     const behavior = force || (streaming?.smoothScrolling && !streamingRef.current) ? 'smooth' : 'auto';
     messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, [streaming?.smoothScrolling]);
@@ -720,6 +726,9 @@ export const Chat: React.FC = () => {
         let buffer = '';
 
         streamingRef.current = true;
+        let lastUpdateTime = 0;
+        const THROTTLE_MS = 100;
+        
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -750,17 +759,20 @@ export const Chat: React.FC = () => {
 
                   if (STREAMING_DRAFT_V2) {
                     draftContentRef.current = fullContent;
-                    const now = performance.now();
-                    if (now - lastDraftFlushRef.current >= STREAMING_DRAFT_UI_THROTTLE_MS) {
-                      lastDraftFlushRef.current = now;
+                    const now = Date.now();
+                    
+                    if (now - lastUpdateTime >= THROTTLE_MS) {
+                      lastUpdateTime = now;
                       setDraftContent(draftContentRef.current);
-                      // 탭 전환 시에도 스크롤 작동하도록 setTimeout 사용
-                      setTimeout(() => scrollToBottom(), 0);
+                      if (!userScrolledUpRef.current) {
+                        scrollToBottom();
+                      }
                     }
                   } else {
                     updateMessageContent(currentSessionId, messageId, fullContent);
-                    // 탭 전환 시에도 스크롤 작동하도록 setTimeout 사용
-                    setTimeout(() => scrollToBottom(), 0);
+                    if (!userScrolledUpRef.current) {
+                      scrollToBottom();
+                    }
                   }
 
                   if (streaming?.chunkDelay && streaming.chunkDelay > 0) {
@@ -771,6 +783,10 @@ export const Chat: React.FC = () => {
                 // ignore
               }
             }
+          }
+          
+          if (STREAMING_DRAFT_V2 && draftContentRef.current) {
+            setDraftContent(draftContentRef.current);
           }
         } catch (error) {
           if (process.env.NODE_ENV !== 'production') {
@@ -1272,10 +1288,18 @@ export const Chat: React.FC = () => {
         {/* 메시지 영역 */}
         {wrapWithProfiler(
           'ChatMessages',
-          <div className={cn(
-            "flex-1 chat-message-card",
-            currentSession?.messages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
-          )}>
+          <div 
+            ref={messagesContainerRef}
+            className={cn(
+              "flex-1 chat-message-card",
+              currentSession?.messages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
+            )}
+            onScroll={(e) => {
+              const container = e.currentTarget;
+              const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+              userScrolledUpRef.current = !isAtBottom;
+            }}
+          >
           {currentSession?.messages.length === 0 ? (
             <div className="text-center px-4 flex items-center justify-center h-full">
               <h1 className="text-4xl font-bold text-gray-800">{t.chat.welcome}</h1>
@@ -1556,27 +1580,33 @@ export const Chat: React.FC = () => {
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={t.chat.askAnything}
-                  className="flex-1 px-2 py-2 bg-transparent focus:outline-none resize-none text-gray-900 placeholder-gray-400 dark:text-white dark:placeholder-gray-500"
+                  placeholder={streamingRef.current ? "AI가 답변 중입니다..." : t.chat.askAnything}
+                  className={cn(
+                    "flex-1 px-2 py-2 bg-transparent focus:outline-none resize-none",
+                    streamingRef.current || isLoading
+                      ? "text-gray-400 placeholder-gray-300 cursor-not-allowed"
+                      : "text-gray-900 placeholder-gray-400 dark:text-white dark:placeholder-gray-500"
+                  )}
                   rows={1}
                   style={{ minHeight: '24px', maxHeight: '200px', overflowY: 'hidden' }}
                   maxLength={selectedModelMaxCharacters}
-                  disabled={isLoading}
+                  disabled={isLoading || streamingRef.current}
                 />
 
                 {/* 전송 버튼 */}
                 <button
                   onClick={handleSendMessage}
-                  disabled={!message.trim() || isLoading || !selectedModelId}
+                  disabled={!message.trim() || isLoading || streamingRef.current || !selectedModelId}
                   className={cn(
                     "chat-send-button p-2 rounded-full transition-all",
-                    !message.trim() || isLoading || !selectedModelId
+                    !message.trim() || isLoading || streamingRef.current || !selectedModelId
                       ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                       : "bg-primary text-primary-foreground hover:opacity-90"
                   )}
+                  title={streamingRef.current ? "AI가 답변 중입니다" : ""}
                 >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-t-white border-r-white border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                  {isLoading || streamingRef.current ? (
+                    <div className="w-5 h-5 border-2 border-t-gray-400 border-r-gray-400 border-b-transparent border-l-transparent rounded-full animate-spin"></div>
                   ) : (
                     <ChevronRight className="w-5 h-5" />
                   )}
