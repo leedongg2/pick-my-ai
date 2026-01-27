@@ -795,10 +795,16 @@ export const Chat: React.FC = () => {
           setTimeout(() => scrollToBottom(true), 100);
         }
         
-        // 요약 추출 및 저장
-        const { summary } = extractSummary(fullContent);
-        if (summary) {
-          setConversationSummaries(prev => [...prev, summary]);
+        // 요약 추출 및 저장 (오류가 발생해도 스트리밍은 계속)
+        try {
+          const { summary } = extractSummary(fullContent);
+          if (summary) {
+            setConversationSummaries(prev => [...prev, summary]);
+          }
+        } catch (summaryError) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('Summary extraction failed:', summaryError);
+          }
         }
       } else {
         // 일반 JSON 응답 처리 (다른 모델)
@@ -846,10 +852,16 @@ export const Chat: React.FC = () => {
           setTimeout(() => scrollToBottom(true), 100);
         }
         
-        // 요약 추출 및 저장
-        const { summary } = extractSummary(data.content);
-        if (summary) {
-          setConversationSummaries(prev => [...prev, summary]);
+        // 요약 추출 및 저장 (오류가 발생해도 응답은 계속)
+        try {
+          const { summary } = extractSummary(data.content);
+          if (summary) {
+            setConversationSummaries(prev => [...prev, summary]);
+          }
+        } catch (summaryError) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('Summary extraction failed:', summaryError);
+          }
         }
       }
       
