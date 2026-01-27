@@ -11,6 +11,7 @@ import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from '@/utils/translations';
 import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
+import { extractSummary, buildConversationContext, ConversationSummary } from '@/utils/summaryExtractor';
 
 // Constants
 const MAX_ATTACHMENTS = 5;
@@ -198,6 +199,7 @@ export const Chat: React.FC = () => {
   const draftContentRef = useRef('');
   const lastDraftFlushRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([]);
   
   const {
     chatSessions,
@@ -622,6 +624,7 @@ export const Chat: React.FC = () => {
             maxTokens: 4096,
             language,
             storedFacts,
+            conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
             persona: activePersona ? {
               name: activePersona.name,
               personality: activePersona.personality,
@@ -791,6 +794,12 @@ export const Chat: React.FC = () => {
           lastDraftFlushRef.current = 0;
           setTimeout(() => scrollToBottom(true), 100);
         }
+        
+        // 요약 추출 및 저장
+        const { summary } = extractSummary(fullContent);
+        if (summary) {
+          setConversationSummaries(prev => [...prev, summary]);
+        }
       } else {
         // 일반 JSON 응답 처리 (다른 모델)
         let data;
@@ -835,6 +844,12 @@ export const Chat: React.FC = () => {
           });
           // 비스트리밍 응답 후 스크롤
           setTimeout(() => scrollToBottom(true), 100);
+        }
+        
+        // 요약 추출 및 저장
+        const { summary } = extractSummary(data.content);
+        if (summary) {
+          setConversationSummaries(prev => [...prev, summary]);
         }
       }
       

@@ -82,6 +82,15 @@ export interface ChatMessage {
   createdAt?: Date;
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: Date;
+  updatedAt: Date;
+  isStarred?: boolean;
+}
+
 export type ThemeColor = 'gray' | 'red' | 'blue' | 'green' | 'purple' | 'orange' | 'yellow';
 
 // 다크모드 관련 타입

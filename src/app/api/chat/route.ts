@@ -211,11 +211,16 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
     ? '\n\n코드를 출력할 때는 반드시 ///로 코드를 둘러싸세요.\n예시:\n///\nfunction example() {\n  return "code here";\n}\n///'
     : '';
   
+  // 요약 규칙 (첫 메시지에만 포함)
+  const summaryRule = isFirstMessage
+    ? '\n\n**중요**: 모든 답변의 마지막에 다음 형식으로 요약을 작성하세요:\n~~\nUser Question Summary: [사용자 질문을 영어로 간단히 요약]\nMy Response Summary: [내 답변의 핵심 내용을 영어로 요약]\nPrevious Models Summary: [이전 모델들의 답변이 있다면 영어로 요약, 없으면 "None"]\n~~'
+    : '';
+  
   const baseSystemPrompt = isGPT5Series
-    ? `당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 최대한 상세하고 포괄적으로 답변하세요.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}\n\n답변을 구조화할 때 ## 제목을 적극 활용하세요.`
+    ? `당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 최대한 상세하고 포괄적으로 답변하세요.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}\n\n답변을 구조화할 때 ## 제목을 적극 활용하세요.`
     : isCodingModel
-    ? `당신은 전문 프로그래밍 어시스턴트입니다. 코드 작성, 디버깅, 최적화, 설명에 특화되어 있습니다.\n\n서식 규칙:${codeBlockRule}\n- 중요한 부분: **강조**\n- 섹션 제목: ## 제목\n\n답변을 구조화할 때 ## 제목을 사용하세요.`
-    : `당신은 도움이 되는 AI 어시스턴트입니다.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}`;
+    ? `당신은 전문 프로그래밍 어시스턴트입니다. 코드 작성, 디버깅, 최적화, 설명에 특화되어 있습니다.\n\n서식 규칙:${codeBlockRule}${summaryRule}\n- 중요한 부분: **강조**\n- 섹션 제목: ## 제목\n\n답변을 구조화할 때 ## 제목을 사용하세요.`
+    : `당신은 도움이 되는 AI 어시스턴트입니다.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}`;
   
   const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
 
@@ -741,7 +746,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts } = await request.json();
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary } = await request.json();
 
     const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
     const languageInstruction = resolvedLanguage === 'en'
@@ -787,20 +792,35 @@ export async function POST(request: NextRequest) {
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
+      
+      // 요약이 있으면 전체 메시지 대신 요약만 사용
+      let contextMessages = inputMessages;
+      if (conversationSummary && inputMessages.length > 1) {
+        // 마지막 사용자 메시지만 유지하고 나머지는 요약으로 대체
+        const lastUserMessage = inputMessages[inputMessages.length - 1];
+        contextMessages = [
+          {
+            role: 'system',
+            content: `Previous conversation summary:\n${conversationSummary}`
+          },
+          lastUserMessage
+        ];
+      }
+      
       const systemContent = [basePrompt, languageInstructionWithMemory].filter(Boolean).join('\n\n');
       
       if (idx === -1) {
-        return [{ role: 'system', content: systemContent }, ...inputMessages];
+        return [{ role: 'system', content: systemContent }, ...contextMessages];
       }
       
-      const existing = inputMessages[idx];
+      const existing = contextMessages[idx];
       const existingContent = typeof existing?.content === 'string' ? existing.content : '';
       const merged = [existingContent, systemContent].filter(Boolean).join('\n\n');
       
       return [
-        ...inputMessages.slice(0, idx),
+        ...contextMessages.slice(0, idx),
         { ...existing, content: merged },
-        ...inputMessages.slice(idx + 1),
+        ...contextMessages.slice(idx + 1),
       ];
     };
 

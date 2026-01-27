@@ -148,6 +148,7 @@ interface AppState {
     messages: ChatMessage[];
     createdAt: Date;
     updatedAt: Date;
+    isStarred?: boolean;
   }>;
   currentSessionId: string | null;
   lastChatSessionCreatedAt?: number;
@@ -404,6 +405,17 @@ export const useStore = create<AppState>()(
               };
               
               set({ currentUser, isAuthenticated: true, storedFacts: [] });
+              
+              // Supabase에서 채팅 세션 로드
+              try {
+                const { ChatSyncService } = await import('@/lib/chatSync');
+                const sessionsResult = await ChatSyncService.loadChatSessions();
+                if (sessionsResult.success && sessionsResult.sessions) {
+                  set({ chatSessions: sessionsResult.sessions });
+                }
+              } catch (error) {
+                console.error('채팅 세션 로드 실패:', error);
+              }
               
               // Supabase에서 크레딧 로드
               try {
@@ -908,17 +920,28 @@ export const useStore = create<AppState>()(
     set({ currentSessionId: sessionId });
   },
   
-      addMessage: (sessionId, message) => set((state) => ({
-        chatSessions: state.chatSessions.map(session =>
-          session.id === sessionId
-            ? {
-                ...session,
-                messages: [...session.messages, { ...message, id: message?.id ?? Date.now().toString() }],
-                updatedAt: new Date()
-              }
-            : session
-        )
-      })),
+      addMessage: (sessionId, message) => {
+        set((state) => ({
+          chatSessions: state.chatSessions.map(session =>
+            session.id === sessionId
+              ? {
+                  ...session,
+                  messages: [...session.messages, { ...message, id: message?.id ?? Date.now().toString() }],
+                  updatedAt: new Date()
+                }
+              : session
+          )
+        }));
+        
+        // Supabase 동기화 (debounced)
+        const state = get();
+        const session = state.chatSessions.find(s => s.id === sessionId);
+        if (session && state.isAuthenticated) {
+          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
+            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
+          });
+        }
+      },
 
       updateMessageContent: (sessionId, messageId, content) =>
         set((state) => ({
