@@ -22,13 +22,15 @@ const nextConfig = {
   
   // 실험적 기능 (성능 향상)
   experimental: {
-    optimizePackageImports: ['lucide-react', 'date-fns', 'zustand', 'sonner'], // 패키지 임포트 최적화
+    optimizePackageImports: ['lucide-react', 'date-fns', 'zustand', 'sonner', '@supabase/supabase-js'], // 패키지 임포트 최적화
     turbo: {
       // Turbopack 최적화
       resolveAlias: {
         canvas: './empty-module.js',
       },
     },
+    // 서버 컴포넌트 최적화
+    serverComponentsExternalPackages: ['@supabase/supabase-js'],
   },
   
   // 웹팩 최적화

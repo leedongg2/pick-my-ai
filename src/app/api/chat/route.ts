@@ -416,8 +416,8 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   }
 
   const geminiModelMap: { [key: string]: string } = {
-    'gemini3': 'gemini-3.0-flash',
-    'gemini3pro': 'gemini-3.0-pro',
+    'gemini3': 'gemini-1.5-flash',
+    'gemini3pro': 'gemini-1.5-pro',
     // 레거시 매핑
     'gemini-flash': 'gemini-1.5-flash',
     'gemini-pro': 'gemini-1.5-pro',
@@ -869,9 +869,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Chat API] Processing request for model: ${modelId}`);
-      console.log(`[Chat API] Messages count: ${messages.length}`);
+    // 개발 환경에서만 로깅
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[Chat API] Model: ${modelId}, Messages: ${messages.length}`);
     }
 
     // 모델 시리즈별로 API 호출 - OpenAI는 스트리밍 응답 반환
@@ -944,10 +944,29 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 빈 응답 에러인 경우 더 자세한 정보 제공
-    const errorMessage = error.message || '응답 생성 중 오류가 발생했습니다.';
+    // 에러 타입별 처리
+    let errorMessage = '응답 생성 중 오류가 발생했습니다.';
+    let statusCode = 500;
+
+    if (error.message?.includes('API 키')) {
+      errorMessage = error.message;
+      statusCode = 401;
+    } else if (error.message?.includes('한도')) {
+      errorMessage = error.message;
+      statusCode = 429;
+    } else if (error.message?.includes('네트워크')) {
+      errorMessage = '네트워크 오류가 발생했습니다. 연결을 확인하세요.';
+      statusCode = 503;
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
     if (process.env.NODE_ENV !== 'production') {
-      console.error(`[Chat API] Returning error to client: ${errorMessage}`);
+      console.error(`[Chat API] Error:`, {
+        message: errorMessage,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
     }
     
     return NextResponse.json(

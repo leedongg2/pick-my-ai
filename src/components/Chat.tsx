@@ -18,6 +18,13 @@ const MAX_ATTACHMENTS = 5;
 const STREAMING_DRAFT_V2 = process.env.NEXT_PUBLIC_STREAMING_DRAFT_V2 === 'true';
 const STREAMING_DRAFT_UI_THROTTLE_MS = 50;
 
+// 메모이제이션된 서브 컴포넌트들
+const MessageItem = React.memo(({ message, formatMessage }: any) => (
+  <div className="whitespace-pre-wrap break-words">
+    {formatMessage(message.content)}
+  </div>
+));
+
 const MEM_BLOCK_START = '@@MEM@@';
 const MEM_BLOCK_END = '@@END@@';
 
@@ -747,11 +754,13 @@ export const Chat: React.FC = () => {
                     if (now - lastDraftFlushRef.current >= STREAMING_DRAFT_UI_THROTTLE_MS) {
                       lastDraftFlushRef.current = now;
                       setDraftContent(draftContentRef.current);
-                      requestAnimationFrame(() => scrollToBottom());
+                      // 탭 전환 시에도 스크롤 작동하도록 setTimeout 사용
+                      setTimeout(() => scrollToBottom(), 0);
                     }
                   } else {
                     updateMessageContent(currentSessionId, messageId, fullContent);
-                    requestAnimationFrame(() => scrollToBottom());
+                    // 탭 전환 시에도 스크롤 작동하도록 setTimeout 사용
+                    setTimeout(() => scrollToBottom(), 0);
                   }
 
                   if (streaming?.chunkDelay && streaming.chunkDelay > 0) {
