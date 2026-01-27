@@ -30,7 +30,7 @@ export function extractSummary(text: string): { displayText: string; summary: Co
   const summaryContent = afterStart.slice(0, endIndex).trim();
   const displayText = text.slice(0, startIndex).trim();
 
-  // 요약 파싱
+  // 요약 파싱 (새 형식: Q:, A:, Prev:)
   const lines = summaryContent.split('\n').map(l => l.trim()).filter(Boolean);
   const summary: ConversationSummary = {
     userQuestion: '',
@@ -40,7 +40,15 @@ export function extractSummary(text: string): { displayText: string; summary: Co
   };
 
   for (const line of lines) {
-    if (line.startsWith('User Question Summary:')) {
+    if (line.startsWith('Q:')) {
+      summary.userQuestion = line.replace('Q:', '').trim();
+    } else if (line.startsWith('A:')) {
+      summary.myResponse = line.replace('A:', '').trim();
+    } else if (line.startsWith('Prev:')) {
+      summary.previousModels = line.replace('Prev:', '').trim();
+    }
+    // 구 형식도 지원 (하위 호환성)
+    else if (line.startsWith('User Question Summary:')) {
       summary.userQuestion = line.replace('User Question Summary:', '').trim();
     } else if (line.startsWith('My Response Summary:')) {
       summary.myResponse = line.replace('My Response Summary:', '').trim();

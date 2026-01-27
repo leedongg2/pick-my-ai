@@ -213,7 +213,7 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
   
   // 요약 규칙 (첫 메시지에만 포함)
   const summaryRule = isFirstMessage
-    ? '\n\n**중요**: 모든 답변의 마지막에 다음 형식으로 요약을 작성하세요:\n~~\nUser Question Summary: [사용자 질문을 영어로 간단히 요약]\nMy Response Summary: [내 답변의 핵심 내용을 영어로 요약]\nPrevious Models Summary: [이전 모델들의 답변이 있다면 영어로 요약, 없으면 "None"]\n~~'
+    ? '\n\n**중요**: 답변 마지막에 요약을 작성하세요 (사용자에게 보이지 않음):\n~~\nQ: [질문 5단어 이내]\nA: [답변 핵심 10단어 이내]\nPrev: [이전 답변 요약 또는 None]\n~~'
     : '';
   
   const baseSystemPrompt = isGPT5Series

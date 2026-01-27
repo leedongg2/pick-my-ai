@@ -937,7 +937,20 @@ export const Chat: React.FC = () => {
 
   // **텍스트**를 bold 처리하고 ## 제목, /// 코드 블록 처리하는 함수 (메모이제이션)
   const formatMessage = useCallback((text: string) => {
-    const safeText = extractMemoryForDisplay(text).displayText;
+    // 메모리 블록 제거
+    let processedText = extractMemoryForDisplay(text).displayText;
+    
+    // ~~로 둘러싸인 요약 부분 제거 (사용자에게 보이지 않게)
+    const summaryStartIndex = processedText.indexOf('~~');
+    if (summaryStartIndex !== -1) {
+      const afterStart = processedText.slice(summaryStartIndex + 2);
+      const summaryEndIndex = afterStart.indexOf('~~');
+      if (summaryEndIndex !== -1) {
+        processedText = processedText.slice(0, summaryStartIndex).trim();
+      }
+    }
+    
+    const safeText = processedText;
     const elements: JSX.Element[] = [];
     let currentIndex = 0;
     
