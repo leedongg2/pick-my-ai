@@ -728,6 +728,7 @@ export const Chat: React.FC = () => {
         streamingRef.current = true;
         let lastUpdateTime = 0;
         const THROTTLE_MS = 100;
+        let chunkCount = 0;
         
         try {
           while (true) {
@@ -760,8 +761,14 @@ export const Chat: React.FC = () => {
                   if (STREAMING_DRAFT_V2) {
                     draftContentRef.current = fullContent;
                     const now = Date.now();
+                    const isBackground = document.hidden;
+                    chunkCount++;
                     
-                    if (now - lastUpdateTime >= THROTTLE_MS) {
+                    const shouldUpdate = isBackground 
+                      ? (chunkCount % 5 === 0)
+                      : (now - lastUpdateTime >= THROTTLE_MS);
+                    
+                    if (shouldUpdate) {
                       lastUpdateTime = now;
                       setDraftContent(draftContentRef.current);
                       if (!userScrolledUpRef.current) {
@@ -946,9 +953,13 @@ export const Chat: React.FC = () => {
   const handleKeyPress = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // AI 답변 중이거나 로딩 중이면 전송 차단
+      if (streamingRef.current || isLoading) {
+        return;
+      }
       handleSendMessage(e as React.FormEvent);
     }
-  }, [handleSendMessage]);
+  }, [handleSendMessage, isLoading]);
   
   const removeAttachment = useCallback((id: string) => {
     setAttachments(prev => prev.filter(att => att.id !== id));
