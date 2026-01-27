@@ -1872,6 +1872,10 @@ export const useStore = create<AppState>()(
               const persistedState = parsed.state;
               state.language = persistedState.language || 'ko';
               
+              // 전역 데이터 복원
+              state.customDesignTheme = persistedState.customDesignTheme || { theme: null, elementColors: {} };
+              state.settings = persistedState.settings || { showDeleteConfirmation: true, showSuccessNotifications: true };
+              
               // 사용자별 데이터 복원
               state.selections = persistedState[`user_${userId}_selections`] || [];
               state.wallet = persistedState[`user_${userId}_wallet`] || null;

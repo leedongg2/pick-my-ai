@@ -182,6 +182,8 @@ export function validateRequestHeaders(headers: Headers): {
     const allowedOrigins = [
       process.env.NEXT_PUBLIC_APP_URL,
       'https://pick-my-ai.com',
+      'https://pickmyai.store',
+      'https://www.pickmyai.store',
     ].filter(Boolean);
     
     if (origin && !allowedOrigins.some(allowed => origin.startsWith(allowed || ''))) {
