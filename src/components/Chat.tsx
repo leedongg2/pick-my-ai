@@ -1099,7 +1099,7 @@ export const Chat: React.FC = () => {
             onClick={handleNewChat}
             disabled={isOnCooldown}
             className={cn(
-              "w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700",
+              "chat-new-button w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700",
               isOnCooldown && "opacity-50 cursor-not-allowed"
             )}
           >
@@ -1520,7 +1520,7 @@ export const Chat: React.FC = () => {
                   onClick={handleSendMessage}
                   disabled={!message.trim() || isLoading || !selectedModelId}
                   className={cn(
-                    "p-2 rounded-full transition-all",
+                    "chat-send-button p-2 rounded-full transition-all",
                     !message.trim() || isLoading || !selectedModelId
                       ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                       : "bg-primary text-primary-foreground hover:opacity-90"

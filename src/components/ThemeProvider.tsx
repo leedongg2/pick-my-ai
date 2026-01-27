@@ -2,11 +2,14 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { usePathname } from 'next/navigation';
 import { useStore } from '@/store';
 import { elementClassMap } from '@/types/design';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { currentUser, themeSettings, customDesignTheme, language } = useStore();
+  const pathname = usePathname();
+  const disableCustomDesign = pathname === '/design-editor';
 
   const getContrastHex = (hexColor: string): string => {
     const hex = hexColor?.replace('#', '');
@@ -19,6 +22,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   const injectedDesignCss = useMemo(() => {
+    if (disableCustomDesign) return '';
+
     const theme = customDesignTheme.theme;
     const elementColors = customDesignTheme.elementColors ?? {};
 
@@ -33,7 +38,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       rules.push(
         `body { background-color: ${theme.backgroundColor} !important; color: ${theme.textColor} !important; }`
       );
-      rules.push(`header { background-color: ${theme.headerColor} !important; }`);
+      rules.push(`.app-header { background-color: ${theme.headerColor} !important; }`);
     }
 
     for (const [id, value] of Object.entries(elementColors)) {
@@ -69,7 +74,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
 
     return rules.join('\n');
-  }, [customDesignTheme.theme, customDesignTheme.elementColors]);
+  }, [customDesignTheme.theme, customDesignTheme.elementColors, disableCustomDesign]);
 
   const hexToHslTriplet = (hexColor: string): string | null => {
     const hex = hexColor?.replace('#', '');
@@ -128,6 +133,34 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
     const elementColors = customDesignTheme.elementColors ?? {};
+
+    if (disableCustomDesign) {
+      root.style.removeProperty('--custom-primary');
+      root.style.removeProperty('--custom-secondary');
+      root.style.removeProperty('--custom-background');
+      root.style.removeProperty('--custom-text');
+      root.style.removeProperty('--custom-button');
+      root.style.removeProperty('--custom-card');
+      root.style.removeProperty('--custom-header');
+
+      root.style.removeProperty('--background');
+      root.style.removeProperty('--foreground');
+      root.style.removeProperty('--card');
+      root.style.removeProperty('--card-foreground');
+      root.style.removeProperty('--theme-primary');
+      root.style.removeProperty('--theme-primary-foreground');
+
+      root.classList.remove('custom-theme-applied');
+
+      for (let i = root.style.length - 1; i >= 0; i -= 1) {
+        const propName = root.style[i];
+        if (propName.startsWith('--custom-element-')) {
+          root.style.removeProperty(propName);
+        }
+      }
+
+      return;
+    }
     
     if (customDesignTheme.theme) {
       const theme = customDesignTheme.theme;
@@ -182,7 +215,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     Object.entries(elementColors).forEach(([id, color]) => {
       root.style.setProperty(`--custom-element-${id}`, color);
     });
-  }, [customDesignTheme]);
+  }, [customDesignTheme, disableCustomDesign]);
 
   // Initialize dark/light mode
   useEffect(() => {

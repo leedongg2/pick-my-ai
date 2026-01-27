@@ -24,7 +24,7 @@ export const defaultTheme: DesignTheme = {
   textColor: '#1f2937',
   buttonColor: '#3b82f6',
   cardColor: '#f9fafb',
-  headerColor: '#1f2937',
+  headerColor: '#ffffff',
 };
 
 type ElementSelectorType = 'color' | 'background' | 'border';
@@ -36,7 +36,7 @@ export const elementClassMap: Record<
     type: ElementSelectorType;
   }
 > = {
-  header: { selector: 'header', type: 'background' },
+  header: { selector: '.app-header', type: 'background' },
   'nav-logo': { selector: '.preview-nav-logo', type: 'background' },
   'nav-title': { selector: '.preview-nav-title', type: 'color' },
   'nav-login': { selector: '.preview-nav-login', type: 'color' },
@@ -57,6 +57,8 @@ export const elementClassMap: Record<
   'chat-list-card': { selector: '.chat-list-card', type: 'background' },
   'chat-message-card': { selector: '.chat-message-card', type: 'background' },
   'chat-input-card': { selector: '.chat-input-card', type: 'background' },
+  'chat-new-button': { selector: '.chat-new-button', type: 'background' },
+  'chat-send-button': { selector: '.chat-send-button', type: 'background' },
   'dashboard-credit-card': { selector: '.dashboard-credit-card', type: 'background' },
   'dashboard-buy-credit-button': { selector: '.dashboard-buy-credit-button', type: 'background' },
   'dashboard-chat-card': { selector: '.dashboard-chat-card', type: 'background' },

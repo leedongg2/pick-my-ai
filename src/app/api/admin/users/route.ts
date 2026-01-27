@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { verifyAdminToken } from '@/lib/adminAuth';
 
 // 모든 유저와 크레딧 정보 조회
@@ -16,8 +16,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '유효하지 않거나 만료된 토큰입니다.' }, { status: 401 });
     }
 
-    // users와 user_wallets 조인하여 조회
-    const { data: users, error } = await supabase
+    // users와 user_wallets 조인하여 조회 (관리자 권한으로)
+    const { data: users, error } = await supabaseAdmin
       .from('users')
       .select(`
         id,
@@ -63,8 +63,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '필수 파라미터가 누락되었습니다.' }, { status: 400 });
     }
 
-    // user_wallets 테이블 업데이트
-    const { data, error } = await supabase
+    // user_wallets 테이블 업데이트 (관리자 권한으로)
+    const { data, error } = await supabaseAdmin
       .from('user_wallets')
       .update({
         credits,

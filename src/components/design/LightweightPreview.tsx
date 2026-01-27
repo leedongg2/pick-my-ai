@@ -79,31 +79,33 @@ const ChatPreview = memo(({
   elementColors: Record<string, string>; 
   onElementClick: (element: DesignElement) => void;
 }) => {
-  const cardBg = elementColors['chat-sidebar'] || theme.cardColor || '#f9fafb';
-  const buttonBg = elementColors['chat-send-button'] || theme.buttonColor || '#3b82f6';
-  const inputBg = elementColors['chat-input'] || '#ffffff';
+  const sidebarBg = elementColors['chat-list-card'] || theme.cardColor || '#f9fafb';
+  const messageBg = elementColors['chat-message-card'] || theme.cardColor || '#ffffff';
+  const inputCardBg = elementColors['chat-input-card'] || theme.cardColor || '#ffffff';
+  const newChatButtonBg = elementColors['chat-new-button'] || theme.buttonColor || '#3b82f6';
+  const sendButtonBg = elementColors['chat-send-button'] || theme.buttonColor || '#3b82f6';
 
   return (
     <div className="flex h-[500px]">
       {/* 사이드바 */}
       <div 
         className="w-64 border-r p-4 cursor-pointer hover:opacity-90 transition-opacity"
-        style={{ backgroundColor: cardBg }}
+        style={{ backgroundColor: sidebarBg }}
         onClick={(e) => {
           e.stopPropagation();
           onElementClick({
-            id: 'chat-sidebar',
+            id: 'chat-list-card',
             type: 'card',
             label: '채팅 사이드바',
-            selector: '.chat-sidebar',
-            currentColor: cardBg,
+            selector: '.chat-list-card',
+            currentColor: sidebarBg,
             scope: 'element',
           });
         }}
       >
         <button 
           className="w-full py-2 px-4 rounded-lg text-white text-sm font-medium mb-4 cursor-pointer"
-          style={{ backgroundColor: buttonBg }}
+          style={{ backgroundColor: newChatButtonBg }}
           onClick={(e) => {
             e.stopPropagation();
             onElementClick({
@@ -111,7 +113,7 @@ const ChatPreview = memo(({
               type: 'button',
               label: '새 채팅 버튼',
               selector: '.chat-new-button',
-              currentColor: buttonBg,
+              currentColor: newChatButtonBg,
               scope: 'element',
             });
           }}
@@ -130,40 +132,34 @@ const ChatPreview = memo(({
 
       {/* 메인 채팅 영역 */}
       <div className="flex-1 flex flex-col">
-        <div className="flex-1 p-4 space-y-4 overflow-auto">
+        <div
+          className="flex-1 p-4 space-y-4 overflow-auto cursor-pointer hover:opacity-90"
+          style={{ backgroundColor: messageBg }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onElementClick({
+              id: 'chat-message-card',
+              type: 'card',
+              label: '채팅 메시지 카드',
+              selector: '.chat-message-card',
+              currentColor: messageBg,
+              scope: 'element',
+            });
+          }}
+        >
           <div className="flex justify-end">
-            <div 
-              className="max-w-[70%] p-3 rounded-2xl bg-blue-100 text-gray-900 cursor-pointer hover:opacity-90"
-              onClick={(e) => {
-                e.stopPropagation();
-                onElementClick({
-                  id: 'chat-user-message',
-                  type: 'card',
-                  label: '사용자 메시지',
-                  selector: '.chat-user-message',
-                  currentColor: '#dbeafe',
-                  scope: 'element',
-                });
-              }}
+            <div
+              className="max-w-[70%] p-3 rounded-2xl bg-blue-100 text-gray-900"
+              onClick={(e) => e.stopPropagation()}
             >
               안녕하세요! 오늘 날씨가 어때요?
             </div>
           </div>
           <div className="flex items-start space-x-3">
             <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white text-xs">AI</div>
-            <div 
-              className="max-w-[70%] p-3 rounded-2xl bg-gray-100 text-gray-800 cursor-pointer hover:opacity-90"
-              onClick={(e) => {
-                e.stopPropagation();
-                onElementClick({
-                  id: 'chat-ai-message',
-                  type: 'card',
-                  label: 'AI 메시지',
-                  selector: '.chat-ai-message',
-                  currentColor: '#f3f4f6',
-                  scope: 'element',
-                });
-              }}
+            <div
+              className="max-w-[70%] p-3 rounded-2xl bg-gray-100 text-gray-800"
+              onClick={(e) => e.stopPropagation()}
             >
               안녕하세요! 오늘 서울 날씨는 맑고 기온은 15°C입니다.
             </div>
@@ -174,15 +170,15 @@ const ChatPreview = memo(({
         <div className="border-t p-4">
           <div 
             className="flex items-center space-x-2 p-3 rounded-xl border cursor-pointer hover:opacity-90"
-            style={{ backgroundColor: inputBg }}
+            style={{ backgroundColor: inputCardBg }}
             onClick={(e) => {
               e.stopPropagation();
               onElementClick({
-                id: 'chat-input',
+                id: 'chat-input-card',
                 type: 'card',
                 label: '채팅 입력창',
-                selector: '.chat-input',
-                currentColor: inputBg,
+                selector: '.chat-input-card',
+                currentColor: inputCardBg,
                 scope: 'element',
               });
             }}
@@ -195,7 +191,7 @@ const ChatPreview = memo(({
             />
             <button 
               className="p-2 rounded-full text-white cursor-pointer"
-              style={{ backgroundColor: buttonBg }}
+              style={{ backgroundColor: sendButtonBg }}
               onClick={(e) => {
                 e.stopPropagation();
                 onElementClick({
@@ -203,7 +199,7 @@ const ChatPreview = memo(({
                   type: 'button',
                   label: '전송 버튼',
                   selector: '.chat-send-button',
-                  currentColor: buttonBg,
+                  currentColor: sendButtonBg,
                   scope: 'element',
                 });
               }}
@@ -227,13 +223,27 @@ const DashboardPreview = memo(({
   elementColors: Record<string, string>; 
   onElementClick: (element: DesignElement) => void;
 }) => {
-  const cardBg = elementColors['dashboard-card'] || theme.cardColor || '#ffffff';
-  const buttonBg = elementColors['dashboard-button'] || theme.buttonColor || '#3b82f6';
+  const getContrastHex = (hexColor: string): string => {
+    const hex = hexColor?.replace('#', '');
+    if (!hex || hex.length !== 6) return '#ffffff';
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.6 ? '#111827' : '#ffffff';
+  };
+
+  const startChatButtonBg = elementColors['dashboard-start-chat-button'] || 'transparent';
+  const buyCreditButtonBg = elementColors['dashboard-buy-credit-button'] || '#111827';
 
   const Card = ({ id, label, children, className = '' }: { id: string; label: string; children: React.ReactNode; className?: string }) => (
+    (() => {
+      const resolvedBg = elementColors[id] || theme.cardColor || '#ffffff';
+
+      return (
     <div 
       className={`p-6 rounded-xl border cursor-pointer hover:opacity-90 transition-opacity ${className}`}
-      style={{ backgroundColor: cardBg }}
+      style={{ backgroundColor: resolvedBg }}
       onClick={(e) => {
         e.stopPropagation();
         onElementClick({
@@ -241,18 +251,65 @@ const DashboardPreview = memo(({
           type: 'card',
           label,
           selector: `.${id}`,
-          currentColor: cardBg,
+          currentColor: resolvedBg,
           scope: 'element',
         });
       }}
     >
       {children}
     </div>
+      );
+    })()
   );
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 min-h-[500px]">
-      <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
+      <div className="flex items-start justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
+        <div className="flex items-center space-x-2">
+          <button
+            className="px-3 py-2 rounded-lg text-sm font-medium border"
+            style={{
+              backgroundColor: startChatButtonBg,
+              color: startChatButtonBg === 'transparent' ? '#374151' : getContrastHex(startChatButtonBg),
+              borderColor: '#d1d5db',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onElementClick({
+                id: 'dashboard-start-chat-button',
+                type: 'button',
+                label: '대시보드 채팅 시작 버튼',
+                selector: '.dashboard-start-chat-button',
+                currentColor: startChatButtonBg,
+                scope: 'element',
+              });
+            }}
+          >
+            채팅 시작
+          </button>
+          <button
+            className="px-3 py-2 rounded-lg text-sm font-medium"
+            style={{
+              backgroundColor: buyCreditButtonBg,
+              color: getContrastHex(buyCreditButtonBg),
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onElementClick({
+                id: 'dashboard-buy-credit-button',
+                type: 'button',
+                label: '대시보드 크레딧 구매 버튼',
+                selector: '.dashboard-buy-credit-button',
+                currentColor: buyCreditButtonBg,
+                scope: 'element',
+              });
+            }}
+          >
+            크레딧 구매
+          </button>
+        </div>
+      </div>
       
       <div className="grid grid-cols-3 gap-4">
         <Card id="dashboard-credit-card" label="크레딧 카드">
@@ -265,23 +322,6 @@ const DashboardPreview = memo(({
               <div className="text-2xl font-bold text-gray-900">₩12,500</div>
             </div>
           </div>
-          <button 
-            className="mt-4 w-full py-2 rounded-lg text-white text-sm font-medium cursor-pointer"
-            style={{ backgroundColor: buttonBg }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onElementClick({
-                id: 'dashboard-button',
-                type: 'button',
-                label: '충전 버튼',
-                selector: '.dashboard-button',
-                currentColor: buttonBg,
-                scope: 'element',
-              });
-            }}
-          >
-            충전하기
-          </button>
         </Card>
 
         <Card id="dashboard-usage-card" label="사용량 카드">
@@ -296,10 +336,10 @@ const DashboardPreview = memo(({
           </div>
         </Card>
 
-        <Card id="dashboard-stats-card" label="통계 카드">
+        <Card id="dashboard-chat-card" label="대화 카드">
           <div className="flex items-center space-x-3">
             <div className="p-3 rounded-lg bg-purple-100">
-              <BarChart3 className="w-6 h-6 text-purple-600" />
+              <MessageSquare className="w-6 h-6 text-purple-600" />
             </div>
             <div>
               <div className="text-sm text-gray-500">총 대화</div>

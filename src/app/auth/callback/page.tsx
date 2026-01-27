@@ -3,8 +3,10 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useStore } from '@/store';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -43,12 +45,103 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      if (session) {
-        router.push('/dashboard');
+      if (session?.user) {
+        // 사용자 정보 가져오기 또는 생성
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+
+        if (userError || !userData) {
+          // 소셜 로그인 첫 사용 시 users 테이블에 사용자 정보 생성
+          const userName = session.user.user_metadata?.full_name || 
+                          session.user.user_metadata?.name || 
+                          session.user.email?.split('@')[0] || 
+                          'User';
+
+          const { data: newUser, error: insertError } = await supabase
+            .from('users')
+            .insert({
+              id: session.user.id,
+              email: session.user.email!,
+              name: userName,
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('사용자 정보 생성 실패:', insertError);
+          } else {
+            // 지갑도 생성
+            await supabase
+              .from('user_wallets')
+              .insert({
+                user_id: session.user.id,
+                credits: {},
+              });
+          }
+
+          // Zustand store 업데이트
+          if (newUser) {
+            useStore.setState({
+              currentUser: {
+                id: newUser.id,
+                email: newUser.email,
+                name: newUser.name,
+                createdAt: new Date(newUser.created_at),
+              },
+              isAuthenticated: true,
+            });
+            
+            // 지갑 초기화
+            useStore.getState().initWallet(newUser.id);
+          }
+        } else {
+          // 기존 사용자 - Zustand store 업데이트
+          useStore.setState({
+            currentUser: {
+              id: userData.id,
+              email: userData.email,
+              name: userData.name,
+              createdAt: new Date(userData.created_at),
+            },
+            isAuthenticated: true,
+          });
+          
+          // 지갑 로드
+          try {
+            const walletResponse = await fetch('/api/wallet', {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`
+              }
+            });
+            
+            if (walletResponse.ok) {
+              const { wallet } = await walletResponse.json();
+              useStore.setState({
+                wallet: {
+                  userId: userData.id,
+                  credits: wallet.credits || {},
+                  transactions: []
+                }
+              });
+            } else {
+              useStore.getState().initWallet(userData.id);
+            }
+          } catch (error) {
+            console.error('지갑 로드 실패:', error);
+            useStore.getState().initWallet(userData.id);
+          }
+        }
+
+        toast.success('로그인 성공!');
+        router.push('/chat');
       } else {
         router.push('/login');
       }
     } catch (error) {
+      console.error('Session handling error:', error);
       router.push('/login?error=session_failed');
     }
   };

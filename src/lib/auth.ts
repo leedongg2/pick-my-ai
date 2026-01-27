@@ -216,6 +216,36 @@ export class AuthService {
   }
 
   /**
+   * 소셜 로그인 (OAuth)
+   */
+  static async signInWithOAuth(provider: 'google' | 'github' | 'naver'): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        return { success: false, error: 'Supabase가 설정되지 않았습니다.' };
+      }
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: provider as any,
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: provider === 'naver' ? {
+            access_type: 'offline',
+            prompt: 'consent',
+          } : undefined,
+        },
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
    * 현재 세션 확인
    */
   static async getCurrentUser(): Promise<User | null> {
