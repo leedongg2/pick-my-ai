@@ -52,7 +52,7 @@ export const Admin: React.FC = () => {
   const [localPaymentFee, setLocalPaymentFee] = useState(paymentFeeMemo);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useReactState<'settings' | 'inbox' | 'polls' | 'users'>('settings');
+  const [activeTab, setActiveTab] = useReactState<'settings' | 'inbox' | 'polls' | 'users' | 'database'>('settings');
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -330,6 +330,12 @@ export const Admin: React.FC = () => {
             }}
           >
             유저 크레딧 관리
+          </button>
+          <button
+            className={cn('px-4 py-2 rounded-lg text-sm font-semibold', activeTab === 'database' ? 'bg-primary-600 text-white' : 'hover:bg-gray-100')}
+            onClick={() => setActiveTab('database')}
+          >
+            데이터베이스 관리
           </button>
         </div>
         
@@ -861,6 +867,148 @@ export const Admin: React.FC = () => {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {activeTab === 'database' && (
+          <Card variant="bordered">
+            <CardHeader>
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <Settings className="w-5 h-5" />
+                Supabase 데이터베이스 관리
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                ⚠️ 주의: 이 기능은 데이터베이스를 직접 조작합니다. 신중하게 사용하세요.
+              </p>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="space-y-6">
+                {/* 사용자 완전 삭제 */}
+                <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+                  <h3 className="text-lg font-semibold text-red-900 mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5" />
+                    위험: 사용자 완전 삭제
+                  </h3>
+                  <p className="text-sm text-red-700 mb-4">
+                    사용자의 모든 데이터(auth, users, wallets, chat_sessions)를 영구적으로 삭제합니다.
+                    <br />
+                    <strong>이 작업은 되돌릴 수 없습니다!</strong>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="삭제할 User ID"
+                      className="flex-1 px-3 py-2 border border-red-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      id="deleteUserId"
+                    />
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="bg-red-600 hover:bg-red-700"
+                      onClick={async () => {
+                        const input = document.getElementById('deleteUserId') as HTMLInputElement;
+                        const userId = input?.value.trim();
+                        
+                        if (!userId) {
+                          toast.error('User ID를 입력해주세요.');
+                          return;
+                        }
+
+                        if (!confirm(`정말로 사용자 ${userId}를 완전히 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다!`)) {
+                          return;
+                        }
+
+                        try {
+                          const response = await fetch('/api/admin/database', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                            },
+                            body: JSON.stringify({
+                              action: 'deleteUser',
+                              data: { userId }
+                            })
+                          });
+
+                          const result = await response.json();
+
+                          if (response.ok && result.success) {
+                            toast.success('사용자가 완전히 삭제되었습니다.');
+                            input.value = '';
+                            fetchUsers();
+                          } else {
+                            toast.error(result.error || '삭제 실패');
+                          }
+                        } catch (error) {
+                          console.error('Delete error:', error);
+                          toast.error('삭제 중 오류가 발생했습니다.');
+                        }
+                      }}
+                    >
+                      완전 삭제
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 데이터베이스 정보 */}
+                <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+                  <h3 className="text-lg font-semibold text-blue-900 mb-2">데이터베이스 정보</h3>
+                  <div className="space-y-2 text-sm text-blue-800">
+                    <p>• <strong>users</strong>: 사용자 기본 정보</p>
+                    <p>• <strong>user_wallets</strong>: 사용자 크레딧 정보</p>
+                    <p>• <strong>chat_sessions</strong>: 채팅 세션 데이터</p>
+                    <p>• <strong>auth.users</strong>: Supabase 인증 사용자</p>
+                  </div>
+                </div>
+
+                {/* Supabase Dashboard 링크 */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Supabase Dashboard</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    더 많은 기능과 안전한 관리를 위해 Supabase Dashboard를 사용하세요.
+                  </p>
+                  <a
+                    href="https://app.supabase.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    Supabase Dashboard 열기
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+
+                {/* 관리 가능한 작업 목록 */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">현재 가능한 관리 작업</h3>
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <span>유저 크레딧 조회 및 수정 (유저 크레딧 관리 탭)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <span>AI 모델 가격 및 활성화 설정 (설정 탭)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <span>고객 문의 확인 및 처리 (고객 문의함 탭)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <span>투표 생성 및 관리 (투표 관리 탭)</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <span>사용자 완전 삭제 (이 페이지)</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

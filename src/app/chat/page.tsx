@@ -2,7 +2,6 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 // 최적화된 로딩 스켈레톤
 const ChatLoadingSkeleton = () => (

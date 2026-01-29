@@ -24,6 +24,7 @@ const MessageItem = React.memo(({ message, formatMessage }: any) => (
     {formatMessage(message.content)}
   </div>
 ));
+MessageItem.displayName = 'MessageItem';
 
 const MEM_BLOCK_START = '@@MEM@@';
 const MEM_BLOCK_END = '@@END@@';

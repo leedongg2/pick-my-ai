@@ -1,11 +1,7 @@
-import dynamic from 'next/dynamic';
-
-const Admin = dynamic(() => import('@/components/Admin').then(mod => ({ default: mod.Admin })), {
-  loading: () => <div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div></div>,
-  ssr: false,
-});
+import { redirect } from 'next/navigation';
 
 export default function AdminPage() {
-  return <Admin />;
+  // 기존 /admin 경로 차단 - 보안을 위해 404로 리다이렉트
+  redirect('/404');
 }
 

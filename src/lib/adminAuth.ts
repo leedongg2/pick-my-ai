@@ -2,6 +2,101 @@ import crypto from 'crypto';
 
 const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
+// 비밀번호 실패 추적 (IP 기반)
+interface LoginAttempt {
+  count: number;
+  lockedUntil: number | null;
+  lastAttempt: number;
+}
+
+const loginAttempts = new Map<string, LoginAttempt>();
+
+// 설정
+const MAX_ATTEMPTS = parseInt(process.env.ADMIN_MAX_ATTEMPTS || '5');
+const LOCKOUT_DURATION = parseInt(process.env.ADMIN_LOCKOUT_DURATION || '1800000'); // 30분 (밀리초)
+
+// IP별 로그인 시도 기록
+export function recordLoginAttempt(ip: string, success: boolean): { allowed: boolean; remainingAttempts?: number; lockedUntil?: number } {
+  const now = Date.now();
+  let attempt = loginAttempts.get(ip);
+
+  if (!attempt) {
+    attempt = { count: 0, lockedUntil: null, lastAttempt: now };
+    loginAttempts.set(ip, attempt);
+  }
+
+  // 잠금 확인
+  if (attempt.lockedUntil && now < attempt.lockedUntil) {
+    return {
+      allowed: false,
+      lockedUntil: attempt.lockedUntil
+    };
+  }
+
+  // 잠금 시간이 지났으면 초기화
+  if (attempt.lockedUntil && now >= attempt.lockedUntil) {
+    attempt.count = 0;
+    attempt.lockedUntil = null;
+  }
+
+  if (success) {
+    // 성공 시 초기화
+    attempt.count = 0;
+    attempt.lockedUntil = null;
+    attempt.lastAttempt = now;
+    return { allowed: true };
+  } else {
+    // 실패 시 카운트 증가
+    attempt.count++;
+    attempt.lastAttempt = now;
+
+    if (attempt.count >= MAX_ATTEMPTS) {
+      // 최대 시도 횟수 초과 - 잠금
+      attempt.lockedUntil = now + LOCKOUT_DURATION;
+      return {
+        allowed: false,
+        lockedUntil: attempt.lockedUntil
+      };
+    }
+
+    return {
+      allowed: true,
+      remainingAttempts: MAX_ATTEMPTS - attempt.count
+    };
+  }
+}
+
+// IP 잠금 상태 확인
+export function isIPLocked(ip: string): { locked: boolean; lockedUntil?: number } {
+  const attempt = loginAttempts.get(ip);
+  const now = Date.now();
+
+  if (!attempt || !attempt.lockedUntil) {
+    return { locked: false };
+  }
+
+  if (now < attempt.lockedUntil) {
+    return { locked: true, lockedUntil: attempt.lockedUntil };
+  }
+
+  // 잠금 시간이 지났으면 초기화
+  attempt.count = 0;
+  attempt.lockedUntil = null;
+  return { locked: false };
+}
+
+// 관리자 비밀번호 검증
+export function verifyAdminPassword(password: string): boolean {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  
+  if (!adminPassword) {
+    console.error('⚠️ ADMIN_PASSWORD가 설정되지 않았습니다!');
+    return false;
+  }
+
+  return password === adminPassword;
+}
+
 // 간단한 토큰 생성 (role + timestamp + signature)
 export function generateAdminToken(): string {
   const payload = {
@@ -49,3 +144,15 @@ export function verifyAdminToken(token: string): boolean {
     return false;
   }
 }
+
+// 정리 작업 (1시간마다 오래된 데이터 삭제)
+setInterval(() => {
+  const now = Date.now();
+  const ONE_HOUR = 60 * 60 * 1000;
+  
+  Array.from(loginAttempts.entries()).forEach(([ip, attempt]) => {
+    if (now - attempt.lastAttempt > ONE_HOUR && (!attempt.lockedUntil || now > attempt.lockedUntil)) {
+      loginAttempts.delete(ip);
+    }
+  });
+}, 60 * 60 * 1000);
