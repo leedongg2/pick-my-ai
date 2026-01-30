@@ -232,6 +232,7 @@ export const Chat: React.FC = () => {
     language,
     streaming,
     showDeleteConfirmation,
+    currentUser,
   } = useStore(
     (state) => ({
       chatSessions: state.chatSessions,
