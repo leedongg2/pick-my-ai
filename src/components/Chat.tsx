@@ -254,6 +254,7 @@ export const Chat: React.FC = () => {
       language: state.language,
       streaming: state.streaming,
       showDeleteConfirmation: state.settings.showDeleteConfirmation,
+      currentUser: state.currentUser,
     }),
     shallow
   );
@@ -1275,23 +1276,25 @@ export const Chat: React.FC = () => {
           </div>
         </div>
 
-        {/* 하단 메뉴 */}
-        <div className="border-t border-gray-200 p-2 space-y-1">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>{t.chat.dashboard}</span>
-          </button>
-          <button
-            onClick={() => router.push('/settings')}
-            className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
-          >
-            <Settings className="w-4 h-4" />
-            <span>{t.chat.settings}</span>
-          </button>
-        </div>
+        {/* 하단 메뉴 - 로그인한 경우만 표시 */}
+        {currentUser && (
+          <div className="border-t border-gray-200 p-2 space-y-1">
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>{t.chat.dashboard}</span>
+            </button>
+            <button
+              onClick={() => router.push('/settings')}
+              className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-sm text-gray-800 font-normal"
+            >
+              <Settings className="w-4 h-4" />
+              <span>{t.chat.settings}</span>
+            </button>
+          </div>
+        )}
       </div>
       )}
       

@@ -228,7 +228,12 @@ export class AuthService {
       if (provider === 'naver') {
         // Naver OAuth 직접 구현
         const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-        const redirectUri = `${window.location.origin}/api/auth/naver/callback`;
+        
+        // 배포 환경에서는 실제 도메인을 사용, 로컬에서는 localhost 사용
+        const isProduction = process.env.NODE_ENV === 'production';
+        const productionUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://pickmyai.store';
+        const baseUrl = isProduction ? productionUrl : window.location.origin;
+        const redirectUri = `${baseUrl}/api/auth/naver/callback`;
         const state = Math.random().toString(36).substring(7);
         
         if (!clientId) {
@@ -246,10 +251,15 @@ export class AuthService {
       }
 
       // Google, GitHub는 Supabase 기본 지원
+      // 배포 환경에서는 실제 도메인을 사용, 로컬에서는 localhost 사용
+      const isProduction = process.env.NODE_ENV === 'production';
+      const productionUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://pickmyai.store';
+      const redirectUrl = isProduction ? productionUrl : window.location.origin;
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: provider as any,
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${redirectUrl}/auth/callback`,
         },
       });
 
