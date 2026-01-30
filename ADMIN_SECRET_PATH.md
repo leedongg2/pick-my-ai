@@ -48,11 +48,12 @@ ADMIN_LOCKOUT_DURATION=1800000
 
 ### 접속 방법
 
-기본 경로를 사용하지 마세요:
-- ❌ `/admin` (사용 불가)
+쿼리 파라미터 방식으로 접속:
+- ✅ `/admin?key=a3f8d9c2b1e5f4a7c6d8e9f0b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0`
+- ✅ `/admin/login?key=a3f8d9c2b1e5f4a7c6d8e9f0b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0`
 
-비밀 경로를 사용하세요:
-- ✅ `/a3f8d9c2b1e5f4a7c6d8e9f0b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0`
+기본 경로는 차단됩니다:
+- ❌ `/admin` (키 없이 접근 불가)
 
 ### 보안 주의사항
 

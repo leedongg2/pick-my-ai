@@ -1,9 +1,7 @@
 'use client';
 
-'use client';
-
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/Card';
 import { csrfFetch } from '@/lib/csrfFetch';
@@ -11,8 +9,24 @@ import { toast } from 'sonner';
 
 export default function AdminLoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    const secretPath = process.env.NEXT_PUBLIC_ADMIN_SECRET_PATH;
+    const providedKey = searchParams.get('key');
+
+    if (!secretPath || !providedKey || providedKey !== secretPath) {
+      router.replace('/404');
+      return;
+    }
+
+    setIsAuthorized(true);
+    setIsChecking(false);
+  }, [searchParams, router]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -34,19 +48,32 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // 토큰과 만료 시간 저장
       localStorage.setItem('adminAuthenticated', 'true');
       localStorage.setItem('adminToken', data.token);
       localStorage.setItem('adminTokenExpiry', (Date.now() + data.expiresIn).toString());
       
       toast.success('로그인 성공!');
-      router.push('/admin');
+      
+      const key = searchParams.get('key');
+      router.push(`/admin?key=${key}`);
     } catch (error: any) {
       toast.error('로그인 처리 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (isChecking) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">

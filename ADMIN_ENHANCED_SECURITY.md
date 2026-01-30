@@ -100,13 +100,20 @@ openssl rand -hex 32
 
 ### 3단계: 접속
 
+쿼리 파라미터 방식으로 접속:
+
 ```
-https://your-domain.com/[NEXT_PUBLIC_ADMIN_SECRET_PATH]
+https://your-domain.com/admin?key=[NEXT_PUBLIC_ADMIN_SECRET_PATH]
 ```
 
 예시:
 ```
-https://pickmyai.store/a3f8d9c2b1e5f4a7c6d8e9f0b1a2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+https://pickmyai.store/admin?key=3b31e72aa73eefa178cdbf5c623816b61d33d8844987b49d8943a9b48223d4b9
+```
+
+또는 로그인 페이지:
+```
+https://pickmyai.store/admin/login?key=3b31e72aa73eefa178cdbf5c623816b61d33d8844987b49d8943a9b48223d4b9
 ```
 
 ---
