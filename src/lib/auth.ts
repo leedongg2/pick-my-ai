@@ -63,7 +63,7 @@ export class AuthService {
             data: {
               name,
             },
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`,
           },
         });
 
@@ -235,10 +235,8 @@ export class AuthService {
         // Naver OAuth 직접 구현
         const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
         
-        // 배포 환경에서는 실제 도메인을 사용, 로컬에서는 localhost 사용
-        const isProduction = process.env.NODE_ENV === 'production';
-        const productionUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://pickmyai.store';
-        const baseUrl = isProduction ? productionUrl : window.location.origin;
+        // 환경 변수 우선 사용
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
         const redirectUri = `${baseUrl}/api/auth/naver/callback`;
         const state = Math.random().toString(36).substring(7);
         
@@ -257,10 +255,9 @@ export class AuthService {
       }
 
       // Google, GitHub는 Supabase 기본 지원
-      // 배포 환경에서는 실제 도메인을 사용, 로컬에서는 localhost 사용
-      const isProduction = process.env.NODE_ENV === 'production';
-      const productionUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://pickmyai.store';
-      const redirectUrl = isProduction ? productionUrl : window.location.origin;
+      // 환경 변수 우선 사용
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const redirectUrl = baseUrl;
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: provider as any,
@@ -325,7 +322,7 @@ export class AuthService {
           type: 'signup',
           email,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`,
           },
         });
 
@@ -349,7 +346,7 @@ export class AuthService {
     try {
       if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/auth/reset-password`,
+          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/reset-password`,
         });
 
         if (error) {

@@ -18,21 +18,25 @@ export default function AuthCallbackPage() {
 
       if (error) {
         console.error('Session error:', error);
-        router.push('/login?error=verification_failed');
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        window.location.href = `${baseUrl}/login?error=verification_failed`;
         return;
       }
 
       if (session) {
         // 인증 성공
         setTimeout(() => {
-          router.push('/login?verified=true');
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+          window.location.href = `${baseUrl}/login?verified=true`;
         }, 2000);
       } else {
-        router.push('/login');
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        window.location.href = `${baseUrl}/login`;
       }
     } catch (error) {
       console.error('Verification error:', error);
-      router.push('/login?error=verification_failed');
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      window.location.href = `${baseUrl}/login?error=verification_failed`;
     }
   };
 
@@ -41,7 +45,8 @@ export default function AuthCallbackPage() {
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error) {
-        router.push('/login?error=session_failed');
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        window.location.href = `${baseUrl}/login?error=session_failed`;
         return;
       }
 
@@ -136,13 +141,16 @@ export default function AuthCallbackPage() {
         }
 
         toast.success('로그인 성공!');
-        router.push('/chat');
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        window.location.href = `${baseUrl}/chat`;
       } else {
-        router.push('/login');
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        window.location.href = `${baseUrl}/login`;
       }
     } catch (error) {
       console.error('Session handling error:', error);
-      router.push('/login?error=session_failed');
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      window.location.href = `${baseUrl}/login?error=session_failed`;
     }
   };
 
@@ -160,7 +168,8 @@ export default function AuthCallbackPage() {
       handleSession();
     } else {
       // 에러 처리
-      router.push('/login');
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      window.location.href = `${baseUrl}/login`;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
