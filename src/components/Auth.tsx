@@ -110,7 +110,9 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
 
   const handleNaverLogin = useCallback(() => {
     const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-    const redirectUri = `${window.location.origin}/api/auth/naver/callback`;
+    // 프로덕션 환경에서 올바른 도메인 사용
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const redirectUri = `${baseUrl}/api/auth/naver/callback`;
     const state = Math.random().toString(36).substring(7);
     
     toast.loading('네이버로 이동 중...');

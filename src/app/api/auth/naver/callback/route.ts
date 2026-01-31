@@ -7,13 +7,17 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
   const error = searchParams.get('error');
 
-  // 에러 처리
+  // 에러 처리 - 올바른 도메인으로 리다이렉트
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
+  
   if (error) {
-    return NextResponse.redirect(new URL('/login?error=naver_auth_failed', request.url));
+    const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
+    return NextResponse.redirect(new URL(errorUrl));
   }
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/login?error=invalid_callback', request.url));
+    const errorUrl = `${baseUrl}/login?error=invalid_callback`;
+    return NextResponse.redirect(new URL(errorUrl));
   }
 
   try {
@@ -101,8 +105,11 @@ export async function GET(request: NextRequest) {
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7일
     })).toString('base64');
 
-    // 쿠키 설정 및 리다이렉트
-    const response = NextResponse.redirect(new URL('/chat', request.url));
+    // 올바른 도메인으로 리다이렉트
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
+    const redirectUrl = `${baseUrl}/chat`;
+    
+    const response = NextResponse.redirect(new URL(redirectUrl));
     response.cookies.set('naver_session', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -113,6 +120,9 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (error) {
     console.error('Naver OAuth error:', error);
-    return NextResponse.redirect(new URL('/login?error=naver_auth_failed', request.url));
+    // 올바른 도메인으로 에러 리다이렉트
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
+    const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
+    return NextResponse.redirect(new URL(errorUrl));
   }
 }
