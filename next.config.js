@@ -35,6 +35,12 @@ const nextConfig = {
   
   // 웹팩 최적화
   webpack: (config, { dev, isServer }) => {
+    // Path alias 명시적 설정 (Netlify 빌드 환경 호환성)
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': require('path').resolve(__dirname, 'src'),
+    };
+    
     // 프로덕션 빌드 최적화
     if (!dev && !isServer) {
       config.optimization = {
