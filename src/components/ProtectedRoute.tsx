@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth, useAuthActions } from '@/hooks/useAuthStore';
 import { Sparkles } from 'lucide-react';
+import { redirectToLogin } from '@/lib/redirect';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -43,14 +44,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         setIsChecking(false);
       } else {
         setIsAuthenticated(false);
-        router.replace('/login');
+        redirectToLogin();
       }
     } catch (error) {
       if (process.env.NODE_ENV !== 'production') {
         console.error('세션 확인 실패:', error);
       }
       setIsAuthenticated(false);
-      router.replace('/login');
+      redirectToLogin();
     }
   }, [router, setCurrentUser, setIsAuthenticated]);
 

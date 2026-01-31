@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { getBaseUrl } from '@/lib/redirect';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
 
   // 에러 처리 - 올바른 도메인으로 리다이렉트
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
+  const baseUrl = getBaseUrl();
   
   if (error) {
     const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
@@ -106,7 +107,6 @@ export async function GET(request: NextRequest) {
     })).toString('base64');
 
     // 올바른 도메인으로 리다이렉트
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
     const redirectUrl = `${baseUrl}/chat`;
     
     const response = NextResponse.redirect(new URL(redirectUrl));
@@ -121,7 +121,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Naver OAuth error:', error);
     // 올바른 도메인으로 에러 리다이렉트
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || request.url.split('/api/auth/naver/callback')[0];
     const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
     return NextResponse.redirect(new URL(errorUrl));
   }

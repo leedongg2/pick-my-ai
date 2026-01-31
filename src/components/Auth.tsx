@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { csrfFetch } from '@/lib/csrfFetch';
 import { useAuthActions } from '@/hooks/useAuthStore';
 import { toast } from 'sonner';
+import { safeRedirect, getBaseUrl } from '@/lib/redirect';
 
 interface AuthProps {
   onSuccess?: () => void;
@@ -54,11 +55,11 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
           
           toast.success('로그인 성공!', { id: toastId });
           
-          // 즉시 리다이렉트
+          // 즉시 리다이렉트 (올바른 도메인)
           if (onSuccess) {
             onSuccess();
           } else {
-            router.push('/chat');
+            safeRedirect('/chat');
           }
         } else {
           const response = await csrfFetch('/api/auth/register', {
@@ -87,7 +88,7 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
             if (onSuccess) {
               onSuccess();
             } else {
-              router.push('/chat');
+              safeRedirect('/chat');
             }
           } else {
             toast.success('회원가입 성공! 로그인해주세요.', { 
@@ -110,8 +111,7 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
 
   const handleNaverLogin = useCallback(() => {
     const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-    // 프로덕션 환경에서 올바른 도메인 사용
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const baseUrl = getBaseUrl();
     const redirectUri = `${baseUrl}/api/auth/naver/callback`;
     const state = Math.random().toString(36).substring(7);
     

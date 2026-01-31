@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import type { User } from '@/types';
 import { PasswordValidator } from './passwordValidator';
 import jwt from 'jsonwebtoken';
+import { getBaseUrl } from './redirect';
 
 export class AuthService {
   /**
@@ -63,7 +64,7 @@ export class AuthService {
             data: {
               name,
             },
-            emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`,
+            emailRedirectTo: `${getBaseUrl()}/auth/callback`,
           },
         });
 
@@ -236,8 +237,7 @@ export class AuthService {
         const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
         
         // 환경 변수 우선 사용
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const redirectUri = `${baseUrl}/api/auth/naver/callback`;
+        const redirectUri = `${getBaseUrl()}/api/auth/naver/callback`;
         const state = Math.random().toString(36).substring(7);
         
         if (!clientId) {
@@ -256,8 +256,7 @@ export class AuthService {
 
       // Google, GitHub는 Supabase 기본 지원
       // 환경 변수 우선 사용
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      const redirectUrl = baseUrl;
+      const redirectUrl = getBaseUrl();
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: provider as any,
@@ -322,7 +321,7 @@ export class AuthService {
           type: 'signup',
           email,
           options: {
-            emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/callback`,
+            emailRedirectTo: `${getBaseUrl()}/auth/callback`,
           },
         });
 
@@ -346,7 +345,7 @@ export class AuthService {
     try {
       if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/reset-password`,
+          redirectTo: `${getBaseUrl()}/auth/reset-password`,
         });
 
         if (error) {

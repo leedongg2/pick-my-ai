@@ -7,6 +7,7 @@ import { useStore } from '@/store';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { safeRedirect, redirectToLogin, redirectToChat } from '@/lib/redirect';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -18,25 +19,21 @@ export default function AuthCallbackPage() {
 
       if (error) {
         console.error('Session error:', error);
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        window.location.href = `${baseUrl}/login?error=verification_failed`;
+        redirectToLogin('verification_failed');
         return;
       }
 
       if (session) {
         // 인증 성공
         setTimeout(() => {
-          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-          window.location.href = `${baseUrl}/login?verified=true`;
+          safeRedirect('/login?verified=true');
         }, 2000);
       } else {
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        window.location.href = `${baseUrl}/login`;
+        redirectToLogin();
       }
     } catch (error) {
       console.error('Verification error:', error);
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      window.location.href = `${baseUrl}/login?error=verification_failed`;
+      redirectToLogin('verification_failed');
     }
   };
 
@@ -45,8 +42,7 @@ export default function AuthCallbackPage() {
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error) {
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        window.location.href = `${baseUrl}/login?error=session_failed`;
+        redirectToLogin('session_failed');
         return;
       }
 
@@ -141,16 +137,13 @@ export default function AuthCallbackPage() {
         }
 
         toast.success('로그인 성공!');
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        window.location.href = `${baseUrl}/chat`;
+        redirectToChat();
       } else {
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        window.location.href = `${baseUrl}/login`;
+        redirectToLogin();
       }
     } catch (error) {
       console.error('Session handling error:', error);
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      window.location.href = `${baseUrl}/login?error=session_failed`;
+      redirectToLogin('session_failed');
     }
   };
 
@@ -168,8 +161,7 @@ export default function AuthCallbackPage() {
       handleSession();
     } else {
       // 에러 처리
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-      window.location.href = `${baseUrl}/login`;
+      redirectToLogin();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
