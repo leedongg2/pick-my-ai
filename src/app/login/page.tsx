@@ -1,28 +1,23 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import dynamic from 'next/dynamic';
+import { Sparkles } from 'lucide-react';
 
-export default function LoginPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    // 로그인 기능 임시 비활성화 - 채팅 페이지로 리다이렉트
-    router.replace('/chat');
-  }, [router]);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-purple-50 to-pink-50 flex items-center justify-center p-4">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-          <div className="w-8 h-8 bg-primary-600 rounded-full animate-bounce"></div>
+const Auth = dynamic(() => import('@/components/Auth').then(mod => ({ default: mod.Auth })), {
+  loading: () => (
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-purple-50 to-pink-50 flex items-center justify-center">
+      <div className="flex flex-col items-center space-y-4 animate-in fade-in duration-500">
+        <div className="w-16 h-16 bg-gradient-to-br from-primary-500 via-primary-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl animate-pulse">
+          <Sparkles className="w-9 h-9 text-white" />
         </div>
-        <h2 className="text-2xl font-bold mb-4">채팅으로 이동 중...</h2>
-        <p className="text-gray-600">
-          잠시만 기다려주세요.
-        </p>
+        <p className="text-sm text-gray-500">로딩 중...</p>
       </div>
     </div>
-  );
+  ),
+  ssr: true,
+});
+
+export default function LoginPage() {
+  return <Auth />;
 }
 

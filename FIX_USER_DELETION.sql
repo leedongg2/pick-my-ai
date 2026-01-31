@@ -76,8 +76,8 @@ SELECT
     au.email as auth_email,
     pu.email as public_email,
     CASE 
-        WHEN pu.id IS NULL THEN '❌ public.users에 없음'
-        ELSE '✅ 정상'
+        WHEN pu.id IS NULL THEN 'public.users에 없음'
+        ELSE '정상'
     END as status
 FROM auth.users au
 LEFT JOIN public.users pu ON au.id = pu.id
@@ -87,7 +87,7 @@ ORDER BY au.created_at DESC;
 SELECT 
     pu.id,
     pu.email,
-    '❌ auth.users에 없음 (고아 레코드)' as status
+    'auth.users에 없음 (고아 레코드)' as status
 FROM public.users pu
 LEFT JOIN auth.users au ON pu.id = au.id
 WHERE au.id IS NULL;

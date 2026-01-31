@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { verifySession } from '@/lib/apiAuth';
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
     
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 토큰입니다.' }, { status: 401 });
-    }
+    const userId = sessionResult.userId;
 
     const { data: sessions, error } = await supabase
       .from('chat_sessions')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false });
 
     if (error) {
@@ -36,18 +32,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
     
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 토큰입니다.' }, { status: 401 });
-    }
+    const userId = sessionResult.userId;
 
     const { sessionId, title, messages, isStarred } = await request.json();
 
@@ -58,7 +49,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from('chat_sessions')
       .upsert({
-        user_id: user.id,
+        user_id: userId,
         session_id: sessionId,
         title,
         messages,
@@ -83,18 +74,13 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
     
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 토큰입니다.' }, { status: 401 });
-    }
+    const userId = sessionResult.userId;
 
     const { sessionId } = await request.json();
 
@@ -105,7 +91,7 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabase
       .from('chat_sessions')
       .delete()
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('session_id', sessionId);
 
     if (error) {

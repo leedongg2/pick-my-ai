@@ -11,7 +11,9 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
     "@tosspayments/payment-sdk": "^1.9.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "clsx": "^2.0.0",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.294.0",
     "next": "14.0.3",
     "react": "^18.2.0",

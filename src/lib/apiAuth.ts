@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from './supabase';
+import jwt from 'jsonwebtoken';
 
 /**
  * API 요청 인증 미들웨어
@@ -93,5 +94,50 @@ export async function verifyAdmin(userId: string): Promise<boolean> {
     return data.role === 'admin';
   } catch {
     return false;
+  }
+}
+
+/**
+ * 세션 쿠키 검증 (HttpOnly)
+ */
+export async function verifySession(request: NextRequest): Promise<{ 
+  authenticated: boolean; 
+  userId?: string; 
+  email?: string;
+  name?: string;
+  error?: string 
+}> {
+  try {
+    const sessionToken = request.cookies.get('session')?.value;
+    
+    if (!sessionToken) {
+      return { authenticated: false, error: '세션 토큰이 없습니다.' };
+    }
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      return { authenticated: false, error: 'JWT_SECRET이 설정되지 않았습니다.' };
+    }
+
+    const decoded = jwt.verify(sessionToken, secret) as { 
+      userId: string; 
+      email: string; 
+      name: string; 
+      iat: number; 
+      exp: number; 
+    };
+
+    if (decoded.exp < Math.floor(Date.now() / 1000)) {
+      return { authenticated: false, error: '세션이 만료되었습니다.' };
+    }
+
+    return { 
+      authenticated: true, 
+      userId: decoded.userId,
+      email: decoded.email,
+      name: decoded.name
+    };
+  } catch (error: any) {
+    return { authenticated: false, error: error.message || '세션 검증 실패' };
   }
 }

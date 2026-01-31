@@ -60,7 +60,6 @@ interface AppState {
   // Actions
   toggleSuccessNotifications: () => void;
   setLanguage: (language: AppLanguage) => void;
-  setCurrentUser: (user: User | null) => void;
   setTheme: (theme: ThemeColor) => void;
   setCustomDesignTheme: (theme: DesignTheme, elementColors: Record<string, string>) => void;
   getCustomDesignTheme: () => { theme: DesignTheme | null; elementColors: Record<string, string> };
@@ -71,9 +70,8 @@ interface AppState {
   // 인증 관련
   currentUser: User | null;
   isAuthenticated: boolean;
-  
-  // TEMP: 임시 자동 로그인 설정
-  tempAutoLogin: () => void;
+  setCurrentUser: (user: User | null) => void;
+  setIsAuthenticated: (value: boolean) => void;
   
   // 모델 관련
   models: AIModel[];
@@ -385,90 +383,93 @@ export const useStore = create<AppState>()(
       feedbacks: [],
       masterEmail: 'master@pickmyai.com',
       
-      // 인증 액션
+      // 인증 상태 설정 액션
+      setCurrentUser: (user) => set({ currentUser: user }),
+      setIsAuthenticated: (value) => set({ isAuthenticated: value }),
+      
+      // 인증 액션 - 새 API 사용
       login: async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
         try {
-          // Supabase 로그인 시도
-          if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
-            const { AuthService } = await import('@/lib/auth');
-            const result = await AuthService.login(email, password);
-            
-            if (result.success && result.user) {
-              const currentUser: User = {
-                id: result.user.id,
-                email: result.user.email,
-                name: result.user.name,
-                credits: 100,
-                subscription: 'free',
-                theme: 'blue',
-                createdAt: result.user.createdAt,
-              };
-              
-              set({ currentUser, isAuthenticated: true, storedFacts: [] });
-              
-              // Supabase에서 채팅 세션 로드
-              try {
-                const { ChatSyncService } = await import('@/lib/chatSync');
-                const sessionsResult = await ChatSyncService.loadChatSessions();
-                if (sessionsResult.success && sessionsResult.sessions) {
-                  set({ chatSessions: sessionsResult.sessions });
-                }
-              } catch (error) {
-                console.error('채팅 세션 로드 실패:', error);
-              }
-              
-              // Supabase에서 크레딧 로드
-              try {
-                const { supabase } = await import('@/lib/supabase');
-                const { data: { session } } = await supabase.auth.getSession();
-                
-                if (session?.access_token) {
-                  const walletResponse = await fetch('/api/wallet', {
-                    headers: {
-                      'Authorization': `Bearer ${session.access_token}`
-                    }
-                  });
-                  
-                  if (walletResponse.ok) {
-                    const { wallet } = await walletResponse.json();
-                    set({
-                      wallet: {
-                        userId: currentUser.id,
-                        credits: wallet.credits || {},
-                        transactions: []
-                      }
-                    });
-                  } else {
-                    get().initWallet(currentUser.id);
-                  }
-                }
-              } catch (error) {
-                if (process.env.NODE_ENV !== 'production') {
-                  console.error('크레딧 로드 실패:', error);
-                }
-                get().initWallet(currentUser.id);
-              }
-              
-              return { success: true, message: '로그인 성공' };
+          const { csrfFetch } = await import('@/lib/csrfFetch');
+          
+          const response = await csrfFetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            return { success: false, message: data.error || '로그인에 실패했습니다.' };
+          }
+
+          const currentUser: User = {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            credits: 100,
+            subscription: 'free',
+            theme: 'blue',
+            createdAt: new Date(),
+          };
+          
+          set({ currentUser, isAuthenticated: true, storedFacts: [] });
+          
+          // 채팅 세션 로드
+          try {
+            const { ChatSyncService } = await import('@/lib/chatSync');
+            const sessionsResult = await ChatSyncService.loadChatSessions();
+            if (sessionsResult.success && sessionsResult.sessions) {
+              set({ chatSessions: sessionsResult.sessions });
             }
-            
-            return { success: false, message: result.error || '이메일 또는 비밀번호가 올바르지 않습니다.' };
+          } catch (error) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.error('채팅 세션 로드 실패:', error);
+            }
           }
           
-          // Fallback: 로컬 로그인
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // 지갑 초기화
+          get().initWallet(currentUser.id);
           
-          const user = userDatabase.find(
-            u => u.email === email && u.password === password
-          );
+          return { success: true, message: '로그인 성공' };
+        } catch (error: any) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('로그인 오류:', error);
+          }
+          return { success: false, message: error.message || '로그인 중 오류가 발생했습니다.' };
+        }
+      },
+      
+      register: async (email, password, name) => {
+        try {
+          const { csrfFetch } = await import('@/lib/csrfFetch');
           
-          if (user) {
-            const userId = user.id || btoa(email).replace(/=/g, '');
-            
+          const response = await csrfFetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, name }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            return { success: false, error: data.error || '회원가입에 실패했습니다.' };
+          }
+
+          if (data.requiresEmailVerification) {
+            return { 
+              success: true, 
+              requiresEmailVerification: true,
+              message: '이메일 인증이 필요합니다. 이메일을 확인해주세요.'
+            };
+          }
+
+          if (data.autoLogin && data.user) {
             const currentUser: User = {
-              id: userId,
-              email: user.email,
-              name: user.name,
+              id: data.user.id,
+              email: data.user.email,
+              name: data.user.name,
               credits: 100,
               subscription: 'free',
               theme: 'blue',
@@ -476,140 +477,39 @@ export const useStore = create<AppState>()(
             };
             
             set({ currentUser, isAuthenticated: true, storedFacts: [] });
+            get().initWallet(currentUser.id);
             
-            // 로컬 스토리지에서 데이터 로드
-            const storage = localStorage.getItem('pick-my-ai-storage');
-            if (storage) {
-              try {
-                const parsed = JSON.parse(storage);
-                const persistedState = parsed.state;
-                
-                set({
-                  selections: persistedState[`user_${userId}_selections`] || [],
-                  wallet: persistedState[`user_${userId}_wallet`] || null,
-                  hasFirstPurchase: persistedState[`user_${userId}_hasFirstPurchase`] || false,
-                  chatSessions: persistedState[`user_${userId}_chatSessions`] || [],
-                  currentSessionId: persistedState[`user_${userId}_currentSessionId`] || null,
-                  storedFacts: persistedState[`user_${userId}_storedFacts`] || [],
-                });
-              } catch (error) {
-                console.error('Failed to load user data:', error);
-              }
-            }
-            
-            const state = get();
-            if (!state.wallet) {
-              get().initWallet(currentUser.id);
-            }
-            
-            const receivedGifts = state.allGifts.filter(gift => 
-              gift.to.toLowerCase() === user.email.toLowerCase()
-            );
-            const sentGifts = state.allGifts.filter(gift => 
-              gift.from.toLowerCase() === user.email.toLowerCase()
-            );
-            
-            set({ 
-              receivedGifts,
-              sentGifts 
-            });
-            
-            return { success: true, message: '로그인 성공' };
+            return { success: true, autoLogin: true };
           }
-          
-          return { success: false, message: '이메일 또는 비밀번호가 올바르지 않습니다.' };
-        } catch (error) {
+
+          return { 
+            success: true, 
+            message: '회원가입이 완료되었습니다. 로그인해주세요.'
+          };
+        } catch (error: any) {
           if (process.env.NODE_ENV !== 'production') {
-            console.error('로그인 오류:', error);
+            console.error('회원가입 오류:', error);
           }
-          return { success: false, message: '로그인 중 오류가 발생했습니다.' };
+          return { 
+            success: false, 
+            error: error.message || '회원가입 중 오류가 발생했습니다.' 
+          };
         }
-      },
-      
-      register: async (email, password, name) => {
-        // Supabase 사용 시도
-        try {
-          const { AuthService } = await import('@/lib/auth');
-          const result = await AuthService.register(email, password, name);
-          
-          if (result.success) {
-            return { success: true };
-          } else {
-            // 에러 메시지를 포함한 객체 반환
-            return { success: false, error: result.error };
-          }
-        } catch (error) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('Supabase not configured, using local registration');
-          }
-        }
-        
-        // Fallback: 로컬 등록
-        // 이메일 형식 검증
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-          return { success: false, error: '올바른 이메일 형식이 아닙니다.', message: '올바른 이메일 형식이 아닙니다.' };
-        }
-        
-        // 비밀번호 길이 검증
-        if (password.length < 8) {
-          return { success: false, error: '비밀번호는 최소 8자 이상이어야 합니다.', message: '비밀번호는 최소 8자 이상이어야 합니다.' };
-        }
-        
-        // 이름 검증
-        if (name.length < 2) {
-          return { success: false, error: '이름은 최소 2자 이상이어야 합니다.', message: '이름은 최소 2자 이상이어야 합니다.' };
-        }
-        
-        const existingUser = userDatabase.find(u => u.email === email);
-        
-        if (existingUser) {
-          return { success: false, error: '이미 사용 중인 이메일입니다.', message: '이미 사용 중인 이메일입니다.' };
-        }
-        
-        // 고유 ID 생성
-        const userId = `local_${btoa(email).substring(0, 16)}`;
-        userDatabase.push({ email, password, name, id: userId });
-        
-        // 가입 축하 PMC 300원 지급
-        const newUser: User = {
-          id: userId,
-          email,
-          name,
-          credits: 100,
-          subscription: 'free',
-          theme: 'blue',
-          createdAt: new Date(),
-        };
-        
-        set({ currentUser: newUser, isAuthenticated: true, storedFacts: [] });
-        
-        // 지갑 초기화
-        get().initWallet(userId);
-        
-        // PMC 300원 지급
-        setTimeout(() => {
-          const earnPMC = get().earnPMC;
-          if (earnPMC) {
-            earnPMC(300, '가입 축하 무료 지급', `welcome_${userId}`);
-          }
-        }, 100);
-        
-        return { success: true };
       },
       
       logout: async () => {
-        // Supabase 로그아웃
         try {
-          const { AuthService } = await import('@/lib/auth');
-          await AuthService.logout();
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+          });
         } catch (error) {
           if (process.env.NODE_ENV !== 'production') {
-            console.log('Local logout');
+            console.error('로그아웃 API 호출 실패:', error);
           }
         }
         
-        // 사용자 인증 정보만 초기화 (데이터는 로컬 스토리지에 저장되어 있음)
+        // 사용자 인증 정보 초기화
         set({ 
           currentUser: null, 
           isAuthenticated: false,
@@ -1016,9 +916,6 @@ export const useStore = create<AppState>()(
       
       // 관리자 관련 액션
       setAdminMode: (isAdmin) => set({ isAdmin }),
-      setCurrentUser: (user: User | null) => {
-        set({ currentUser: user });
-      },
       
       setTheme: (theme: ThemeColor) => {
         set(state => {
@@ -1773,47 +1670,6 @@ export const useStore = create<AppState>()(
         set({ customDesignTheme: { theme: null, elementColors: {} } });
       },
       
-      // TEMP_ENABLED_START - 임시 자동 로그인 (복구 시 이 섹션 주석 처리)
-      tempAutoLogin: () => {
-        const tempUser: User = {
-          id: 'temp-user-001',
-          email: 'temp@pickmyai.com',
-          name: '임시 사용자',
-          credits: 999999,
-          subscription: 'max',
-          theme: 'blue',
-          createdAt: new Date(),
-        };
-        
-        set({ 
-          currentUser: tempUser, 
-          isAuthenticated: true,
-          isAdmin: true,
-          userPlan: 'max',
-          storedFacts: [],
-        });
-        
-        // 지갑 초기화
-        const state = get();
-        if (!state.wallet) {
-          get().initWallet(tempUser.id);
-        }
-        
-        // 가입 축하 PMC 300원 지급 (최초 1회만)
-        const hasWelcomePMC = state.pmcBalance.history.some(
-          tx => tx.orderId === `welcome_${tempUser.id}`
-        );
-        
-        if (!hasWelcomePMC) {
-          setTimeout(() => {
-            const earnPMC = get().earnPMC;
-            if (earnPMC) {
-              earnPMC(300, '가입 축하 무료 지급', `welcome_${tempUser.id}`);
-            }
-          }, 100);
-        }
-      },
-      // TEMP_ENABLED_END
     }),
     {
       name: 'pick-my-ai-storage',

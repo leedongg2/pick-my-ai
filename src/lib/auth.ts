@@ -1,12 +1,13 @@
 import { supabase } from './supabase';
 import type { User } from '@/types';
 import { PasswordValidator } from './passwordValidator';
+import jwt from 'jsonwebtoken';
 
 export class AuthService {
   /**
    * 회원가입
    */
-  static async register(email: string, password: string, name: string): Promise<{ success: boolean; error?: string; requiresEmailVerification?: boolean }> {
+  static async register(email: string, password: string, name: string): Promise<{ success: boolean; error?: string; requiresEmailVerification?: boolean; autoLogin?: boolean }> {
     try {
       // Supabase가 설정되어 있는 경우
       if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
@@ -81,9 +82,14 @@ export class AuthService {
         }
 
         // Supabase가 이미 존재하는 사용자에게 확인 이메일을 보내는 경우 체크
-        // identities가 비어있으면 이미 존재하는 사용자
+        // identities가 비어있으면 이미 존재하는 사용자 - 자동 로그인 시도
         if (authData.user.identities && authData.user.identities.length === 0) {
-          return { success: false, error: '이미 사용 중인 이메일입니다.' };
+          // 이미 가입된 계정이므로 로그인 시도
+          const loginResult = await this.login(email, password);
+          if (loginResult.success) {
+            return { success: true, autoLogin: true };
+          }
+          return { success: false, error: '이미 사용 중인 이메일입니다. 로그인을 시도해주세요.' };
         }
 
         // public.users 테이블에 사용자 정보 저장 (Trigger 대신 직접 처리)
@@ -386,6 +392,27 @@ export class AuthService {
     } catch (error: any) {
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * 세션 토큰 생성 (JWT)
+   */
+  static async createSessionToken(userId: string, email: string, name: string): Promise<string> {
+    const payload = {
+      userId,
+      email,
+      name,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7일
+    };
+    
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('JWT_SECRET이 설정되지 않았습니다.');
+    }
+    
+    const token = jwt.sign(payload, secret);
+    return token;
   }
 }
 

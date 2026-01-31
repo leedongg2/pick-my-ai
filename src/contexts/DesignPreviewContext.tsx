@@ -25,14 +25,14 @@ export const DesignPreviewProvider: React.FC<DesignPreviewProviderProps> = ({
   isPreviewMode = false,
   onElementClick,
 }) => {
-  const { isAuthenticated, tempAutoLogin, initWallet, wallet } = useStore();
+  const { isAuthenticated, initWallet, wallet } = useStore();
 
-  // 미리보기 모드에서는 강제로 로그인 상태 보장
+  // 미리보기 모드에서는 인증 필요 (tempAutoLogin 제거됨)
   useEffect(() => {
     if (isPreviewMode && !isAuthenticated) {
-      tempAutoLogin();
+      console.warn('미리보기 모드는 로그인이 필요합니다.');
     }
-  }, [isPreviewMode, isAuthenticated, tempAutoLogin]);
+  }, [isPreviewMode, isAuthenticated]);
 
   // 지갑 초기화 확인
   useEffect(() => {

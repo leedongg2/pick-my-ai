@@ -1,31 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { verifySession } from '@/lib/apiAuth';
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 인증 토큰입니다.' }, { status: 401 });
-    }
+    
+    const userId = sessionResult.userId;
 
     const { data: wallet, error: walletError } = await supabase
       .from('user_wallets')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     if (walletError) {
       if (walletError.code === 'PGRST116') {
         const { data: newWallet, error: createError } = await supabase
           .from('user_wallets')
-          .insert({ user_id: user.id, credits: {} })
+          .insert({ user_id: userId, credits: {} })
           .select()
           .single();
 
@@ -49,17 +46,13 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 인증 토큰입니다.' }, { status: 401 });
-    }
+    
+    const userId = sessionResult.userId;
 
     const { credits, type, description } = await request.json();
 
@@ -70,7 +63,7 @@ export async function POST(request: NextRequest) {
     const { data: currentWallet, error: fetchError } = await supabase
       .from('user_wallets')
       .select('credits')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
 
     if (fetchError) {
@@ -93,7 +86,7 @@ export async function POST(request: NextRequest) {
     const { data: updatedWallet, error: updateError } = await supabase
       .from('user_wallets')
       .update({ credits: newCredits })
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .select()
       .single();
 
@@ -104,7 +97,7 @@ export async function POST(request: NextRequest) {
     const { error: txError } = await supabase
       .from('transactions')
       .insert({
-        user_id: user.id,
+        user_id: userId,
         type: type || 'purchase',
         credits: credits,
         description: description || '크레딧 변경',
@@ -125,17 +118,13 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const sessionResult = await verifySession(request);
+    
+    if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
-
-    const token = authHeader.substring(7);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: '유효하지 않은 인증 토큰입니다.' }, { status: 401 });
-    }
+    
+    const userId = sessionResult.userId;
 
     const { credits } = await request.json();
 
@@ -146,7 +135,7 @@ export async function PATCH(request: NextRequest) {
     const { data: updatedWallet, error: updateError } = await supabase
       .from('user_wallets')
       .update({ credits })
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .select()
       .single();
 

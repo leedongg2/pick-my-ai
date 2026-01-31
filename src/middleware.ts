@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { checkIPSecurity, recordIPActivity, validateRequestHeaders, securityLog } from '@/lib/security';
 import { getClientIp } from '@/lib/rateLimit';
+import jwt from 'jsonwebtoken';
+
+// JWT 알고리즘 명시 (none 알고리즘 공격 방지)
+const JWT_ALGORITHM = 'HS256';
 
 // CSRF 토큰 생성
 function generateCsrfToken(): string {
@@ -13,6 +17,44 @@ function generateCsrfToken(): string {
 }
 
 export function middleware(request: NextRequest) {
+  // 보호된 경로 정의
+  const protectedPaths = ['/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
+  const isProtectedPath = protectedPaths.some(path => request.nextUrl.pathname.startsWith(path));
+  
+  // 보호된 경로에 대한 세션 검증
+  if (isProtectedPath) {
+    const sessionToken = request.cookies.get('session')?.value;
+    
+    if (!sessionToken) {
+      const loginUrl = new URL('/login', request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+    
+    try {
+      const secret = process.env.JWT_SECRET;
+      if (!secret || secret.length < 32) {
+        // JWT_SECRET이 없거나 너무 짧으면 로그인 페이지로
+        const loginUrl = new URL('/login', request.url);
+        return NextResponse.redirect(loginUrl);
+      }
+      
+      // 알고리즘 명시적 지정 (none 알고리즘 공격 방지)
+      const decoded = jwt.verify(sessionToken, secret, {
+        algorithms: [JWT_ALGORITHM],
+      }) as { exp: number; jti?: string };
+      
+      // 만료 확인 (jwt.verify가 자동으로 하지만 이중 검증)
+      if (decoded.exp < Math.floor(Date.now() / 1000)) {
+        const loginUrl = new URL('/login', request.url);
+        return NextResponse.redirect(loginUrl);
+      }
+    } catch (error) {
+      // 모든 JWT 에러는 로그인 페이지로 리다이렉트
+      const loginUrl = new URL('/login', request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+  
   // IP 보안 체크
   const clientIp = getClientIp(request);
   const ipCheck = checkIPSecurity(clientIp);
@@ -63,10 +105,33 @@ export function middleware(request: NextRequest) {
       );
 
       if (!isPublicEndpoint) {
-        // CSRF 토큰 검증
-        if (!csrfCookie || !csrfHeader || csrfCookie.value !== csrfHeader) {
+        // CSRF 토큰 검증 (타이밍 안전한 비교)
+        if (!csrfCookie || !csrfHeader) {
           return NextResponse.json(
-            { error: 'CSRF 토큰이 유효하지 않습니다.' },
+            { error: '요청이 유효하지 않습니다.' },
+            { status: 403 }
+          );
+        }
+        
+        // 타이밍 공격 방지를 위한 상수 시간 비교
+        const cookieValue = csrfCookie.value;
+        const headerValue = csrfHeader;
+        
+        if (cookieValue.length !== headerValue.length) {
+          return NextResponse.json(
+            { error: '요청이 유효하지 않습니다.' },
+            { status: 403 }
+          );
+        }
+        
+        let mismatch = 0;
+        for (let i = 0; i < cookieValue.length; i++) {
+          mismatch |= cookieValue.charCodeAt(i) ^ headerValue.charCodeAt(i);
+        }
+        
+        if (mismatch !== 0) {
+          return NextResponse.json(
+            { error: '요청이 유효하지 않습니다.' },
             { status: 403 }
           );
         }
@@ -84,12 +149,15 @@ export function middleware(request: NextRequest) {
     });
   }
 
-  // 보안 헤더 추가 (next.config.js와 중복되지만 추가 보호)
+  // 보안 헤더 추가 (강화된 보안 정책)
   response.headers.set('X-Content-Type-Options', 'nosniff');
-  response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+  response.headers.set('X-Frame-Options', 'DENY'); // SAMEORIGIN -> DENY로 강화
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  response.headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  response.headers.set('X-DNS-Prefetch-Control', 'off');
+  response.headers.set('X-Download-Options', 'noopen');
+  response.headers.set('X-Permitted-Cross-Domain-Policies', 'none');
   
   // Content Security Policy 강화
   if (process.env.NODE_ENV === 'production') {
