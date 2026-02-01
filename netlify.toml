@@ -2,15 +2,11 @@
   command = "npm ci && npm run build"
   publish = ".next"
 
-
 [build.environment]
   NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps --include=dev"
 
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-
-# 캐싱 설정 (성능 최적화)
+# 캐싱 (정적 리소스만)
 [[headers]]
   for = "/_next/static/*"
   [headers.values]
@@ -21,27 +17,7 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
-[[headers]]
-  for = "/*.js"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.css"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.html"
-  [headers.values]
-    Cache-Control = "public, max-age=0, must-revalidate"
-
-[[headers]]
-  for = "/api/*"
-  [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate"
-
-# 리다이렉트 설정
+# 정상 리다이렉트만 유지
 [[redirects]]
   from = "/home"
   to = "/"
@@ -52,13 +28,6 @@
   to = "/"
   status = 301
 
-# SPA 폴백 (404 처리)
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-# 환경 변수 (프로덕션)
 [context.production.environment]
   NODE_ENV = "production"
   NEXT_PUBLIC_STREAMING_DRAFT_V2 = "true"
