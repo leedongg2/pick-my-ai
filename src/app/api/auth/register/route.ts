@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
       const user = await AuthService.getCurrentUser();
       
       if (user) {
-        const sessionToken = createSecureToken({
+        const sessionToken = await createSecureToken({
           userId: user.id,
           email: user.email,
           name: user.name,

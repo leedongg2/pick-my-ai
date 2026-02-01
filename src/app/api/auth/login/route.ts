@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // JWT 세션 토큰 생성 (보안 강화)
-    const sessionToken = createSecureToken({
+    const sessionToken = await createSecureToken({
       userId: result.user.id,
       email: result.user.email,
       name: result.user.name,
