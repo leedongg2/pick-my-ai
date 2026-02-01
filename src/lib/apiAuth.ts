@@ -1,7 +1,6 @@
-export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from './supabase';
-import jwt from 'jsonwebtoken';
+import { jwtVerify } from 'jose';
 
 /**
  * API 요청 인증 미들웨어
@@ -12,7 +11,6 @@ export async function verifyAuth(request: NextRequest): Promise<{
   error?: string 
 }> {
   try {
-    // Authorization 헤더에서 토큰 추출
     const authHeader = request.headers.get('authorization');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -21,7 +19,6 @@ export async function verifyAuth(request: NextRequest): Promise<{
 
     const token = authHeader.substring(7);
 
-    // Supabase가 설정된 경우
     if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
       const { data: { user }, error } = await supabase.auth.getUser(token);
 
@@ -32,7 +29,6 @@ export async function verifyAuth(request: NextRequest): Promise<{
       return { authenticated: true, userId: user.id };
     }
 
-    // Supabase가 없는 경우 기본 검증
     return { authenticated: true };
   } catch (error) {
     return { authenticated: false, error: '인증 처리 중 오류가 발생했습니다.' };
@@ -110,7 +106,7 @@ export async function verifySession(request: NextRequest): Promise<{
 }> {
   try {
     const sessionToken = request.cookies.get('session')?.value;
-    
+
     if (!sessionToken) {
       return { authenticated: false, error: '세션 토큰이 없습니다.' };
     }
@@ -120,25 +116,22 @@ export async function verifySession(request: NextRequest): Promise<{
       return { authenticated: false, error: 'JWT_SECRET이 설정되지 않았습니다.' };
     }
 
-    const decoded = jwt.verify(sessionToken, secret) as { 
-      userId: string; 
-      email: string; 
-      name: string; 
-      iat: number; 
-      exp: number; 
-    };
+    const key = new TextEncoder().encode(secret);
 
-    if (decoded.exp < Math.floor(Date.now() / 1000)) {
-      return { authenticated: false, error: '세션이 만료되었습니다.' };
-    }
+    const { payload } = await jwtVerify(sessionToken, key, {
+      algorithms: ['HS256'],
+    });
 
-    return { 
-      authenticated: true, 
-      userId: decoded.userId,
-      email: decoded.email,
-      name: decoded.name
+    return {
+      authenticated: true,
+      userId: payload.userId as string,
+      email: payload.email as string,
+      name: payload.name as string,
     };
   } catch (error: any) {
-    return { authenticated: false, error: error.message || '세션 검증 실패' };
+    return {
+      authenticated: false,
+      error: error?.message || '세션 검증 실패',
+    };
   }
 }
