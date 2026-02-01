@@ -2,10 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { checkIPSecurity, recordIPActivity, validateRequestHeaders, securityLog } from '@/lib/security';
 import { getClientIp } from '@/lib/rateLimit';
-import jwt from 'jsonwebtoken';
-
-// JWT 알고리즘 명시 (none 알고리즘 공격 방지)
-const JWT_ALGORITHM = 'HS256';
+import { jwtVerify } from 'jose';
 
 // CSRF 토큰 생성
 function generateCsrfToken(): string {
@@ -16,7 +13,7 @@ function generateCsrfToken(): string {
   return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   // 보호된 경로 정의
   const protectedPaths = ['/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
   const isProtectedPath = protectedPaths.some(path => request.nextUrl.pathname.startsWith(path));
@@ -33,21 +30,14 @@ export function middleware(request: NextRequest) {
     try {
       const secret = process.env.JWT_SECRET;
       if (!secret || secret.length < 32) {
-        // JWT_SECRET이 없거나 너무 짧으면 로그인 페이지로
         const loginUrl = new URL('/login', request.url);
         return NextResponse.redirect(loginUrl);
       }
       
-      // 알고리즘 명시적 지정 (none 알고리즘 공격 방지)
-      const decoded = jwt.verify(sessionToken, secret, {
-        algorithms: [JWT_ALGORITHM],
-      }) as { exp: number; jti?: string };
-      
-      // 만료 확인 (jwt.verify가 자동으로 하지만 이중 검증)
-      if (decoded.exp < Math.floor(Date.now() / 1000)) {
-        const loginUrl = new URL('/login', request.url);
-        return NextResponse.redirect(loginUrl);
-      }
+      const key = new TextEncoder().encode(secret);
+      await jwtVerify(sessionToken, key, {
+        algorithms: ['HS256'],
+      });
     } catch (error) {
       // 모든 JWT 에러는 로그인 페이지로 리다이렉트
       const loginUrl = new URL('/login', request.url);

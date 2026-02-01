@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import jwt from 'jsonwebtoken';
+import { SignJWT, jwtVerify } from 'jose';
 import crypto from 'crypto';
 
 /**
@@ -8,9 +8,6 @@ import crypto from 'crypto';
 
 // 세션 블랙리스트 (프로덕션에서는 Redis 사용 권장)
 const sessionBlacklist = new Set<string>();
-
-// JWT 알고리즘 명시 (none 알고리즘 공격 방지)
-const JWT_ALGORITHM = 'HS256';
 
 /**
  * 안전한 문자열 비교 (타이밍 공격 방지)
@@ -105,11 +102,11 @@ export function isValidName(name: unknown): name is string {
 /**
  * 보안 강화된 JWT 생성
  */
-export function createSecureToken(payload: {
+export async function createSecureToken(payload: {
   userId: string;
   email: string;
   name: string;
-}): string {
+}): Promise<string> {
   const secret = process.env.JWT_SECRET;
   
   if (!secret) {
@@ -124,24 +121,24 @@ export function createSecureToken(payload: {
   // jti (JWT ID) 추가로 토큰 고유 식별
   const jti = crypto.randomBytes(16).toString('hex');
   
-  return jwt.sign(
-    {
-      ...payload,
-      jti,
-      iat: Math.floor(Date.now() / 1000),
-    },
-    secret,
-    {
-      algorithm: JWT_ALGORITHM,
-      expiresIn: '7d',
-    }
-  );
+  const key = new TextEncoder().encode(secret);
+  
+  const token = await new SignJWT({
+    ...payload,
+    jti,
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('7d')
+    .sign(key);
+  
+  return token;
 }
 
 /**
  * 보안 강화된 JWT 검증
  */
-export function verifySecureToken(token: string): {
+export async function verifySecureToken(token: string): Promise<{
   valid: boolean;
   payload?: {
     userId: string;
@@ -150,7 +147,7 @@ export function verifySecureToken(token: string): {
     jti: string;
   };
   error?: string;
-} {
+}> {
   const secret = process.env.JWT_SECRET;
   
   if (!secret) {
@@ -158,39 +155,33 @@ export function verifySecureToken(token: string): {
   }
   
   try {
-    const decoded = jwt.verify(token, secret, {
-      algorithms: [JWT_ALGORITHM], // 알고리즘 명시적 제한
-    }) as {
-      userId: string;
-      email: string;
-      name: string;
-      jti: string;
-      iat: number;
-      exp: number;
-    };
+    const key = new TextEncoder().encode(secret);
+    
+    const { payload } = await jwtVerify(token, key, {
+      algorithms: ['HS256'],
+    });
+    
+    const jti = payload.jti as string;
     
     // 블랙리스트 확인
-    if (decoded.jti && sessionBlacklist.has(decoded.jti)) {
+    if (jti && sessionBlacklist.has(jti)) {
       return { valid: false, error: '무효화된 세션입니다.' };
     }
     
     return {
       valid: true,
       payload: {
-        userId: decoded.userId,
-        email: decoded.email,
-        name: decoded.name,
-        jti: decoded.jti,
+        userId: payload.userId as string,
+        email: payload.email as string,
+        name: payload.name as string,
+        jti,
       },
     };
   } catch (error: any) {
-    if (error.name === 'TokenExpiredError') {
+    if (error.code === 'ERR_JWT_EXPIRED') {
       return { valid: false, error: '세션이 만료되었습니다.' };
     }
-    if (error.name === 'JsonWebTokenError') {
-      return { valid: false, error: '유효하지 않은 세션입니다.' };
-    }
-    return { valid: false, error: '인증 오류가 발생했습니다.' };
+    return { valid: false, error: '유효하지 않은 세션입니다.' };
   }
 }
 

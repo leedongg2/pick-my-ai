@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type { User } from '@/types';
 import { PasswordValidator } from './passwordValidator';
-import jwt from 'jsonwebtoken';
+import { SignJWT } from 'jose';
 import { getBaseUrl } from './redirect';
 
 export class AuthService {
@@ -394,20 +394,19 @@ export class AuthService {
    * 세션 토큰 생성 (JWT)
    */
   static async createSessionToken(userId: string, email: string, name: string): Promise<string> {
-    const payload = {
-      userId,
-      email,
-      name,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7일
-    };
-    
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       throw new Error('JWT_SECRET이 설정되지 않았습니다.');
     }
     
-    const token = jwt.sign(payload, secret);
+    const key = new TextEncoder().encode(secret);
+    
+    const token = await new SignJWT({ userId, email, name })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('7d')
+      .sign(key);
+    
     return token;
   }
 }
