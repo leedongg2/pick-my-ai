@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 보안 강화된 토큰 검증
-    const result = verifySecureToken(sessionToken);
+    const result = await verifySecureToken(sessionToken);
 
     if (!result.valid || !result.payload) {
       // 에러 상세 정보 숨김 (정보 노출 방지)

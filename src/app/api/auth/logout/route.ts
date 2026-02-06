@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
     // 현재 세션 토큰에서 jti 추출하여 블랙리스트에 추가
     const sessionToken = request.cookies.get('session')?.value;
     if (sessionToken) {
-      const result = verifySecureToken(sessionToken);
+      const result = await verifySecureToken(sessionToken);
       if (result.valid && result.payload?.jti) {
         // 세션 무효화 (토큰 재사용 방지)
         invalidateSession(result.payload.jti);
