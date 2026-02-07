@@ -225,37 +225,12 @@ export class AuthService {
   /**
    * 소셜 로그인 (OAuth)
    */
-  static async signInWithOAuth(provider: 'google' | 'github' | 'naver'): Promise<{ success: boolean; error?: string }> {
+  static async signInWithOAuth(provider: 'google' | 'github'): Promise<{ success: boolean; error?: string }> {
     try {
       if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
         return { success: false, error: 'Supabase가 설정되지 않았습니다.' };
       }
 
-      // Naver는 Supabase에서 기본 지원하지 않으므로 직접 처리
-      if (provider === 'naver') {
-        // Naver OAuth 직접 구현
-        const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-        
-        // 환경 변수 우선 사용
-        const redirectUri = `${getBaseUrl()}/api/auth/naver/callback`;
-        const state = Math.random().toString(36).substring(7);
-        
-        if (!clientId) {
-          return { success: false, error: 'Naver Client ID가 설정되지 않았습니다.' };
-        }
-
-        // 세션 스토리지에 state 저장
-        sessionStorage.setItem('naver_oauth_state', state);
-        
-        // Naver 로그인 페이지로 리다이렉트
-        const naverAuthUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
-        window.location.href = naverAuthUrl;
-        
-        return { success: true };
-      }
-
-      // Google, GitHub는 Supabase 기본 지원
-      // 환경 변수 우선 사용
       const redirectUrl = getBaseUrl();
       
       const { data, error } = await supabase.auth.signInWithOAuth({

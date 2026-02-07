@@ -43,68 +43,25 @@ export default function DesignEditorPage() {
   // 실시간 미리보기는 로컬 state만 사용
 
   const handleElementClick = useCallback((element: DesignElement) => {
-    const resolvedScope: 'element' | 'global' =
-      element.scope ?? (element.type === 'button' ? 'element' : 'global');
-
-    // 현재 적용된 색상 가져오기
-    let currentColor = element.currentColor;
-    
-    if (resolvedScope === 'element') {
-      // 개별 요소: elementColors에서 가져오기
-      currentColor = elementColors[element.id] || element.currentColor;
-    } else {
-      // 전역 테마: theme에서 가져오기
-      const elementId = element.id;
-      if (elementId.includes('header') && !elementId.includes('text') && !elementId.includes('title')) {
-        currentColor = theme.headerColor;
-      } else if (elementId.includes('button') || elementId.includes('cta-section') || elementId.includes('badge')) {
-        currentColor = theme.buttonColor;
-      } else if (elementId.includes('card')) {
-        currentColor = theme.cardColor;
-      } else if (elementId.includes('text') || elementId.includes('title') || elementId.includes('description')) {
-        currentColor = theme.textColor;
-      } else if (elementId === 'background' || elementId.includes('background')) {
-        currentColor = theme.backgroundColor;
-      }
-    }
+    // 모든 요소를 개별(element) scope로 처리하여 세트 변경 방지
+    const currentColor = elementColors[element.id] || element.currentColor;
 
     setSelectedElement({
       ...element,
-      scope: resolvedScope,
+      scope: 'element',
       currentColor,
     });
-  }, [elementColors, theme]);
+  }, [elementColors]);
 
-  // 실시간 미리보기 - 바로 상태 업데이트
+  // 실시간 미리보기 - 개별 요소만 업데이트 (세트 변경 방지)
   const handleColorPreview = useCallback((elementId: string, color: string) => {
     if (!selectedElement) return;
 
-    if (selectedElement.scope === 'element') {
-      // 개별 요소 색상 즉시 업데이트
-      setElementColors(prev => ({
-        ...prev,
-        [elementId]: color,
-      }));
-    } else {
-      // 전역 테마 색상 즉시 업데이트
-      setTheme(prev => {
-        const newTheme = { ...prev };
-
-        if (elementId.includes('header') && !elementId.includes('text') && !elementId.includes('title')) {
-          newTheme.headerColor = color;
-        } else if (elementId.includes('button') || elementId.includes('cta-section') || elementId.includes('badge')) {
-          newTheme.buttonColor = color;
-        } else if (elementId.includes('card')) {
-          newTheme.cardColor = color;
-        } else if (elementId.includes('text') || elementId.includes('title') || elementId.includes('description')) {
-          newTheme.textColor = color;
-        } else if (elementId === 'background' || elementId.includes('background')) {
-          newTheme.backgroundColor = color;
-        }
-
-        return newTheme;
-      });
-    }
+    // 항상 개별 요소 색상만 업데이트
+    setElementColors(prev => ({
+      ...prev,
+      [elementId]: color,
+    }));
 
     // 선택된 요소의 currentColor도 업데이트
     setSelectedElement(prev => prev ? { ...prev, currentColor: color } : null);

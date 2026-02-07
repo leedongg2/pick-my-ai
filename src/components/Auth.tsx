@@ -1,16 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, useTransition } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Label } from '@/components/ui/Label';
-import { Sparkles, Mail, Lock, User, CheckCircle2 } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { csrfFetch } from '@/lib/csrfFetch';
-import { useAuthActions } from '@/hooks/useAuthStore';
+import { Sparkles } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
-import { safeRedirect, getBaseUrl } from '@/lib/redirect';
+import { getBaseUrl } from '@/lib/redirect';
 
 interface AuthProps {
   onSuccess?: () => void;
@@ -18,124 +14,36 @@ interface AuthProps {
 }
 
 export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) => {
-  const router = useRouter();
-  const { setCurrentUser, setIsAuthenticated } = useAuthActions();
-  
-  const [mode, setMode] = useState<'login' | 'signup'>(defaultMode);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [isPending, startTransition] = useTransition();
-  const [optimisticSuccess, setOptimisticSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // Optimistic UI - 즉시 성공 상태로 전환
-    setOptimisticSuccess(true);
-    const toastId = toast.loading(mode === 'login' ? '로그인 중...' : '회원가입 중...');
-
-    startTransition(async () => {
-      try {
-        if (mode === 'login') {
-          const response = await csrfFetch('/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
-          });
-
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || '로그인에 실패했습니다.');
-          }
-
-          setCurrentUser(data.user);
-          setIsAuthenticated(true);
-          
-          toast.success('로그인 성공!', { id: toastId });
-          
-          // 즉시 리다이렉트 (올바른 도메인)
-          if (onSuccess) {
-            onSuccess();
-          } else {
-            safeRedirect('/chat');
-          }
-        } else {
-          const response = await csrfFetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, name }),
-          });
-
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(data.error || '회원가입에 실패했습니다.');
-          }
-
-          if (data.requiresEmailVerification) {
-            toast.success('회원가입 성공! 이메일을 확인해주세요.', { 
-              id: toastId,
-              duration: 5000 
-            });
-            setOptimisticSuccess(false);
-          } else if (data.autoLogin) {
-            setCurrentUser(data.user);
-            setIsAuthenticated(true);
-            toast.success('로그인 성공!', { id: toastId });
-            
-            if (onSuccess) {
-              onSuccess();
-            } else {
-              safeRedirect('/chat');
-            }
-          } else {
-            toast.success('회원가입 성공! 로그인해주세요.', { 
-              id: toastId,
-              duration: 4000 
-            });
-            setMode('login');
-            setOptimisticSuccess(false);
-          }
-        }
-      } catch (err: any) {
-        setOptimisticSuccess(false);
-        toast.error(err.message || '오류가 발생했습니다.', {
-          id: toastId,
-          duration: 4000,
-        });
-      }
-    });
-  }, [mode, email, password, name, setCurrentUser, setIsAuthenticated, onSuccess, router]);
-
-  const handleNaverLogin = useCallback(() => {
-    const clientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-    const baseUrl = getBaseUrl();
-    const redirectUri = `${baseUrl}/api/auth/naver/callback`;
-    const state = Math.random().toString(36).substring(7);
-    
-    toast.loading('네이버로 이동 중...');
-    
-    const naverAuthUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
-    
-    window.location.href = naverAuthUrl;
-  }, []);
-
-  const toggleMode = useCallback(() => {
-    setMode(mode === 'login' ? 'signup' : 'login');
-    setOptimisticSuccess(false);
-  }, [mode]);
-
-  const isLoading = isPending || optimisticSuccess;
-  
-  // 입력 검증 메모이제이션
-  const isFormValid = useMemo(() => {
-    if (mode === 'signup') {
-      return email.length > 0 && password.length >= 8 && name.length >= 2;
+  const handleGoogleLogin = useCallback(async () => {
+    if (!agreedToTerms) {
+      toast.error('이용약관 및 개인정보처리방침에 동의해주세요.');
+      return;
     }
-    return email.length > 0 && password.length > 0;
-  }, [mode, email, password, name]);
+
+    setIsLoading(true);
+
+    try {
+      const redirectUrl = getBaseUrl();
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${redirectUrl}/auth/callback`,
+        },
+      });
+
+      if (error) {
+        toast.error(error.message || '로그인에 실패했습니다.');
+        setIsLoading(false);
+      }
+    } catch (err: any) {
+      toast.error(err.message || '오류가 발생했습니다.');
+      setIsLoading(false);
+    }
+  }, [agreedToTerms]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-purple-50 to-pink-50 relative">
@@ -169,145 +77,81 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
         <Card variant="elevated" className="shadow-2xl border-2 border-white/50">
           <CardHeader>
             <h2 className="text-2xl font-bold mb-2 text-center">
-              {mode === 'login' ? '로그인' : '회원가입'}
+              로그인 / 회원가입
             </h2>
             <p className="text-sm text-gray-500 text-center">
-              {mode === 'login' ? 'AI 채팅을 시작하세요' : '새로운 계정을 만드세요'}
+              소셜 계정으로 간편하게 시작하세요
             </p>
           </CardHeader>
 
           <CardContent className="p-6">
-            {optimisticSuccess && (
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                <CheckCircle2 className="w-5 h-5 text-green-600" />
-                <p className="text-sm text-green-800 font-medium">
-                  {mode === 'login' ? '로그인 처리 중...' : '회원가입 처리 중...'}
-                </p>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {mode === 'signup' && (
-                <div className="space-y-2">
-                  <Label htmlFor="name">이름</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <Input
-                      id="name"
-                      type="text"
-                      placeholder="홍길동"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="pl-10 transition-all"
-                      required
-                      disabled={isLoading}
-                      autoComplete="name"
-                    />
-                  </div>
-                </div>
+            {/* 구글 로그인 버튼 */}
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="w-full flex items-center justify-center space-x-3 border-gray-300 hover:bg-gray-50 transition-all py-3"
+              onClick={handleGoogleLogin}
+              disabled={isLoading || !agreedToTerms}
+            >
+              {isLoading ? (
+                <span className="flex items-center justify-center space-x-2">
+                  <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-600 border-t-transparent"></span>
+                  <span className="text-gray-700">로그인 중...</span>
+                </span>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  <span className="text-gray-700 font-medium">Google로 계속하기</span>
+                </>
               )}
+            </Button>
 
-              <div className="space-y-2">
-                <Label htmlFor="email">이메일</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="example@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 transition-all"
-                    required
-                    disabled={isLoading}
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">비밀번호</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 transition-all"
-                    required
-                    disabled={isLoading}
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  />
-                </div>
-                {mode === 'signup' && (
-                  <p className="text-xs text-gray-500">
-                    8자 이상, 영문/숫자/특수문자 포함
-                  </p>
-                )}
-              </div>
-
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                className="w-full transition-all"
-                disabled={isLoading || !isFormValid}
-              >
-                {isLoading ? (
-                  <span className="flex items-center justify-center space-x-2">
-                    <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
-                    <span>{mode === 'login' ? '로그인 중...' : '가입 중...'}</span>
-                  </span>
-                ) : (
-                  mode === 'login' ? '로그인' : '회원가입'
-                )}
-              </Button>
-            </form>
-
+            {/* 이용약관 동의 체크박스 */}
             <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">또는</span>
-                </div>
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                className="w-full mt-4 bg-[#03C75A] hover:bg-[#02B350] text-white border-0 transition-all"
-                onClick={handleNaverLogin}
-                disabled={isLoading}
-              >
-                <svg className="w-5 h-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M13.3 10.5l-3.8-5.5H4v10h5.5v-5.5l3.8 5.5H19V5h-5.7z"/>
-                </svg>
-                네이버로 시작하기
-              </Button>
-            </div>
-
-            <div className="mt-6 text-center">
-              <button
-                type="button"
-                onClick={toggleMode}
-                className="text-sm text-primary-600 hover:text-primary-700 font-medium transition-colors"
-                disabled={isLoading}
-              >
-                {mode === 'login' ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
-              </button>
+              <label className="flex items-start space-x-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                />
+                <span className="text-sm text-gray-600 leading-relaxed">
+                  <a
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    이용약관
+                  </a>
+                  {' '}및{' '}
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    개인정보처리방침
+                  </a>
+                  에 동의합니다.
+                </span>
+              </label>
+              {!agreedToTerms && (
+                <p className="mt-2 text-xs text-gray-400 ml-7">
+                  서비스 이용을 위해 약관에 동의해주세요.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
-
-          <p className="text-center text-sm text-gray-500 mt-6">
-            로그인하면 <a href="#" className="text-primary-600 hover:underline">이용약관</a> 및{' '}
-            <a href="#" className="text-primary-600 hover:underline">개인정보처리방침</a>에 동의하는 것으로 간주됩니다.
-          </p>
         </div>
       </div>
     </div>
