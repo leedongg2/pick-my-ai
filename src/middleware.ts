@@ -89,7 +89,7 @@ export async function middleware(request: NextRequest) {
     // API 라우트에 대한 CSRF 검증 (일부 공개 엔드포인트 제외)
     if (request.nextUrl.pathname.startsWith('/api/')) {
       // 공개 엔드포인트는 CSRF 검증 제외
-      const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/chat']; // TODO: /api/chat도 CSRF 검증을 통일하는 것이 이상적이지만 현재는 예외 유지
+      const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/auth/social-session', '/api/chat']; // TODO: /api/chat도 CSRF 검증을 통일하는 것이 이상적이지만 현재는 예외 유지
       const isPublicEndpoint = publicEndpoints.some(endpoint => 
         request.nextUrl.pathname.startsWith(endpoint)
       );

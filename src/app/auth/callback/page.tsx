@@ -3,192 +3,128 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useStore } from '@/store';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { safeRedirect, redirectToLogin, redirectToChat } from '@/lib/redirect';
+import { redirectToLogin, redirectToChat } from '@/lib/redirect';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
 
-  const handleEmailVerification = async () => {
+  /**
+   * Supabase 세션 확인 후 커스텀 JWT 세션 쿠키를 설정하는 핵심 함수
+   */
+  const createSessionCookie = async (accessToken: string): Promise<boolean> => {
     try {
-      // 세션 확인
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const response = await fetch('/api/auth/social-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ access_token: accessToken }),
+      });
 
-      if (error) {
-        console.error('Session error:', error);
-        redirectToLogin('verification_failed');
-        return;
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.error('Session cookie creation failed:', data);
+        return false;
       }
 
-      if (session) {
-        // 인증 성공
-        setTimeout(() => {
-          safeRedirect('/login?verified=true');
-        }, 2000);
-      } else {
-        redirectToLogin();
-      }
+      return true;
     } catch (error) {
-      console.error('Verification error:', error);
-      redirectToLogin('verification_failed');
+      console.error('Session cookie creation error:', error);
+      return false;
     }
   };
 
-  const handleSession = async () => {
+  const handleCallback = async () => {
     try {
-      // 잠시 대기하여 토큰이 설정될 시간을 확보
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const { data: { session }, error } = await supabase.auth.getSession();
+      console.log('Auth callback - URL:', window.location.href);
 
-      if (error) {
-        console.error('Session error:', error);
+      // 1) PKCE 방식: URL query string에서 code 파라미터 확인
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+
+      if (code) {
+        console.log('PKCE code found, exchanging for session...');
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+        if (error) {
+          console.error('Code exchange failed:', error);
+          redirectToLogin('code_exchange_failed');
+          return;
+        }
+
+        if (data.session) {
+          console.log('Code exchange successful for:', data.session.user.email);
+          const cookieSet = await createSessionCookie(data.session.access_token);
+          if (cookieSet) {
+            toast.success('로그인 성공!');
+            redirectToChat();
+            return;
+          }
+        }
+
         redirectToLogin('session_failed');
         return;
       }
 
-      if (session?.user) {
-        console.log('Session found for user:', session.user.email);
-        // 사용자 정보 가져오기 또는 생성
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
+      // 2) Implicit 방식: URL hash fragment에서 access_token 확인
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const hashAccessToken = hashParams.get('access_token');
+      const type = hashParams.get('type');
 
-        if (userError || !userData) {
-          console.log('Creating new user for:', session.user.email);
-          // 소셜 로그인 첫 사용 시 users 테이블에 사용자 정보 생성
-          const userName = session.user.user_metadata?.full_name || 
-                          session.user.user_metadata?.name || 
-                          session.user.email?.split('@')[0] || 
-                          'User';
+      console.log('Hash params:', { hasAccessToken: !!hashAccessToken, type });
 
-          const { data: newUser, error: insertError } = await supabase
-            .from('users')
-            .insert({
-              id: session.user.id,
-              email: session.user.email!,
-              name: userName,
-            })
-            .select()
-            .single();
+      if (hashAccessToken) {
+        // hash에 토큰이 있으면 Supabase가 자동으로 세션 설정
+        // 잠시 대기 후 세션 확인
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-          if (insertError) {
-            console.error('사용자 정보 생성 실패:', insertError);
-            toast.error('사용자 정보 생성에 실패했습니다.');
-            redirectToLogin('user_creation_failed');
-            return;
-          } else {
-            console.log('User created successfully:', newUser);
-            // 지갑도 생성
-            const { error: walletError } = await supabase
-              .from('user_wallets')
-              .insert({
-                user_id: session.user.id,
-                credits: {},
-              });
-              
-            if (walletError) {
-              console.error('지갑 생성 실패:', walletError);
-            } else {
-              console.log('Wallet created successfully');
-            }
-          }
+        const { data: { session }, error } = await supabase.auth.getSession();
 
-          // Zustand store 업데이트
-          if (newUser) {
-            useStore.setState({
-              currentUser: {
-                id: newUser.id,
-                email: newUser.email,
-                name: newUser.name,
-                createdAt: new Date(newUser.created_at),
-              },
-              isAuthenticated: true,
-            });
-            
-            // 지갑 초기화
-            useStore.getState().initWallet(newUser.id);
-          }
-        } else {
-          // 기존 사용자 - Zustand store 업데이트
-          useStore.setState({
-            currentUser: {
-              id: userData.id,
-              email: userData.email,
-              name: userData.name,
-              createdAt: new Date(userData.created_at),
-            },
-            isAuthenticated: true,
-          });
-          
-          // 지갑 로드
-          try {
-            const walletResponse = await fetch('/api/wallet', {
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`
-              }
-            });
-            
-            if (walletResponse.ok) {
-              const { wallet } = await walletResponse.json();
-              useStore.setState({
-                wallet: {
-                  userId: userData.id,
-                  credits: wallet.credits || {},
-                  transactions: []
-                }
-              });
-            } else {
-              useStore.getState().initWallet(userData.id);
-            }
-          } catch (error) {
-            console.error('지갑 로드 실패:', error);
-            useStore.getState().initWallet(userData.id);
-          }
+        if (error || !session) {
+          console.error('Session not found after hash token:', error);
+          redirectToLogin('session_failed');
+          return;
         }
 
-        toast.success('로그인 성공!');
-        redirectToChat();
-      } else {
-        console.log('No session found, redirecting to login');
-        redirectToLogin('no_session');
+        console.log('Session found for:', session.user.email);
+        const cookieSet = await createSessionCookie(session.access_token);
+        if (cookieSet) {
+          toast.success('로그인 성공!');
+          redirectToChat();
+          return;
+        }
+
+        redirectToLogin('cookie_failed');
+        return;
       }
+
+      // 3) 아무 토큰도 없는 경우 - 마지막으로 기존 세션 확인
+      console.log('No code or token found, checking existing session...');
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        console.log('Existing session found for:', session.user.email);
+        const cookieSet = await createSessionCookie(session.access_token);
+        if (cookieSet) {
+          toast.success('로그인 성공!');
+          redirectToChat();
+          return;
+        }
+      }
+
+      console.log('No session available, redirecting to login');
+      redirectToLogin('no_session');
     } catch (error) {
-      console.error('Session handling error:', error);
+      console.error('Auth callback error:', error);
       toast.error('로그인 처리 중 오류가 발생했습니다.');
-      redirectToLogin('session_failed');
+      redirectToLogin('callback_error');
     }
   };
 
   useEffect(() => {
-    console.log('Auth callback page loaded');
-    console.log('Current URL:', window.location.href);
-    
-    // URL 해시에서 토큰 확인
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = hashParams.get('access_token');
-    const type = hashParams.get('type');
-    
-    console.log('Hash params:', { accessToken: !!accessToken, type });
-
-    if (type === 'signup' || type === 'email') {
-      // 이메일 인증 완료
-      console.log('Handling email verification');
-      handleEmailVerification();
-    } else if (accessToken) {
-      // 세션 확인
-      console.log('Handling OAuth callback');
-      handleSession();
-    } else {
-      // 에러 처리
-      console.log('No access token or type found, redirecting to login');
-      redirectToLogin('no_token');
-    }
+    handleCallback();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
