@@ -39,14 +39,19 @@ export default function AuthCallbackPage() {
 
   const handleSession = async () => {
     try {
+      // 잠시 대기하여 토큰이 설정될 시간을 확보
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const { data: { session }, error } = await supabase.auth.getSession();
 
       if (error) {
+        console.error('Session error:', error);
         redirectToLogin('session_failed');
         return;
       }
 
       if (session?.user) {
+        console.log('Session found for user:', session.user.email);
         // 사용자 정보 가져오기 또는 생성
         const { data: userData, error: userError } = await supabase
           .from('users')
@@ -55,6 +60,7 @@ export default function AuthCallbackPage() {
           .single();
 
         if (userError || !userData) {
+          console.log('Creating new user for:', session.user.email);
           // 소셜 로그인 첫 사용 시 users 테이블에 사용자 정보 생성
           const userName = session.user.user_metadata?.full_name || 
                           session.user.user_metadata?.name || 
@@ -73,14 +79,24 @@ export default function AuthCallbackPage() {
 
           if (insertError) {
             console.error('사용자 정보 생성 실패:', insertError);
+            toast.error('사용자 정보 생성에 실패했습니다.');
+            redirectToLogin('user_creation_failed');
+            return;
           } else {
+            console.log('User created successfully:', newUser);
             // 지갑도 생성
-            await supabase
+            const { error: walletError } = await supabase
               .from('user_wallets')
               .insert({
                 user_id: session.user.id,
                 credits: {},
               });
+              
+            if (walletError) {
+              console.error('지갑 생성 실패:', walletError);
+            } else {
+              console.log('Wallet created successfully');
+            }
           }
 
           // Zustand store 업데이트
@@ -139,29 +155,39 @@ export default function AuthCallbackPage() {
         toast.success('로그인 성공!');
         redirectToChat();
       } else {
-        redirectToLogin();
+        console.log('No session found, redirecting to login');
+        redirectToLogin('no_session');
       }
     } catch (error) {
       console.error('Session handling error:', error);
+      toast.error('로그인 처리 중 오류가 발생했습니다.');
       redirectToLogin('session_failed');
     }
   };
 
   useEffect(() => {
+    console.log('Auth callback page loaded');
+    console.log('Current URL:', window.location.href);
+    
     // URL 해시에서 토큰 확인
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const accessToken = hashParams.get('access_token');
     const type = hashParams.get('type');
+    
+    console.log('Hash params:', { accessToken: !!accessToken, type });
 
     if (type === 'signup' || type === 'email') {
       // 이메일 인증 완료
+      console.log('Handling email verification');
       handleEmailVerification();
     } else if (accessToken) {
       // 세션 확인
+      console.log('Handling OAuth callback');
       handleSession();
     } else {
       // 에러 처리
-      redirectToLogin();
+      console.log('No access token or type found, redirecting to login');
+      redirectToLogin('no_token');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

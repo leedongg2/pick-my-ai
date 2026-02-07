@@ -9,7 +9,7 @@
 export function getBaseUrl(): string {
   // 서버 사이드에서는 환경 변수만 사용
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
+    return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   }
   
   // 클라이언트 사이드에서는 환경 변수 우선
@@ -17,13 +17,8 @@ export function getBaseUrl(): string {
     return process.env.NEXT_PUBLIC_APP_URL;
   }
 
-  // localhost인 경우 프로덕션 도메인 사용 (OAuth 리다이렉트 문제 방지)
-  const origin = window.location.origin;
-  if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-    return 'https://pickmyai.store';
-  }
-
-  return origin;
+  // 현재 도메인 그대로 사용 (OAuth 콜백을 위해)
+  return window.location.origin;
 }
 
 /**
