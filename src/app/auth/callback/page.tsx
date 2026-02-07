@@ -39,87 +39,74 @@ export default function AuthCallbackPage() {
   const handleCallback = async () => {
     try {
       console.log('Auth callback - URL:', window.location.href);
+      console.log('Hash:', window.location.hash ? 'present' : 'empty');
+      console.log('Search:', window.location.search || 'empty');
 
-      // 1) PKCE 방식: URL query string에서 code 파라미터 확인
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
+      // Supabase의 detectSessionInUrl이 hash fragment를 자동 처리
+      // onAuthStateChange로 세션이 설정될 때까지 대기
+      const waitForSession = (): Promise<any> => {
+        return new Promise((resolve, reject) => {
+          let subscription: { unsubscribe: () => void } | null = null;
 
-      if (code) {
-        console.log('PKCE code found, exchanging for session...');
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          const cleanup = () => {
+            try { subscription?.unsubscribe(); } catch {}
+          };
 
-        if (error) {
-          console.error('Code exchange failed:', error);
-          redirectToLogin('code_exchange_failed');
-          return;
-        }
+          const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error('Session timeout'));
+          }, 10000); // 10초 타임아웃
 
-        if (data.session) {
-          console.log('Code exchange successful for:', data.session.user.email);
-          const cookieSet = await createSessionCookie(data.session.access_token);
-          if (cookieSet) {
-            toast.success('로그인 성공!');
-            redirectToChat();
-            return;
-          }
-        }
+          // 먼저 현재 세션 확인
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session) {
+              clearTimeout(timeout);
+              cleanup();
+              resolve(session);
+              return;
+            }
 
-        redirectToLogin('session_failed');
-        return;
-      }
+            // 세션이 없으면 auth state change 이벤트 대기
+            const { data } = supabase.auth.onAuthStateChange(
+              (event, session) => {
+                console.log('Auth state changed:', event);
+                if (event === 'SIGNED_IN' && session) {
+                  clearTimeout(timeout);
+                  cleanup();
+                  resolve(session);
+                }
+              }
+            );
+            subscription = data.subscription;
+          });
+        });
+      };
 
-      // 2) Implicit 방식: URL hash fragment에서 access_token 확인
-      const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      const hashAccessToken = hashParams.get('access_token');
-      const type = hashParams.get('type');
+      const session = await waitForSession();
 
-      console.log('Hash params:', { hasAccessToken: !!hashAccessToken, type });
-
-      if (hashAccessToken) {
-        // hash에 토큰이 있으면 Supabase가 자동으로 세션 설정
-        // 잠시 대기 후 세션 확인
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        const { data: { session }, error } = await supabase.auth.getSession();
-
-        if (error || !session) {
-          console.error('Session not found after hash token:', error);
-          redirectToLogin('session_failed');
-          return;
-        }
-
-        console.log('Session found for:', session.user.email);
+      if (session?.access_token) {
+        console.log('Session established for:', session.user?.email);
         const cookieSet = await createSessionCookie(session.access_token);
         if (cookieSet) {
           toast.success('로그인 성공!');
           redirectToChat();
           return;
         }
-
+        console.error('Failed to set session cookie');
         redirectToLogin('cookie_failed');
-        return;
+      } else {
+        console.log('No session after waiting');
+        redirectToLogin('no_session');
       }
-
-      // 3) 아무 토큰도 없는 경우 - 마지막으로 기존 세션 확인
-      console.log('No code or token found, checking existing session...');
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (session) {
-        console.log('Existing session found for:', session.user.email);
-        const cookieSet = await createSessionCookie(session.access_token);
-        if (cookieSet) {
-          toast.success('로그인 성공!');
-          redirectToChat();
-          return;
-        }
-      }
-
-      console.log('No session available, redirecting to login');
-      redirectToLogin('no_session');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auth callback error:', error);
-      toast.error('로그인 처리 중 오류가 발생했습니다.');
-      redirectToLogin('callback_error');
+      if (error.message === 'Session timeout') {
+        toast.error('로그인 시간이 초과되었습니다. 다시 시도해주세요.');
+        redirectToLogin('timeout');
+      } else {
+        toast.error('로그인 처리 중 오류가 발생했습니다.');
+        redirectToLogin('callback_error');
+      }
     }
   };
 
