@@ -31,3 +31,4 @@
 [context.production.environment]
   NODE_ENV = "production"
   NEXT_PUBLIC_STREAMING_DRAFT_V2 = "true"
+  NEXT_PUBLIC_APP_URL = "https://pickmyai.store"

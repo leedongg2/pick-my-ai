@@ -12,8 +12,18 @@ export function getBaseUrl(): string {
     return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
   }
   
-  // 클라이언트 사이드에서는 환경 변수 우선, fallback으로 현재 origin
-  return process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+  // 클라이언트 사이드에서는 환경 변수 우선
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
+  }
+
+  // localhost인 경우 프로덕션 도메인 사용 (OAuth 리다이렉트 문제 방지)
+  const origin = window.location.origin;
+  if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+    return 'https://pickmyai.store';
+  }
+
+  return origin;
 }
 
 /**
