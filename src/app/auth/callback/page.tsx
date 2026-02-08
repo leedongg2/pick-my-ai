@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
 
@@ -11,63 +10,6 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     if (processed.current) return;
     processed.current = true;
-
-    const handleCallback = async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get('code');
-        const errorParam = url.searchParams.get('error');
-        const errorDescription = url.searchParams.get('error_description');
-
-        console.log('[auth/callback] code:', !!code, 'error:', errorParam);
-
-        // Supabase가 에러를 반환한 경우
-        if (errorParam) {
-          console.error('[auth/callback] OAuth error:', errorParam, errorDescription);
-          window.location.href = `/login?error=${encodeURIComponent(errorParam)}`;
-          return;
-        }
-
-        // PKCE: code가 있으면 클라이언트에서 exchange (code verifier가 localStorage에 있음)
-        if (code) {
-          console.log('[auth/callback] Exchanging code for session...');
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-
-          if (error) {
-            console.warn('[auth/callback] exchangeCodeForSession error (might be auto-handled):', error.message);
-            // 에러가 나더라도 여기서 멈추지 않고 아래의 세션 확인 로직으로 진행합니다.
-            // Supabase client가 detectSessionInUrl: true 옵션으로 인해 이미 코드를 소모했을 수 있기 때문입니다.
-          } else if (data.session) {
-            console.log('[auth/callback] Session obtained, setting cookie...');
-            const ok = await setSessionCookie(data.session.access_token);
-            if (ok) {
-              window.location.href = '/chat';
-              return;
-            }
-            window.location.href = '/login?error=cookie_failed';
-            return;
-          }
-        }
-
-        // Fallback: 이미 세션이 있는지 확인 (Code exchange 실패 시에도 여기로 도달)
-        console.log('[auth/callback] No code, checking existing session...');
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          console.log('[auth/callback] Existing session found');
-          const ok = await setSessionCookie(session.access_token);
-          if (ok) {
-            window.location.href = '/chat';
-            return;
-          }
-        }
-
-        console.log('[auth/callback] No session available');
-        window.location.href = '/login?error=no_session';
-      } catch (err) {
-        console.error('[auth/callback] Unexpected error:', err);
-        window.location.href = '/login?error=callback_error';
-      }
-    };
 
     handleCallback();
   }, []);
@@ -92,7 +34,81 @@ export default function AuthCallbackPage() {
   );
 }
 
-async function setSessionCookie(accessToken: string): Promise<boolean> {
+/**
+ * OAuth 콜백 처리
+ * 
+ * Implicit flow: Supabase가 #access_token=xxx&refresh_token=yyy 형태로 hash fragment에 토큰 전달
+ * hash fragment를 직접 파싱하여 access_token을 추출하고 서버 API로 전달하여 세션 쿠키 설정
+ */
+async function handleCallback() {
+  try {
+    const hash = window.location.hash;
+    const search = window.location.search;
+
+    console.log('[auth/callback] hash present:', !!hash, 'search present:', !!search);
+
+    // 1) URL query string에서 에러 확인
+    const urlParams = new URLSearchParams(search);
+    const errorParam = urlParams.get('error');
+    if (errorParam) {
+      const desc = urlParams.get('error_description') || errorParam;
+      console.error('[auth/callback] OAuth error:', desc);
+      window.location.replace('/login?error=' + encodeURIComponent(errorParam));
+      return;
+    }
+
+    // 2) Hash fragment에서 access_token 추출 (implicit flow)
+    if (hash && hash.length > 1) {
+      const hashParams = new URLSearchParams(hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      const errorInHash = hashParams.get('error');
+
+      if (errorInHash) {
+        console.error('[auth/callback] Hash error:', errorInHash);
+        window.location.replace('/login?error=' + encodeURIComponent(errorInHash));
+        return;
+      }
+
+      if (accessToken) {
+        console.log('[auth/callback] access_token found in hash, setting session cookie...');
+        const ok = await callSocialSessionAPI(accessToken);
+        if (ok) {
+          console.log('[auth/callback] Session cookie set, redirecting to /chat');
+          window.location.replace('/chat');
+          return;
+        }
+        console.error('[auth/callback] Failed to set session cookie');
+        window.location.replace('/login?error=cookie_failed');
+        return;
+      }
+    }
+
+    // 3) Query string에서 code 확인 (PKCE fallback - Supabase 설정에 따라)
+    const code = urlParams.get('code');
+    if (code) {
+      console.log('[auth/callback] code found, sending to server for exchange...');
+      const ok = await callCodeExchangeAPI(code);
+      if (ok) {
+        console.log('[auth/callback] Code exchange successful, redirecting to /chat');
+        window.location.replace('/chat');
+        return;
+      }
+      console.error('[auth/callback] Code exchange failed');
+      window.location.replace('/login?error=exchange_failed');
+      return;
+    }
+
+    // 4) 아무것도 없으면 로그인으로
+    console.log('[auth/callback] No token or code found');
+    window.location.replace('/login?error=no_token');
+  } catch (err) {
+    console.error('[auth/callback] Unexpected error:', err);
+    window.location.replace('/login?error=callback_error');
+  }
+}
+
+/** access_token을 서버로 보내서 커스텀 JWT 세션 쿠키 설정 */
+async function callSocialSessionAPI(accessToken: string): Promise<boolean> {
   try {
     const res = await fetch('/api/auth/social-session', {
       method: 'POST',
@@ -102,12 +118,33 @@ async function setSessionCookie(accessToken: string): Promise<boolean> {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      console.error('[auth/callback] social-session API failed:', res.status, body);
+      console.error('[auth/callback] social-session API error:', res.status, body);
       return false;
     }
     return true;
   } catch (err) {
     console.error('[auth/callback] social-session fetch error:', err);
+    return false;
+  }
+}
+
+/** code를 서버로 보내서 서버사이드에서 token 교환 + 세션 쿠키 설정 */
+async function callCodeExchangeAPI(code: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/social-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.error('[auth/callback] code exchange API error:', res.status, body);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[auth/callback] code exchange fetch error:', err);
     return false;
   }
 }

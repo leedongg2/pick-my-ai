@@ -3,26 +3,59 @@ import { createSecureToken } from '@/lib/secureAuth';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 export async function POST(request: NextRequest) {
   try {
-    const { access_token } = await request.json();
+    const body = await request.json();
+    const { access_token, code } = body;
 
-    if (!access_token) {
+    let resolvedAccessToken = access_token;
+
+    // code가 있으면 Supabase Auth API로 직접 token 교환 (서버사이드 PKCE 대체)
+    if (!resolvedAccessToken && code) {
+      console.log('[social-session] Exchanging code for token via Supabase Auth API...');
+      const tokenRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=authorization_code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({
+          auth_code: code,
+          code_verifier: '', // implicit 방식이므로 빈 값
+        }),
+      });
+
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        resolvedAccessToken = tokenData.access_token;
+        console.log('[social-session] Code exchange successful');
+      } else {
+        const errBody = await tokenRes.text();
+        console.error('[social-session] Code exchange failed:', tokenRes.status, errBody);
+        return NextResponse.json(
+          { error: '인증 코드 교환에 실패했습니다.' },
+          { status: 401 }
+        );
+      }
+    }
+
+    if (!resolvedAccessToken) {
       return NextResponse.json(
         { error: '토큰이 필요합니다.' },
         { status: 400 }
       );
     }
 
-    // Supabase access_token으로 사용자 정보 확인
-    const supabase = createClient(supabaseUrl, supabaseServiceKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '');
+    // Supabase Admin 클라이언트로 사용자 정보 확인
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
     
-    const { data: { user }, error: userError } = await supabase.auth.getUser(access_token);
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(resolvedAccessToken);
 
     if (userError || !user) {
-      console.error('Social session - user verification failed:', userError);
+      console.error('[social-session] User verification failed:', userError?.message);
       return NextResponse.json(
         { error: '사용자 인증에 실패했습니다.' },
         { status: 401 }
@@ -30,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     // users 테이블에서 사용자 정보 조회
-    const { data: userData, error: dbError } = await supabase
+    const { data: userData, error: dbError } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('id', user.id)
@@ -43,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     // 사용자가 없으면 생성
     if (dbError || !userData) {
-      const { data: newUser, error: insertError } = await supabase
+      const { data: newUser, error: insertError } = await supabaseAdmin
         .from('users')
         .insert({
           id: user.id,
@@ -55,7 +88,7 @@ export async function POST(request: NextRequest) {
 
       if (insertError) {
         // 이미 존재하는 경우 (race condition) 다시 조회
-        const { data: existingUser } = await supabase
+        const { data: existingUser } = await supabaseAdmin
           .from('users')
           .select('*')
           .eq('id', user.id)
@@ -64,7 +97,7 @@ export async function POST(request: NextRequest) {
         if (existingUser) {
           userName = existingUser.name;
         } else {
-          console.error('Social session - user creation failed:', insertError);
+          console.error('[social-session] User creation failed:', insertError);
           return NextResponse.json(
             { error: '사용자 정보 생성에 실패했습니다.' },
             { status: 500 }
@@ -74,7 +107,7 @@ export async function POST(request: NextRequest) {
         userName = newUser.name;
         
         // 지갑 생성
-        await supabase
+        await supabaseAdmin
           .from('user_wallets')
           .insert({
             user_id: user.id,
@@ -112,7 +145,7 @@ export async function POST(request: NextRequest) {
 
     return response;
   } catch (error: any) {
-    console.error('Social session error:', error);
+    console.error('[social-session] Error:', error);
     return NextResponse.json(
       { error: '세션 생성 중 오류가 발생했습니다.' },
       { status: 500 }
