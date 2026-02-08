@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import dynamic from 'next/dynamic';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { SessionInitializer } from '@/components/SessionInitializer';
 import './globals.css';
 
 // 동적 임포트로 초기 로딩 최적화
@@ -30,6 +31,7 @@ export default function RootLayout({
     <html lang="ko">
       <body className={inter.className}>
         <ThemeProvider>
+          <SessionInitializer />
           <Header />
           {children}
           <Toaster 
