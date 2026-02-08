@@ -498,6 +498,23 @@ export const useStore = create<AppState>()(
       },
       
       logout: async () => {
+        // 로그아웃 전에 현재 설정을 서버에 저장
+        const state = get();
+        if (state.currentUser && state.isAuthenticated) {
+          try {
+            const { extractSettingsFromState } = await import('@/lib/userDataSync');
+            const settings = extractSettingsFromState(state);
+            await fetch('/api/user-data', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ settings }),
+            });
+          } catch {
+            // 저장 실패해도 로그아웃은 진행
+          }
+        }
+
         try {
           await fetch('/api/auth/logout', {
             method: 'POST',
@@ -610,40 +627,25 @@ export const useStore = create<AppState>()(
           wallet: updatedWallet
         });
         
-        // Supabase에 동기화
-        if (process.env.NEXT_PUBLIC_SUPABASE_URL && state.currentUser) {
+        // Supabase에 동기화 (세션 쿠키 기반)
+        if (state.currentUser) {
           try {
-            const { supabase } = await import('@/lib/supabase');
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (session?.access_token) {
-              await fetch('/api/wallet', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({
-                  credits,
-                  type: 'purchase',
-                  description: '크레딧 구매'
-                })
-              });
-            }
+            await fetch('/api/wallet', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                credits,
+                type: 'purchase',
+                description: '크레딧 구매'
+              })
+            });
           } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
               console.error('Supabase 크레딧 동기화 실패:', error);
             }
           }
         }
-        
-        // 강제로 로컬 스토리지에 즉시 저장
-        setTimeout(() => {
-          if (process.env.NODE_ENV !== 'production') {
-            const currentState = get();
-            console.log('📦 저장 후 확인:', currentState.wallet);
-          }
-        }, 100);
       },
       
       deductCredit: async (modelId) => {
@@ -677,26 +679,19 @@ export const useStore = create<AppState>()(
           };
         });
         
-        // Supabase에 동기화
-        if (process.env.NEXT_PUBLIC_SUPABASE_URL && state.currentUser) {
+        // Supabase에 동기화 (세션 쿠키 기반)
+        if (state.currentUser) {
           try {
-            const { supabase } = await import('@/lib/supabase');
-            const { data: { session } } = await supabase.auth.getSession();
-            
-            if (session?.access_token) {
-              await fetch('/api/wallet', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({
-                  credits: { [modelId]: -1 },
-                  type: 'usage',
-                  description: '크레딧 사용'
-                })
-              });
-            }
+            await fetch('/api/wallet', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                credits: { [modelId]: -1 },
+                type: 'usage',
+                description: '크레딧 사용'
+              })
+            });
           } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
               console.error('Supabase 크레딧 사용 동기화 실패:', error);
@@ -1808,3 +1803,44 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+// 설정 변경 시 자동으로 서버에 저장 (debounced)
+let _syncTimer: ReturnType<typeof setTimeout> | null = null;
+let _prevSnapshot = '';
+
+useStore.subscribe((state) => {
+  if (!state.isAuthenticated || !state.currentUser) return;
+
+  // 주요 설정 필드의 스냅샷을 비교하여 변경 시에만 저장
+  const snapshot = JSON.stringify({
+    sel: state.selections,
+    fp: state.hasFirstPurchase,
+    ts: state.themeSettings,
+    per: state.personas?.length,
+    ap: state.activePersona,
+    up: state.userPlan,
+    pmc: state.pmcBalance?.amount,
+    lang: state.language,
+  });
+
+  if (snapshot === _prevSnapshot) return;
+  _prevSnapshot = snapshot;
+
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(async () => {
+    try {
+      const { extractSettingsFromState } = await import('@/lib/userDataSync');
+      const currentState = useStore.getState();
+      if (!currentState.isAuthenticated) return;
+      const settings = extractSettingsFromState(currentState);
+      await fetch('/api/user-data', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings }),
+      });
+    } catch {
+      // 저장 실패 시 무시
+    }
+  }, 3000);
+});
