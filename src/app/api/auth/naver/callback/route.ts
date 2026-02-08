@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import { getBaseUrl } from '@/lib/redirect';
+import { createClient } from '@supabase/supabase-js';
+import { createSecureToken } from '@/lib/secureAuth';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+function getServerBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -8,17 +16,14 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');
   const error = searchParams.get('error');
 
-  // 에러 처리 - 올바른 도메인으로 리다이렉트
-  const baseUrl = getBaseUrl();
+  const baseUrl = getServerBaseUrl();
   
   if (error) {
-    const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
-    return NextResponse.redirect(new URL(errorUrl));
+    return NextResponse.redirect(new URL(`${baseUrl}/login?error=naver_auth_failed`));
   }
 
   if (!code || !state) {
-    const errorUrl = `${baseUrl}/login?error=invalid_callback`;
-    return NextResponse.redirect(new URL(errorUrl));
+    return NextResponse.redirect(new URL(`${baseUrl}/login?error=invalid_callback`));
   }
 
   try {
@@ -30,8 +35,8 @@ export async function GET(request: NextRequest) {
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: process.env.NEXT_PUBLIC_NAVER_CLIENT_ID!,
-        client_secret: process.env.NAVER_CLIENT_SECRET!,
+        client_id: process.env.NEXT_PUBLIC_NAVER_CLIENT_ID || '',
+        client_secret: process.env.NAVER_CLIENT_SECRET || '',
         code: code,
         state: state,
       }),
@@ -58,22 +63,26 @@ export async function GET(request: NextRequest) {
 
     const naverUser = userData.response;
     const email = naverUser.email;
-    const name = naverUser.name || naverUser.nickname;
+    const name = naverUser.name || naverUser.nickname || email?.split('@')[0] || 'User';
 
-    // Supabase에서 사용자 확인 또는 생성
-    const { data: existingUser } = await supabase
+    // 서버사이드 Supabase Admin 클라이언트 사용
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+
+    // 사용자 확인 또는 생성
+    const { data: existingUser } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('email', email)
       .single();
 
     let userId: string;
+    let userName = name;
 
     if (existingUser) {
       userId = existingUser.id;
+      userName = existingUser.name;
     } else {
-      // 새 사용자 생성
-      const { data: newUser, error: createError } = await supabase
+      const { data: newUser, error: createError } = await supabaseAdmin
         .from('users')
         .insert({
           email: email,
@@ -89,7 +98,7 @@ export async function GET(request: NextRequest) {
       userId = newUser.id;
 
       // 지갑 생성
-      await supabase
+      await supabaseAdmin
         .from('user_wallets')
         .insert({
           user_id: userId,
@@ -97,31 +106,29 @@ export async function GET(request: NextRequest) {
         });
     }
 
-    // 세션 생성 (Supabase Auth 우회)
-    const sessionToken = Buffer.from(JSON.stringify({
+    // 보안 강화된 JWT 세션 토큰 생성 (Google 로그인과 동일한 방식)
+    const sessionToken = await createSecureToken({
       userId,
       email,
-      name,
-      provider: 'naver',
-      expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7일
-    })).toString('base64');
+      name: userName,
+    });
 
-    // 올바른 도메인으로 리다이렉트
-    const redirectUrl = `${baseUrl}/chat`;
+    const response = NextResponse.redirect(new URL(`${baseUrl}/chat`));
     
-    const response = NextResponse.redirect(new URL(redirectUrl));
-    response.cookies.set('naver_session', sessionToken, {
+    // Google 로그인과 동일한 session 쿠키 사용 (통일)
+    response.cookies.set('session', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7일
+      path: '/',
     });
 
     return response;
   } catch (error) {
-    console.error('Naver OAuth error:', error);
-    // 올바른 도메인으로 에러 리다이렉트
-    const errorUrl = `${baseUrl}/login?error=naver_auth_failed`;
-    return NextResponse.redirect(new URL(errorUrl));
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Naver OAuth error:', error);
+    }
+    return NextResponse.redirect(new URL(`${baseUrl}/login?error=naver_auth_failed`));
   }
 }

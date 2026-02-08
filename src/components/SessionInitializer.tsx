@@ -14,7 +14,6 @@ export function SessionInitializer() {
   const setIsAuthenticated = useStore((s) => s.setIsAuthenticated);
 
   useEffect(() => {
-    // 이미 인증된 상태이거나 이미 체크한 경우 스킵
     if (isAuthenticated || checkedRef.current) return;
     checkedRef.current = true;
 
@@ -40,6 +39,17 @@ export function SessionInitializer() {
             createdAt: new Date(),
           });
           setIsAuthenticated(true);
+
+          // 채팅 세션 로드 (로그인 후 store의 login과 동일한 처리)
+          try {
+            const { ChatSyncService } = await import('@/lib/chatSync');
+            const sessionsResult = await ChatSyncService.loadChatSessions();
+            if (sessionsResult.success && sessionsResult.sessions) {
+              useStore.setState({ chatSessions: sessionsResult.sessions });
+            }
+          } catch {
+            // 채팅 세션 로드 실패 시 무시
+          }
         }
       } catch {
         // 세션 확인 실패 시 무시 (비로그인 상태 유지)

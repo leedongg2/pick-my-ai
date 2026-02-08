@@ -1,6 +1,5 @@
 import { useStore } from '@/store';
 import { shallow } from 'zustand/shallow';
-import { useEffect } from 'react';
 
 /**
  * 인증 관련 상태만 선택하는 최적화된 훅
@@ -25,29 +24,13 @@ export const useAuthStore = () => {
  * 인증 상태만 선택하는 경량 훅 (보안 강화)
  */
 export const useAuth = () => {
-  const auth = useStore(
+  return useStore(
     (state) => ({
       isAuthenticated: state.isAuthenticated,
       currentUser: state.currentUser,
     }),
     shallow
   );
-
-  // 프로덕션에서 콘솔 조작 방지
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'production') {
-      // 전역 객체에서 인증 상태 숨기기 시도 방지
-      const originalDefineProperty = Object.defineProperty;
-      Object.defineProperty = function(obj, prop, descriptor) {
-        if (prop === 'isAuthenticated' || prop === 'currentUser') {
-          return obj;
-        }
-        return originalDefineProperty(obj, prop, descriptor);
-      };
-    }
-  }, []);
-
-  return auth;
 };
 
 /**

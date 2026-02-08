@@ -9,7 +9,7 @@
 export function getBaseUrl(): string {
   // 서버 사이드에서는 환경 변수만 사용
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
   }
   
   // 클라이언트 사이드에서는 환경 변수 우선
