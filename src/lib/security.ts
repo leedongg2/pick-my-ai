@@ -44,6 +44,7 @@ export function validateApiKey(apiKey: string, provider: string): boolean {
     anthropic: 'sk-ant-',
     google: 'AIza',
     perplexity: 'pplx-',
+    grok: 'xai-',
   };
   
   const prefix = prefixes[provider];
