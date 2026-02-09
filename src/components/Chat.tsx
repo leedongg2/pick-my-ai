@@ -154,7 +154,13 @@ type Attachment = {
                {model?.displayName || 'ChatGPT'}
              </div>
              <div className="text-gray-800 text-[15px] leading-7">
-               {isImage ? (
+               {!content ? (
+                 <div className="flex space-x-1 py-2">
+                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}} />
+                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
+                 </div>
+               ) : isImage ? (
                  <div className="relative group">
                    {/* eslint-disable-next-line @next/next/no-img-element */}
                    <img
@@ -1229,7 +1235,7 @@ export const Chat: React.FC = () => {
                 );
               })()}
               
-              {isLoading && (
+              {isLoading && !(currentSession?.messages?.length && currentSession.messages[currentSession.messages.length - 1]?.role === 'assistant' && !currentSession.messages[currentSession.messages.length - 1]?.content) && (
                 <div className="group mb-4">
                   <div className="flex items-start space-x-3">
                     <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white">
