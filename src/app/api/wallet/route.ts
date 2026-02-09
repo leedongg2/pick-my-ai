@@ -32,30 +32,31 @@ export async function GET(request: NextRequest) {
 
     const db = getSupabaseAdmin();
 
-    const { data: wallet, error: walletError } = await db
+    const { data: wallets, error: walletError } = await db
       .from('user_wallets')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .limit(1);
 
     if (walletError) {
-      if (walletError.code === 'PGRST116') {
-        const { data: newWallet, error: createError } = await db
-          .from('user_wallets')
-          .insert({ user_id: userId, credits: {} })
-          .select()
-          .single();
-
-        if (createError) {
-          return NextResponse.json({ error: '지갑 생성 실패' }, { status: 500 });
-        }
-
-        return NextResponse.json({ wallet: newWallet });
-      }
-      return NextResponse.json({ error: '지갑 조회 실패' }, { status: 500 });
+      return NextResponse.json({ error: walletError.message || '지갑 조회 실패' }, { status: 500 });
     }
 
-    return NextResponse.json({ wallet });
+    if (!wallets || wallets.length === 0) {
+      const { data: newWallet, error: createError } = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits: {} })
+        .select()
+        .single();
+
+      if (createError) {
+        return NextResponse.json({ error: createError.message || '지갑 생성 실패' }, { status: 500 });
+      }
+
+      return NextResponse.json({ wallet: newWallet });
+    }
+
+    return NextResponse.json({ wallet: wallets[0] });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet GET error:', error);
@@ -82,20 +83,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    const { data: currentWallet, error: fetchError } = await db
+    const { data: currentWalletRows, error: fetchError } = await db
       .from('user_wallets')
       .select('credits')
       .eq('user_id', userId)
-      .single();
+      .limit(1);
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
+    if (fetchError) {
       if (process.env.NODE_ENV !== 'production') {
         console.error('Wallet POST fetch error:', fetchError);
       }
-      return NextResponse.json({ error: '지갑 조회 실패' }, { status: 500 });
+      return NextResponse.json({ error: fetchError.message || '지갑 조회 실패' }, { status: 500 });
     }
 
-    const currentCredits = currentWallet?.credits || {};
+    const currentCredits = (currentWalletRows?.[0] as any)?.credits || {};
     const newCredits = { ...currentCredits };
 
     Object.entries(credits).forEach(([modelId, amount]) => {
@@ -108,22 +109,29 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // user_wallets.user_id에 unique 제약이 없을 수 있으므로 upsert(onConflict)를 피함
-    const { data: updatedWallet, error: updateError } = fetchError?.code === 'PGRST116'
-      ? await db
-          .from('user_wallets')
-          .insert({ user_id: userId, credits: newCredits })
-          .select()
-          .single()
-      : await db
-          .from('user_wallets')
-          .update({ credits: newCredits, updated_at: new Date().toISOString() })
-          .eq('user_id', userId)
-          .select()
-          .single();
+    const { data: updatedWalletRows, error: updateError } = await db
+      .from('user_wallets')
+      .update({ credits: newCredits })
+      .eq('user_id', userId)
+      .select();
 
     if (updateError) {
-      return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
+      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
+    }
+
+    const updatedWallet = updatedWalletRows?.[0];
+    if (!updatedWallet) {
+      const insertResult = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits: newCredits })
+        .select()
+        .single();
+
+      if (insertResult.error) {
+        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
+      }
+
+      return NextResponse.json({ wallet: insertResult.data });
     }
 
     const { error: txError } = await db
@@ -166,28 +174,27 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    // user_wallets.user_id에 unique 제약이 없을 수 있으므로 upsert(onConflict)를 피함
-    const { data: updatedWallet, error: updateError } = await db
+    const { data: updatedWalletRows, error: updateError } = await db
       .from('user_wallets')
-      .update({ credits, updated_at: new Date().toISOString() })
+      .update({ credits })
       .eq('user_id', userId)
-      .select()
-      .single();
+      .select();
 
-    if (updateError?.code === 'PGRST116') {
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
+    }
+
+    const updatedWallet = updatedWalletRows?.[0];
+    if (!updatedWallet) {
       const insertResult = await db
         .from('user_wallets')
         .insert({ user_id: userId, credits })
         .select()
         .single();
       if (insertResult.error) {
-        return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
+        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
       }
       return NextResponse.json({ wallet: insertResult.data });
-    }
-
-    if (updateError) {
-      return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
     }
 
     return NextResponse.json({ wallet: updatedWallet });
