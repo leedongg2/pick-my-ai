@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/apiAuth';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+function getSupabaseAdmin() {
+  if (!supabaseUrl || !(supabaseServiceKey || supabaseAnonKey)) {
+    throw new Error('Supabase 환경 변수가 설정되지 않았습니다.');
+  }
+  return createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +23,9 @@ export async function GET(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
-    const { data: wallet, error: walletError } = await supabase
+    const db = getSupabaseAdmin();
+
+    const { data: wallet, error: walletError } = await db
       .from('user_wallets')
       .select('*')
       .eq('user_id', userId)
@@ -20,7 +33,7 @@ export async function GET(request: NextRequest) {
 
     if (walletError) {
       if (walletError.code === 'PGRST116') {
-        const { data: newWallet, error: createError } = await supabase
+        const { data: newWallet, error: createError } = await db
           .from('user_wallets')
           .insert({ user_id: userId, credits: {} })
           .select()
@@ -54,23 +67,28 @@ export async function POST(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
+    const db = getSupabaseAdmin();
+
     const { credits, type, description } = await request.json();
 
     if (!credits || typeof credits !== 'object') {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    const { data: currentWallet, error: fetchError } = await supabase
+    const { data: currentWallet, error: fetchError } = await db
       .from('user_wallets')
       .select('credits')
       .eq('user_id', userId)
       .single();
 
-    if (fetchError) {
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Wallet POST fetch error:', fetchError);
+      }
       return NextResponse.json({ error: '지갑 조회 실패' }, { status: 500 });
     }
 
-    const currentCredits = currentWallet.credits || {};
+    const currentCredits = currentWallet?.credits || {};
     const newCredits = { ...currentCredits };
 
     Object.entries(credits).forEach(([modelId, amount]) => {
@@ -83,10 +101,12 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const { data: updatedWallet, error: updateError } = await supabase
+    const { data: updatedWallet, error: updateError } = await db
       .from('user_wallets')
-      .update({ credits: newCredits })
-      .eq('user_id', userId)
+      .upsert(
+        { user_id: userId, credits: newCredits, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      )
       .select()
       .single();
 
@@ -94,7 +114,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
     }
 
-    const { error: txError } = await supabase
+    const { error: txError } = await db
       .from('transactions')
       .insert({
         user_id: userId,
@@ -126,16 +146,20 @@ export async function PATCH(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
+    const db = getSupabaseAdmin();
+
     const { credits } = await request.json();
 
     if (!credits || typeof credits !== 'object') {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    const { data: updatedWallet, error: updateError } = await supabase
+    const { data: updatedWallet, error: updateError } = await db
       .from('user_wallets')
-      .update({ credits })
-      .eq('user_id', userId)
+      .upsert(
+        { user_id: userId, credits, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      )
       .select()
       .single();
 
