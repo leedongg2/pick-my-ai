@@ -3,6 +3,10 @@ import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
 
+// Netlify/Vercel 서버리스 함수 타임아웃 설정 (60초)
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 const isStaticExportPhase =
   process.env.NEXT_PHASE === PHASE_EXPORT ||
   process.env.NEXT_PHASE === PHASE_PRODUCTION_BUILD;

@@ -802,17 +802,15 @@ export const Chat: React.FC = () => {
           if (process.env.NODE_ENV !== 'production') {
             console.error('Streaming error:', error);
           }
-
-          if (STREAMING_DRAFT_V2) {
-            if (fullContent) {
-              setDraftContent(fullContent);
-              finalizeMessageContent(currentSessionId, messageId, fullContent);
+          // 스트림이 중간에 끊겨도 기존 콘텐츠가 있으면 보존 (에러를 던지지 않음)
+          if (!fullContent) {
+            if (STREAMING_DRAFT_V2) {
+              setDraftMessageId(null);
+              draftContentRef.current = '';
+              lastDraftFlushRef.current = 0;
             }
-            setDraftMessageId(null);
-            draftContentRef.current = '';
-            lastDraftFlushRef.current = 0;
+            throw new Error('스트리밍 중 오류가 발생했습니다.');
           }
-          throw new Error('스트리밍 중 오류가 발생했습니다.');
         } finally {
           streamingRef.current = false;
         }
@@ -821,6 +819,7 @@ export const Chat: React.FC = () => {
           throw new Error('AI로부터 응답을 받지 못했습니다.');
         }
 
+        // 스트리밍 완료 또는 중간 끊김 시 기존 콘텐츠 확정
         if (STREAMING_DRAFT_V2) {
           setDraftContent(fullContent);
           finalizeMessageContent(currentSessionId, messageId, fullContent);
@@ -828,6 +827,9 @@ export const Chat: React.FC = () => {
           draftContentRef.current = '';
           lastDraftFlushRef.current = 0;
           setTimeout(() => scrollToBottom(true), 100);
+        } else {
+          // DRAFT_V2가 아닌 경우에도 최종 콘텐츠 확정
+          updateMessageContent(currentSessionId, messageId, fullContent);
         }
         
         // 요약 추출 및 저장 (오류가 발생해도 스트리밍은 계속)
