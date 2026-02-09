@@ -715,212 +715,48 @@ export const Chat: React.FC = () => {
         throw new Error(errorData.error || `API 호출 실패 (상태 코드: ${response.status})`);
       }
       
-      // 스트리밍 응답 처리 (OpenAI 모델)
-      const isEventStream = response.headers.get('content-type')?.includes('text/event-stream');
+      // JSON 응답 처리 (모든 모델 공통)
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('Failed to parse response:', e);
+        }
+        throw new Error('서버 응답을 파싱할 수 없습니다.');
+      }
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('API Response data:', data);
+      }
       
-      if (isEventStream && sessionIdForThisRequest && assistantMessageId) {
+      if (!data || !data.content) {
         if (process.env.NODE_ENV !== 'production') {
-          console.log('Processing streaming response...');
+          console.error('Empty response from API:', data);
         }
+        throw new Error('AI로부터 응답을 받지 못했습니다.');
+      }
+      
+      const extracted = extractMemoryForDisplay(data.content);
+      if (extracted.facts.length) {
+        addStoredFacts(extracted.facts);
+      }
 
-        const messageId = assistantMessageId;
-
-        if (STREAMING_DRAFT_V2) {
-          setDraftMessageId(messageId);
-          setDraftContent('');
-          draftContentRef.current = '';
-          lastDraftFlushRef.current = 0;
+      // AI 응답 표시
+      if (sessionIdForThisRequest && assistantMessageId) {
+        updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+        setTimeout(() => scrollToBottom(true), 100);
+      }
+      
+      // 요약 추출
+      try {
+        const { summary } = extractSummary(data.content);
+        if (summary) {
+          setConversationSummaries(prev => [...prev, summary]);
         }
-        
-        // 스트리밍 시작 시 로딩 상태 해제
-        setIsLoading(false);
-        
-        let rawContent = '';
-        let fullContent = '';
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('스트리밍 응답을 읽을 수 없습니다.');
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        streamingRef.current = true;
-        let lastUpdateTime = 0;
-        const THROTTLE_MS = 100;
-        let chunkCount = 0;
-        
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
-
-            for (const raw of lines) {
-              const line = raw.trim();
-              if (!line) continue;
-              if (!line.startsWith('data:')) continue;
-
-              const data = line.replace(/^data:\s*/, '');
-              if (data === '[DONE]') continue;
-
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed?.content) {
-                  rawContent += parsed.content;
-                  const extracted = extractMemoryForDisplay(rawContent);
-                  fullContent = extracted.displayText;
-
-                  if (extracted.facts.length) {
-                    addStoredFacts(extracted.facts);
-                  }
-
-                  if (STREAMING_DRAFT_V2) {
-                    draftContentRef.current = fullContent;
-                    const now = Date.now();
-                    const isBackground = document.hidden;
-                    chunkCount++;
-                    
-                    const shouldUpdate = isBackground 
-                      ? (chunkCount % 5 === 0)
-                      : (now - lastUpdateTime >= THROTTLE_MS);
-                    
-                    if (shouldUpdate) {
-                      lastUpdateTime = now;
-                      setDraftContent(draftContentRef.current);
-                      if (!userScrolledUpRef.current) {
-                        scrollToBottom();
-                      }
-                    }
-                  } else {
-                    updateMessageContent(sessionIdForThisRequest, messageId, fullContent);
-                    if (!userScrolledUpRef.current) {
-                      scrollToBottom();
-                    }
-                  }
-
-                  if (streaming?.chunkDelay && streaming.chunkDelay > 0) {
-                    await new Promise(resolve => setTimeout(resolve, streaming.chunkDelay));
-                  }
-                }
-              } catch {
-                // ignore
-              }
-            }
-          }
-          
-          if (STREAMING_DRAFT_V2 && draftContentRef.current) {
-            setDraftContent(draftContentRef.current);
-          }
-        } catch (error) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('Streaming error:', error);
-          }
-          // 스트림이 중간에 끊겨도 기존 콘텐츠가 있으면 보존 (에러를 던지지 않음)
-          if (!fullContent) {
-            if (STREAMING_DRAFT_V2) {
-              setDraftMessageId(null);
-              draftContentRef.current = '';
-              lastDraftFlushRef.current = 0;
-            }
-            throw new Error('스트리밍 중 오류가 발생했습니다.');
-          }
-        } finally {
-          streamingRef.current = false;
-        }
-        
-        if (!fullContent) {
-          throw new Error('AI로부터 응답을 받지 못했습니다.');
-        }
-
-        // 스트리밍 완료 또는 중간 끊김 시 기존 콘텐츠 확정
-        if (STREAMING_DRAFT_V2) {
-          setDraftContent(fullContent);
-          finalizeMessageContent(sessionIdForThisRequest, messageId, fullContent);
-          setDraftMessageId(null);
-          draftContentRef.current = '';
-          lastDraftFlushRef.current = 0;
-          setTimeout(() => scrollToBottom(true), 100);
-        } else {
-          // DRAFT_V2가 아닌 경우에도 최종 콘텐츠 확정
-          updateMessageContent(sessionIdForThisRequest, messageId, fullContent);
-        }
-        
-        // 요약 추출 및 저장 (오류가 발생해도 스트리밍은 계속)
-        try {
-          const { summary } = extractSummary(fullContent);
-          if (summary) {
-            setConversationSummaries(prev => [...prev, summary]);
-          }
-        } catch (summaryError) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.warn('Summary extraction failed:', summaryError);
-          }
-        }
-      } else {
-        // 일반 JSON 응답 처리 (다른 모델)
-        let data;
-        try {
-          data = await response.json();
-        } catch (e) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('Failed to parse response:', e);
-          }
-          throw new Error('서버 응답을 파싱할 수 없습니다.');
-        }
-
+      } catch (summaryError) {
         if (process.env.NODE_ENV !== 'production') {
-          console.log('API Response data:', data);
-        }
-        
-        // 응답이 없는 경우 에러 처리
-        if (!data || !data.content) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.error('Empty response from API:', data);
-          }
-          throw new Error('AI로부터 응답을 받지 못했습니다. 서버 로그를 확인하세요.');
-        }
-        
-        const extracted = extractMemoryForDisplay(data.content);
-        if (extracted.facts.length) {
-          addStoredFacts(extracted.facts);
-        }
-
-        // AI 응답 추가
-        if (sessionIdForThisRequest) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('Adding AI message to session:', sessionIdForThisRequest);
-          }
-          if (assistantMessageId) {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
-          } else {
-            addMessage(sessionIdForThisRequest, {
-              id: crypto.randomUUID(),
-              role: 'assistant' as const,
-              content: extracted.displayText,
-              modelId: selectedModelId,
-              timestamp: new Date().toISOString(),
-              creditUsed: 1
-            });
-          }
-          // 비스트리밍 응답 후 스크롤
-          setTimeout(() => scrollToBottom(true), 100);
-        }
-        
-        // 요약 추출 및 저장 (오류가 발생해도 응답은 계속)
-        try {
-          const { summary } = extractSummary(data.content);
-          if (summary) {
-            setConversationSummaries(prev => [...prev, summary]);
-          }
-        } catch (summaryError) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.warn('Summary extraction failed:', summaryError);
-          }
+          console.warn('Summary extraction failed:', summaryError);
         }
       }
       
@@ -956,20 +792,14 @@ export const Chat: React.FC = () => {
       toast.error(`응답 생성 실패: ${errorMessage}`);
     } finally {
       setIsLoading(false);
-      // 스트리밍 draft 상태를 반드시 정리하여 빈 화면 방지
       streamingRef.current = false;
-      if (STREAMING_DRAFT_V2) {
-        setDraftMessageId(null);
-        draftContentRef.current = '';
-        lastDraftFlushRef.current = 0;
-      }
       if (chatPerfRunId) {
         requestAnimationFrame(() => {
           endChatPerfRun(chatPerfRunId);
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, streaming, scrollToBottom]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, scrollToBottom]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;

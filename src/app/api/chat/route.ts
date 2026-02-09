@@ -22,91 +22,6 @@ type UserAttachment = {
   content?: string; // for text files
 };
 
-// upstream SSE 스트림을 우리 형식으로 변환하는 공통 함수
-// TransformStream을 사용하여 Netlify가 스트림 끝까지 연결을 유지하도록 함
-function createSSETransformStream(
-  extractContent: (parsed: any) => string | null,
-  label: string
-): { transform: TransformStream<Uint8Array, Uint8Array>; } {
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  let firstChunk = true;
-  let lastChunkTime = Date.now();
-  const transform = new TransformStream<Uint8Array, Uint8Array>({
-    start(controller) {
-      // 즉시 keepalive 청크를 보내서 Netlify idle timeout 방지
-      controller.enqueue(encoder.encode(': keepalive\n\n'));
-      
-      // 5초마다 keepalive 전송 (Netlify idle timeout 방지)
-      const keepaliveInterval = setInterval(() => {
-        if (Date.now() - lastChunkTime > 5000) {
-          try {
-            controller.enqueue(encoder.encode(': keepalive\n\n'));
-          } catch {
-            clearInterval(keepaliveInterval);
-          }
-        }
-      }, 5000);
-      
-      // cleanup을 위해 interval 저장 (실제로는 flush에서 정리)
-      (controller as any)._keepaliveInterval = keepaliveInterval;
-    },
-    transform(chunk, controller) {
-      lastChunkTime = Date.now();
-      buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        
-        // data: 접두사 처리 (다양한 형식 지원)
-        let dataStr = '';
-        if (trimmed.startsWith('data: ')) {
-          dataStr = trimmed.slice(6);
-        } else if (trimmed.startsWith('data:')) {
-          dataStr = trimmed.slice(5).trim();
-        } else {
-          continue;
-        }
-
-        if (dataStr === '[DONE]') {
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          continue;
-        }
-
-        try {
-          const parsed = JSON.parse(dataStr);
-          const content = extractContent(parsed);
-          if (content) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-            firstChunk = false;
-          }
-        } catch { /* ignore parse errors */ }
-      }
-    },
-    flush(controller) {
-      // keepalive interval 정리
-      const interval = (controller as any)._keepaliveInterval;
-      if (interval) clearInterval(interval);
-      
-      // 스트림 끝에 DONE 보장
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-    }
-  });
-
-  return { transform };
-}
-
-const SSE_HEADERS = {
-  'Content-Type': 'text/event-stream',
-  'Cache-Control': 'no-cache',
-  'Connection': 'keep-alive',
-  'X-Accel-Buffering': 'no', // nginx/Netlify 버퍼링 비활성화
-};
 
 function extractBase64(dataUrl: string): { mime: string; base64: string } | null {
   try {
@@ -164,34 +79,15 @@ async function callDALLE(prompt: string): Promise<string> {
   });
 }
 
-// OpenAI API 호출 (키 로테이션 및 큐 시스템 지원) - 스트리밍 Response 반환
-async function callOpenAIStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string): Promise<Response> {
-  // 이미지 생성 모델인 경우 DALL-E API 사용 (스트리밍 불필요)
+// OpenAI API 호출 (키 로테이션 및 큐 시스템 지원) - JSON 문자열 반환
+async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string): Promise<string> {
+  // 이미지 생성 모델인 경우 DALL-E API 사용
   if (model === 'gptimage1' || model === 'dalle3') {
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
     const prompt = typeof lastUserMessage?.content === 'string' 
       ? lastUserMessage.content 
       : lastUserMessage?.content?.[0]?.text || '아름다운 풍경';
-    
-    const imageUrl = await callDALLE(prompt);
-    
-    // 스트리밍 형식으로 반환
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: imageUrl })}\n\n`));
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        controller.close();
-      }
-    });
-    
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive'
-      }
-    });
+    return await callDALLE(prompt);
   }
 
   const apiKey = apiKeyManager.getAvailableKey('openai');
@@ -199,11 +95,11 @@ async function callOpenAIStreaming(model: string, messages: any[], userAttachmen
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
-  return await executeOpenAIStreamingRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction);
+  return await executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction);
 }
 
-// OpenAI 실제 요청 실행 - 스트리밍 Response 반환
-async function executeOpenAIStreamingRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string): Promise<Response> {
+// OpenAI 실제 요청 실행 - JSON 문자열 반환
+async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string): Promise<string> {
 
   const modelMap: { [key: string]: string } = {
     // GPT 시리즈
@@ -340,8 +236,6 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
     requestBody.temperature = 0.7;
   }
   
-  // 스트리밍 활성화
-  requestBody.stream = true;
   
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[OpenAI] Request body:`, {
@@ -353,8 +247,8 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
   }
 
   // Codex 모델은 /v1/responses 엔드포인트 사용
-  const isCodexModel = selectedModel.includes('codex');
-  const endpoint = isCodexModel 
+  const isCodex = selectedModel.includes('codex');
+  const endpoint = isCodex 
     ? 'https://api.openai.com/v1/responses'
     : 'https://api.openai.com/v1/chat/completions';
   
@@ -364,7 +258,7 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
 
   // Responses API는 다른 파라미터 구조 사용
   let apiRequestBody: any;
-  if (isCodexModel) {
+  if (isCodex) {
     // Responses API 형식
     apiRequestBody = {
       model: requestBody.model,
@@ -424,7 +318,7 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
           if (process.env.NODE_ENV !== 'production') {
             console.log(`OpenAI Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return executeOpenAIStreamingRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction);
+          return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction);
         }
         
         // 모든 키가 제한된 경우
@@ -436,24 +330,23 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
     throw error;
   }
 
-  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
-  if (!response.body) {
-    const encoder = new TextEncoder();
-    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
-    return new Response(fallback, { headers: SSE_HEADERS });
+  const data = await response.json();
+
+  // Codex (Responses API) vs Chat Completions API
+  const isCodexResp = (modelMap[model] || '').includes('codex');
+  const content = isCodexResp
+    ? (data?.output?.[0]?.content?.[0]?.text || data?.choices?.[0]?.message?.content)
+    : data?.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
   }
 
-  const { transform } = createSSETransformStream(
-    (parsed) => parsed.choices?.[0]?.delta?.content || null,
-    'OpenAI'
-  );
-
-  const transformed = response.body.pipeThrough(transform);
-  return new Response(transformed, { headers: SSE_HEADERS });
+  return content;
 }
 
-// Google AI Studio (Gemini) 스트리밍 호출 (키 로테이션 지원)
-async function callGeminiStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
+// Google AI Studio (Gemini) 호출 (비스트리밍 JSON - Netlify 호환)
+async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
     throw new Error('Gemini API 키가 설정되지 않았습니다. GOOGLE_API_KEY 또는 GEMINI_API_KEY를 설정하세요.');
@@ -515,8 +408,8 @@ async function callGeminiStreaming(model: string, messages: any[], userAttachmen
     }
   }
 
-  // streamGenerateContent 엔드포인트 사용
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:streamGenerateContent?alt=sse&key=${apiKey}`, {
+  // generateContent 엔드포인트 사용 (비스트리밍)
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -550,7 +443,7 @@ async function callGeminiStreaming(model: string, messages: any[], userAttachmen
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Gemini Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callGeminiStreaming(model, messages, userAttachments, retryCount + 1, temperature);
+          return callGemini(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
@@ -561,30 +454,20 @@ async function callGeminiStreaming(model: string, messages: any[], userAttachmen
     throw error;
   }
 
-  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
-  if (!response.body) {
-    const encoder = new TextEncoder();
-    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
-    return new Response(fallback, { headers: SSE_HEADERS });
+  const data = await response.json();
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const content = parts.map((p: any) => p?.text).filter(Boolean).join('');
+
+  if (!content) {
+    throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
   }
 
-  const { transform: geminiTransform } = createSSETransformStream(
-    (parsed) => {
-      // Gemini SSE: candidates[0].content.parts[*].text
-      const parts = parsed?.candidates?.[0]?.content?.parts || [];
-      const texts = parts.map((p: any) => p?.text).filter(Boolean);
-      return texts.length > 0 ? texts.join('') : null;
-    },
-    'Gemini'
-  );
-
-  const geminiTransformed = response.body.pipeThrough(geminiTransform);
-  return new Response(geminiTransformed, { headers: SSE_HEADERS });
+  return content;
 }
 
 
-// Anthropic API 스트리밍 호출 (키 로테이션 지원)
-async function callAnthropicStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
+// Anthropic API 호출 (비스트리밍 JSON - Netlify 호환)
+async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
@@ -650,7 +533,7 @@ async function callAnthropicStreaming(model: string, messages: any[], userAttach
       max_tokens: 4096,
       temperature: temperature ?? 1.0,
       top_p: 0.9,
-      stream: true,
+      stream: false,
       system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
       messages: transformed
     })
@@ -674,7 +557,7 @@ async function callAnthropicStreaming(model: string, messages: any[], userAttach
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Anthropic Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callAnthropicStreaming(model, messages, userAttachments, retryCount + 1, temperature);
+          return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
@@ -685,25 +568,14 @@ async function callAnthropicStreaming(model: string, messages: any[], userAttach
     throw error;
   }
 
-  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
-  if (!response.body) {
-    const encoder = new TextEncoder();
-    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
-    return new Response(fallback, { headers: SSE_HEADERS });
+  const data = await response.json();
+  const content = data?.content?.map((c: any) => c.type === 'text' ? c.text : '').filter(Boolean).join('') || '';
+
+  if (!content) {
+    throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
   }
 
-  const { transform: anthropicTransform } = createSSETransformStream(
-    (parsed) => {
-      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-        return parsed.delta.text;
-      }
-      return null;
-    },
-    'Anthropic'
-  );
-
-  const anthropicTransformed = response.body.pipeThrough(anthropicTransform);
-  return new Response(anthropicTransformed, { headers: SSE_HEADERS });
+  return content;
 }
 
 // Perplexity API 호출 (비스트리밍 JSON - Netlify 완벽 호환)
@@ -952,50 +824,37 @@ export async function POST(request: NextRequest) {
       console.log(`[Chat API] Model: ${modelId}, Messages: ${messages.length}`);
     }
 
-    // 모델 시리즈별로 API 호출 - 모든 모델 스트리밍 응답 반환
-    let streamResponse: Response;
+    // 모델 시리즈별로 API 호출 - 모든 모델 JSON 응답 반환
+    let responseContent: string;
 
     if (modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex') || modelId === 'gptimage1' || modelId === 'dalle3') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log(`[Chat API] Calling OpenAI API (Streaming)${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
+        console.log(`[Chat API] Calling OpenAI API${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
       }
-      streamResponse = await callOpenAIStreaming(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
+      responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
     } else if (modelId.startsWith('gemini')) {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Gemini API (Streaming)');
+        console.log('[Chat API] Calling Gemini API');
       }
-      streamResponse = await callGeminiStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      responseContent = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'haiku45' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45' || modelId === 'opus46') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Anthropic API (Streaming)');
+        console.log('[Chat API] Calling Anthropic API');
       }
-      streamResponse = await callAnthropicStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      responseContent = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else if (modelId.startsWith('perplexity') || modelId === 'sonar' || modelId === 'sonarPro' || modelId === 'deepResearch') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Perplexity API (JSON)');
+        console.log('[Chat API] Calling Perplexity API');
       }
-      const perplexityContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
-      return NextResponse.json({ content: perplexityContent });
+      responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
       }
-      // 데모 응답도 스트리밍 형식으로 반환
-      const demoText = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
-      const encoder = new TextEncoder();
-      const demoStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: demoText })}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
-        }
-      });
-      streamResponse = new Response(demoStream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
-      });
+      responseContent = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
     }
 
-    return streamResponse;
+    return NextResponse.json({ content: responseContent });
 
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
