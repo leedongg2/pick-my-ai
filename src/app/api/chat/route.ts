@@ -234,7 +234,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: 1024, // Netlify 26초 타임아웃 내 완료를 위해 1024로 제한
+    max_completion_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
     stream: false // 비스트리밍으로 변경 (간결한 응답)
   };
   
@@ -386,7 +386,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
       contents,
       generationConfig: { 
         temperature: temperature ?? 0.7,
-        maxOutputTokens: 1024, // Netlify 26초 타임아웃 내 완료를 위해 1024로 제한
+        maxOutputTokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
         topP: 0.95,
         topK: 40
       },
@@ -498,7 +498,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     },
     body: JSON.stringify({
       model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: 1024, // Netlify 26초 타임아웃 내 완료를 위해 1024로 제한
+      max_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
       temperature: temperature ?? 1.0,
       top_p: 0.9,
       stream: false, // 비스트리밍으로 변경 (간결한 응답)
@@ -585,7 +585,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
       model: modelMap[model] || 'sonar',
       stream: false, // 비스트리밍으로 변경 (간결한 응답)
       messages: finalMessages,
-      max_tokens: 1024, // Netlify 26초 타임아웃 내 완료를 위해 1024로 제한
+      max_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
       temperature: temperature ?? 0.7,
       top_p: 0.9,
     })
