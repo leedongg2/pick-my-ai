@@ -302,37 +302,48 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
 
   // 스트리밍 응답을 서버에서 모아서 반환 (Netlify 타임아웃 방지)
   if (!isCodex && response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let buffer = '';
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) fullContent += delta;
-        } catch {}
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) fullContent += delta;
+          } catch (parseErr) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[OpenAI] SSE parse error:', parseErr);
+            }
+          }
+        }
       }
-    }
 
-    if (!fullContent) {
-      throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
+      if (!fullContent.trim()) {
+        throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
+      }
+      return fullContent;
+    } catch (streamErr) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[OpenAI] Stream reading error:', streamErr);
+      }
+      throw new Error(`OpenAI 스트림 읽기 실패: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`);
     }
-    return fullContent;
   }
 
   // Codex (비스트리밍) 응답 처리
@@ -454,38 +465,49 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
   // SSE 스트림을 서버에서 모아서 반환
   if (response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let buffer = '';
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const jsonStr = trimmed.slice(6);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const parts = parsed?.candidates?.[0]?.content?.parts || [];
-          for (const p of parts) {
-            if (p?.text) fullContent += p.text;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const jsonStr = trimmed.slice(6);
+          
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const parts = parsed?.candidates?.[0]?.content?.parts || [];
+            for (const p of parts) {
+              if (p?.text) fullContent += p.text;
+            }
+          } catch (parseErr) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Gemini] SSE parse error:', parseErr);
+            }
           }
-        } catch {}
+        }
       }
-    }
 
-    if (!fullContent) {
-      throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
+      if (!fullContent.trim()) {
+        throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
+      }
+      return fullContent;
+    } catch (streamErr) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[Gemini] Stream reading error:', streamErr);
+      }
+      throw new Error(`Gemini 스트림 읽기 실패: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`);
     }
-    return fullContent;
   }
 
   throw new Error('Gemini API 응답을 읽을 수 없습니다.');
@@ -593,38 +615,49 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
 
   // SSE 스트림을 서버에서 모아서 반환
   if (response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let buffer = '';
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const jsonStr = trimmed.slice(6);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        try {
-          const parsed = JSON.parse(jsonStr);
-          // Anthropic SSE: content_block_delta 이벤트에서 텍스트 추출
-          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-            fullContent += parsed.delta.text;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const jsonStr = trimmed.slice(6);
+          
+          try {
+            const parsed = JSON.parse(jsonStr);
+            // Anthropic SSE: content_block_delta 이벤트에서 텍스트 추출
+            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+              fullContent += parsed.delta.text;
+            }
+          } catch (parseErr) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Anthropic] SSE parse error:', parseErr);
+            }
           }
-        } catch {}
+        }
       }
-    }
 
-    if (!fullContent) {
-      throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
+      if (!fullContent.trim()) {
+        throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
+      }
+      return fullContent;
+    } catch (streamErr) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[Anthropic] Stream reading error:', streamErr);
+      }
+      throw new Error(`Anthropic 스트림 읽기 실패: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`);
     }
-    return fullContent;
   }
 
   throw new Error('Anthropic API 응답을 읽을 수 없습니다.');
@@ -702,37 +735,48 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
 
   // SSE 스트림을 서버에서 모아서 반환
   if (response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let buffer = '';
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
         
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) fullContent += delta;
-        } catch {}
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) fullContent += delta;
+          } catch (parseErr) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Perplexity] SSE parse error:', parseErr);
+            }
+          }
+        }
       }
-    }
 
-    if (!fullContent) {
-      throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
+      if (!fullContent.trim()) {
+        throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
+      }
+      return fullContent;
+    } catch (streamErr) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[Perplexity] Stream reading error:', streamErr);
+      }
+      throw new Error(`Perplexity 스트림 읽기 실패: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`);
     }
-    return fullContent;
   }
 
   throw new Error('Perplexity API 응답을 읽을 수 없습니다.');
