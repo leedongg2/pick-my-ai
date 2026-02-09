@@ -917,7 +917,7 @@ export const Chat: React.FC = () => {
           id: crypto.randomUUID(),
           role: 'assistant' as const,
           content: `⚠️ 오류가 발생했습니다: ${errorMessage}\n\n문제가 지속되면:\n1. 인터넷 연결을 확인하세요\n2. API 키가 올바른지 확인하세요\n3. 나중에 다시 시도하세요`,
-          modelId: selectedModelId,
+          modelId: currentModelId,
           timestamp: new Date().toISOString(),
           creditUsed: 1
         });
@@ -926,6 +926,13 @@ export const Chat: React.FC = () => {
       toast.error(`응답 생성 실패: ${errorMessage}`);
     } finally {
       setIsLoading(false);
+      // 스트리밍 draft 상태를 반드시 정리하여 빈 화면 방지
+      streamingRef.current = false;
+      if (STREAMING_DRAFT_V2) {
+        setDraftMessageId(null);
+        draftContentRef.current = '';
+        lastDraftFlushRef.current = 0;
+      }
       if (chatPerfRunId) {
         requestAnimationFrame(() => {
           endChatPerfRun(chatPerfRunId);

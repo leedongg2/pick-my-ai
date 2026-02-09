@@ -812,12 +812,46 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
+  // Perplexity가 스트리밍을 지원하지 않는 경우 (일반 JSON 응답) 처리
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    // 비스트리밍 응답을 SSE 형식으로 래핑
+    try {
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content || '';
+      const wrapStream = new ReadableStream({
+        start(controller) {
+          if (content) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+          }
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }
+      });
+      return new Response(wrapStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
+      });
+    } catch {
+      const errStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }
+      });
+      return new Response(errStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
+      });
+    }
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       const reader = response.body?.getReader();
       if (!reader) { controller.close(); return; }
 
       let buffer = '';
+      let hasContent = false;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -841,16 +875,25 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
               // Perplexity uses OpenAI-compatible format: choices[0].delta.content
               const content = parsed?.choices?.[0]?.delta?.content;
               if (content) {
+                hasContent = true;
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
               }
             } catch { /* ignore parse errors */ }
           }
+        }
+        if (!hasContent) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 빈 응답이 반환되었습니다.' })}\n\n`));
         }
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
           console.error('[Perplexity Streaming] Error:', err);
         }
+        // 에러 발생 시에도 DONE을 보내서 클라이언트가 정상 종료하도록
+        if (!hasContent) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 스트리밍 중 오류가 발생했습니다.' })}\n\n`));
+        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       } finally {
         controller.close();
       }

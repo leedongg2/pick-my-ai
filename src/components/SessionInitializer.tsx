@@ -155,15 +155,42 @@ export function SessionInitializer() {
             // 서버 데이터 로드 실패 시 무시 (로컬 데이터 사용)
           }
 
-          // 채팅 세션 로드
+          // 채팅 세션 로드 (서버 세션과 로컬 세션 병합)
           try {
             const { ChatSyncService } = await import('@/lib/chatSync');
             const sessionsResult = await ChatSyncService.loadChatSessions();
             if (sessionsResult.success && sessionsResult.sessions) {
-              useStore.setState({ chatSessions: sessionsResult.sessions });
+              const serverSessions = sessionsResult.sessions;
+              
+              // 로컬 세션 가져오기 (localStorage에서 직접 + store에서)
+              let localSessions: any[] = useStore.getState().chatSessions || [];
+              if (localSessions.length === 0) {
+                try {
+                  const raw = localStorage.getItem('pick-my-ai-storage');
+                  if (raw) {
+                    const parsed = JSON.parse(raw);
+                    const ps = parsed?.state;
+                    const userSessions = ps?.[`user_${userId}_chatSessions`];
+                    if (Array.isArray(userSessions) && userSessions.length > 0) {
+                      localSessions = userSessions;
+                    }
+                  }
+                } catch { /* ignore */ }
+              }
+              
+              // 서버에 세션이 있으면 서버 우선, 없으면 로컬 유지
+              if (serverSessions.length > 0) {
+                // 서버 세션 ID 목록
+                const serverIds = new Set(serverSessions.map((s: any) => s.id));
+                // 로컬에만 있는 세션 보존
+                const localOnly = localSessions.filter((s: any) => !serverIds.has(s.id));
+                const merged = [...serverSessions, ...localOnly];
+                useStore.setState({ chatSessions: merged });
+              }
+              // 서버가 비어있으면 로컬 세션 유지 (덮어쓰지 않음)
             }
           } catch {
-            // 채팅 세션 로드 실패 시 무시
+            // 채팅 세션 로드 실패 시 무시 (로컬 데이터 유지)
           }
         }
       } catch {
