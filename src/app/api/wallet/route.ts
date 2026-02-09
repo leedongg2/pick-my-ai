@@ -7,10 +7,17 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 function getSupabaseAdmin() {
-  if (!supabaseUrl || !(supabaseServiceKey || supabaseAnonKey)) {
-    throw new Error('Supabase 환경 변수가 설정되지 않았습니다.');
+  if (!supabaseUrl) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL이 설정되지 않았습니다.');
   }
-  return createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+  if (!supabaseAnonKey) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY가 설정되지 않았습니다.');
+  }
+  // 지갑/트랜잭션 API는 서버에서 DB를 직접 갱신하므로 service role이 필요합니다.
+  if (!supabaseServiceKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY가 설정되지 않았습니다. (Netlify 환경변수에 추가 필요)');
+  }
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
 
 export async function GET(request: NextRequest) {
@@ -53,7 +60,7 @@ export async function GET(request: NextRequest) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet GET error:', error);
     }
-    return NextResponse.json({ error: '서버 오류' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || '서버 오류' }, { status: 500 });
   }
 }
 
@@ -101,14 +108,19 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const { data: updatedWallet, error: updateError } = await db
-      .from('user_wallets')
-      .upsert(
-        { user_id: userId, credits: newCredits, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      )
-      .select()
-      .single();
+    // user_wallets.user_id에 unique 제약이 없을 수 있으므로 upsert(onConflict)를 피함
+    const { data: updatedWallet, error: updateError } = fetchError?.code === 'PGRST116'
+      ? await db
+          .from('user_wallets')
+          .insert({ user_id: userId, credits: newCredits })
+          .select()
+          .single()
+      : await db
+          .from('user_wallets')
+          .update({ credits: newCredits, updated_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .select()
+          .single();
 
     if (updateError) {
       return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
@@ -132,7 +144,7 @@ export async function POST(request: NextRequest) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet POST error:', error);
     }
-    return NextResponse.json({ error: '서버 오류' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || '서버 오류' }, { status: 500 });
   }
 }
 
@@ -154,14 +166,25 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
+    // user_wallets.user_id에 unique 제약이 없을 수 있으므로 upsert(onConflict)를 피함
     const { data: updatedWallet, error: updateError } = await db
       .from('user_wallets')
-      .upsert(
-        { user_id: userId, credits, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      )
+      .update({ credits, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
       .select()
       .single();
+
+    if (updateError?.code === 'PGRST116') {
+      const insertResult = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits })
+        .select()
+        .single();
+      if (insertResult.error) {
+        return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
+      }
+      return NextResponse.json({ wallet: insertResult.data });
+    }
 
     if (updateError) {
       return NextResponse.json({ error: '지갑 업데이트 실패' }, { status: 500 });
@@ -172,6 +195,6 @@ export async function PATCH(request: NextRequest) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet PATCH error:', error);
     }
-    return NextResponse.json({ error: '서버 오류' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || '서버 오류' }, { status: 500 });
   }
 }

@@ -7,7 +7,16 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 function getSupabaseAdmin() {
-  return createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+  if (!supabaseUrl) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL이 설정되지 않았습니다.');
+  }
+  if (!supabaseAnonKey) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY가 설정되지 않았습니다.');
+  }
+  if (!supabaseServiceKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY가 설정되지 않았습니다. (Netlify 환경변수에 추가 필요)');
+  }
+  return createClient(supabaseUrl, supabaseServiceKey);
 }
 
 /**
@@ -56,7 +65,7 @@ export async function GET(request: NextRequest) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('user-data GET error:', error);
     }
-    return NextResponse.json({ error: '서버 오류' }, { status: 500 });
+    return NextResponse.json({ error: (error as any)?.message || '서버 오류' }, { status: 500 });
   }
 }
 
@@ -108,6 +117,6 @@ export async function POST(request: NextRequest) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('user-data POST error:', error);
     }
-    return NextResponse.json({ error: '서버 오류' }, { status: 500 });
+    return NextResponse.json({ error: (error as any)?.message || '서버 오류' }, { status: 500 });
   }
 }
