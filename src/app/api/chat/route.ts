@@ -234,7 +234,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
+    max_completion_tokens: 2048,
     stream: false // 비스트리밍으로 변경 (간결한 응답)
   };
   
@@ -303,12 +303,23 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   // 비스트리밍 JSON 응답 처리
   const data = await response.json();
   
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[OpenAI] Full response data:', JSON.stringify(data, null, 2));
+  }
+  
   // Codex (Responses API) vs Chat Completions API
   const content = isCodex
     ? (data?.output?.[0]?.content?.[0]?.text || data?.choices?.[0]?.message?.content)
     : data?.choices?.[0]?.message?.content;
 
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[OpenAI] Extracted content:', content);
+    console.log('[OpenAI] Content type:', typeof content);
+    console.log('[OpenAI] Content length:', content?.length);
+  }
+
   if (!content || !content.trim()) {
+    console.error('[OpenAI] Empty content detected. Full data:', JSON.stringify(data));
     throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
   }
 
@@ -386,7 +397,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
       contents,
       generationConfig: { 
         temperature: temperature ?? 0.7,
-        maxOutputTokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
+        maxOutputTokens: 2048,
         topP: 0.95,
         topK: 40
       },
@@ -498,7 +509,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     },
     body: JSON.stringify({
       model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
+      max_tokens: 2048,
       temperature: temperature ?? 1.0,
       top_p: 0.9,
       stream: false, // 비스트리밍으로 변경 (간결한 응답)
@@ -585,7 +596,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
       model: modelMap[model] || 'sonar',
       stream: false, // 비스트리밍으로 변경 (간결한 응답)
       messages: finalMessages,
-      max_tokens: 512, // Netlify 26초 타임아웃 내 완료를 위해 512로 제한
+      max_tokens: 2048,
       temperature: temperature ?? 0.7,
       top_p: 0.9,
     })
