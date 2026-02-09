@@ -50,16 +50,44 @@ export function SessionInitializer() {
             if (userData) {
               const stateUpdate: Record<string, any> = {};
 
-              // 지갑 복원
-              if (userData.credits && Object.keys(userData.credits).length > 0) {
-                stateUpdate.wallet = {
-                  userId,
-                  credits: userData.credits,
-                  transactions: [],
-                };
+              // 지갑 복원: 서버 크레딧과 로컬 크레딧을 병합 (각 모델별 큰 값 사용)
+              const localWallet = useStore.getState().wallet;
+              const localCredits = localWallet?.credits || {};
+              const serverCredits = userData.credits || {};
+              
+              // 병합: 서버와 로컬 중 더 큰 값을 사용
+              const mergedCredits: Record<string, number> = { ...localCredits };
+              for (const [modelId, amount] of Object.entries(serverCredits)) {
+                const serverVal = typeof amount === 'number' ? amount : 0;
+                const localVal = mergedCredits[modelId] || 0;
+                mergedCredits[modelId] = Math.max(serverVal, localVal);
+              }
+              
+              // 0 이하인 크레딧 제거
+              for (const key of Object.keys(mergedCredits)) {
+                if (mergedCredits[key] <= 0) delete mergedCredits[key];
+              }
+              
+              const hasCredits = Object.keys(mergedCredits).length > 0;
+              stateUpdate.wallet = {
+                userId,
+                credits: mergedCredits,
+                transactions: localWallet?.transactions || [],
+              };
+              if (hasCredits) {
                 stateUpdate.hasFirstPurchase = true;
-              } else {
-                stateUpdate.wallet = { userId, credits: {}, transactions: [] };
+              }
+              
+              // 병합된 크레딧이 서버와 다르면 서버에도 동기화
+              const serverStr = JSON.stringify(serverCredits);
+              const mergedStr = JSON.stringify(mergedCredits);
+              if (hasCredits && serverStr !== mergedStr) {
+                fetch('/api/wallet', {
+                  method: 'PATCH',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ credits: mergedCredits }),
+                }).catch(() => {});
               }
 
               // 설정 복원
