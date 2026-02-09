@@ -596,10 +596,7 @@ export const Chat: React.FC = () => {
       const msg = message;
       setMessage('');
       
-      // 크레딧 차감 시도 (store에서 가져온 함수 사용)
-      await deductCredit(selectedModelId);
-      
-      // API 호출을 위한 메시지 준비 (현재 메시지 포함)
+      // API 호출을 위한 메시지 준비 (크레딧 차감 전에 먼저 준비)
       const liveState = useStore.getState();
       const sessionForThisRequest = sessionIdForThisRequest
         ? liveState.chatSessions.find((s: any) => s.id === sessionIdForThisRequest)
@@ -626,7 +623,7 @@ export const Chat: React.FC = () => {
         });
       }
       
-      // 사용자 메시지를 세션에 추가
+      // 사용자 메시지를 세션에 즉시 추가 (UI 먼저 업데이트)
       if (sessionIdForThisRequest) {
         if (process.env.NODE_ENV !== 'production') {
           console.log('[Chat] Adding user message to session:', sessionIdForThisRequest);
@@ -637,8 +634,6 @@ export const Chat: React.FC = () => {
           content: msg,
           timestamp: new Date().toISOString(),
         });
-        // 사용자 메시지 추가 직후 스크롤
-        setTimeout(() => scrollToBottom(true), 100);
       } else {
         if (process.env.NODE_ENV !== 'production') {
           console.error('[Chat] No session ID - cannot add user message');
@@ -654,8 +649,15 @@ export const Chat: React.FC = () => {
           timestamp: new Date().toISOString(),
           creditUsed: 1
         });
-        setTimeout(() => scrollToBottom(true), 100);
       }
+      
+      // UI 업데이트 후 스크롤 (한 번만)
+      scrollToBottom(true);
+      
+      // 크레딧 차감은 백그라운드로 (UI 블로킹 없이)
+      deductCredit(selectedModelId).catch(err => {
+        console.error('[Chat] Credit deduction failed:', err);
+      });
 
       // API 호출
       const controller = new AbortController();
