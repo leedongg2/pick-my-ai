@@ -408,8 +408,8 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
   });
 }
 
-// Google AI Studio (Gemini) 호출 (키 로테이션 지원)
-async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+// Google AI Studio (Gemini) 스트리밍 호출 (키 로테이션 지원)
+async function callGeminiStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
     throw new Error('Gemini API 키가 설정되지 않았습니다. GOOGLE_API_KEY 또는 GEMINI_API_KEY를 설정하세요.');
@@ -439,7 +439,6 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   for (const m of messages) {
     const role = m.role === 'assistant' ? 'model' : 'user';
     if (Array.isArray(m.content)) {
-      // OpenAI식 멀티모달 parts를 텍스트만 우선 반영
       for (const p of m.content) {
         if (p?.type === 'text' && p?.text) {
           append(role, { text: p.text });
@@ -472,7 +471,8 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     }
   }
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${apiKey}`, {
+  // streamGenerateContent 엔드포인트 사용
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:streamGenerateContent?alt=sse&key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -486,8 +486,9 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     }),
   });
 
-  const data = await response.json();
   if (!response.ok) {
+    let data: any = {};
+    try { data = await response.json(); } catch { /* ignore */ }
     const msg = data?.error?.message || 'Gemini API 오류';
     const error: any = new Error(msg);
     error.status = response.status;
@@ -505,7 +506,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Gemini Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callGemini(model, messages, userAttachments, retryCount + 1, temperature);
+          return callGeminiStreaming(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
@@ -516,15 +517,65 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     throw error;
   }
 
-  // candidates[0].content.parts[*].text 결합
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  const text = parts.map((p: any) => p?.text).filter(Boolean).join('\n');
-  return text || '[Gemini] 빈 응답';
+  // Gemini SSE 스트림을 우리 형식으로 변환
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const reader = response.body?.getReader();
+      if (!reader) { controller.close(); return; }
+
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data: ')) continue;
+            const data = trimmed.slice(6);
+
+            try {
+              const parsed = JSON.parse(data);
+              // Gemini SSE: candidates[0].content.parts[*].text
+              const parts = parsed?.candidates?.[0]?.content?.parts || [];
+              for (const part of parts) {
+                if (part?.text) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: part.text })}\n\n`));
+                }
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      } catch (err) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('[Gemini Streaming] Error:', err);
+        }
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
 }
 
 
-// Anthropic API 호출 (키 로테이션 지원)
-async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+// Anthropic API 스트리밍 호출 (키 로테이션 지원)
+async function callAnthropicStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
@@ -587,9 +638,10 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     },
     body: JSON.stringify({
       model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: 4096, // Claude 최대 출력 토큰
+      max_tokens: 4096,
       temperature: temperature ?? 1.0,
       top_p: 0.9,
+      stream: true,
       system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
       messages: transformed
     })
@@ -613,7 +665,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Anthropic Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature);
+          return callAnthropicStreaming(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
@@ -624,12 +676,67 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     throw error;
   }
 
-  const data = await response.json();
-  return data.content[0].text;
+  // Anthropic SSE 스트림을 우리 형식으로 변환
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const reader = response.body?.getReader();
+      if (!reader) { controller.close(); return; }
+
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data: ')) continue;
+            const data = trimmed.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              // Anthropic SSE: content_block_delta 이벤트에서 텍스트 추출
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: parsed.delta.text })}\n\n`));
+              }
+              // message_stop 이벤트
+              if (parsed.type === 'message_stop') {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+        // 스트림 끝에 DONE 보장
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      } catch (err) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('[Anthropic Streaming] Error:', err);
+        }
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
 }
 
-// Perplexity API 호출 (키 로테이션 지원)
-async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+// Perplexity API 스트리밍 호출 (키 로테이션 지원)
+async function callPerplexityStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
@@ -654,7 +761,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      // Perplexity는 현재 이미지 업로드 미지원. 첨부가 있으면 안내 문구를 본문에 덧붙임
+      stream: true,
       messages: (() => {
         if (!userAttachments?.length) return messages;
         const msgs = [...messages];
@@ -666,14 +773,9 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
         msgs[idx] = { ...last, content: `${last.content || ''}${note}` };
         return msgs;
       })(),
-      // 답변 품질 향상 파라미터
-      max_tokens: 2048,  // Perplexity 최대 출력 토큰
-      temperature: temperature ?? 0.7,  // 사용자 설정 temperature (기본값 0.7)
-      top_p: 0.9,  // 응답 다양성
-      // 웹 검색 옵션
-      search_recency_filter: 'month',  // 최근 1개월 결과 우선
-      return_images: true,  // 이미지 URL 포함
-      return_related_questions: true  // 관련 질문 제안
+      max_tokens: 2048,
+      temperature: temperature ?? 0.7,
+      top_p: 0.9,
     })
   });
 
@@ -695,7 +797,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
           if (process.env.NODE_ENV !== 'production') {
             console.log(`Perplexity Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
           }
-          return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
+          return callPerplexityStreaming(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
@@ -706,8 +808,62 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     throw error;
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  // Perplexity SSE 스트림 (OpenAI 호환 형식) -> 우리 형식으로 변환
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const reader = response.body?.getReader();
+      if (!reader) { controller.close(); return; }
+
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            const data = trimmed.replace(/^data:\s*/, '');
+            if (data === '[DONE]') {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              continue;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+              // Perplexity uses OpenAI-compatible format: choices[0].delta.content
+              const content = parsed?.choices?.[0]?.delta?.content;
+              if (content) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      } catch (err) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('[Perplexity Streaming] Error:', err);
+        }
+      } finally {
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    }
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -876,55 +1032,49 @@ export async function POST(request: NextRequest) {
       console.log(`[Chat API] Model: ${modelId}, Messages: ${messages.length}`);
     }
 
-    // 모델 시리즈별로 API 호출 - OpenAI는 스트리밍 응답 반환
+    // 모델 시리즈별로 API 호출 - 모든 모델 스트리밍 응답 반환
+    let streamResponse: Response;
+
     if (modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex') || modelId === 'gptimage1' || modelId === 'dalle3') {
       if (process.env.NODE_ENV !== 'production') {
         console.log(`[Chat API] Calling OpenAI API (Streaming)${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
       }
-      const streamResponse = await callOpenAIStreaming(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
-      return streamResponse;
-    }
-    
-    // 나머지 모델들은 기존 방식 유지
-    let response: string;
-    
-    if (modelId.startsWith('gemini')) {
+      streamResponse = await callOpenAIStreaming(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
+    } else if (modelId.startsWith('gemini')) {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Gemini API');
+        console.log('[Chat API] Calling Gemini API (Streaming)');
       }
-      response = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      streamResponse = await callGeminiStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'haiku45' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45' || modelId === 'opus46') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Anthropic API');
+        console.log('[Chat API] Calling Anthropic API (Streaming)');
       }
-      response = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      streamResponse = await callAnthropicStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else if (modelId.startsWith('perplexity') || modelId === 'sonar' || modelId === 'sonarPro' || modelId === 'deepResearch') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Perplexity API');
+        console.log('[Chat API] Calling Perplexity API (Streaming)');
       }
-      response = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      streamResponse = await callPerplexityStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
       }
-      // API 키가 없으면 데모 응답
-      response = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[Chat API] Response length: ${response?.length || 0} characters`);
-    }
-
-    return NextResponse.json(
-      { content: response },
-      {
-        headers: {
-          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
-          'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
-          'X-RateLimit-Reset': new Date(rateLimitResult.reset).toISOString()
+      // 데모 응답도 스트리밍 형식으로 반환
+      const demoText = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
+      const encoder = new TextEncoder();
+      const demoStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: demoText })}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
         }
-      }
-    );
+      });
+      streamResponse = new Response(demoStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
+      });
+    }
+
+    return streamResponse;
 
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
