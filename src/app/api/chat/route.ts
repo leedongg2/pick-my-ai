@@ -22,6 +22,66 @@ type UserAttachment = {
   content?: string; // for text files
 };
 
+// upstream SSE 스트림을 우리 형식으로 변환하는 공통 함수
+// TransformStream을 사용하여 Netlify가 스트림 끝까지 연결을 유지하도록 함
+function createSSETransformStream(
+  extractContent: (parsed: any) => string | null,
+  label: string
+): { transform: TransformStream<Uint8Array, Uint8Array>; } {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const transform = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        // data: 접두사 처리 (다양한 형식 지원)
+        let dataStr = '';
+        if (trimmed.startsWith('data: ')) {
+          dataStr = trimmed.slice(6);
+        } else if (trimmed.startsWith('data:')) {
+          dataStr = trimmed.slice(5).trim();
+        } else {
+          continue;
+        }
+
+        if (dataStr === '[DONE]') {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(dataStr);
+          const content = extractContent(parsed);
+          if (content) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    },
+    flush(controller) {
+      // 스트림 끝에 DONE 보장
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+    }
+  });
+
+  return { transform };
+}
+
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  'Connection': 'keep-alive',
+  'X-Accel-Buffering': 'no', // nginx/Netlify 버퍼링 비활성화
+};
+
 function extractBase64(dataUrl: string): { mime: string; base64: string } | null {
   try {
     const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
@@ -350,66 +410,20 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
     throw error;
   }
 
-  // 스트리밍 응답을 Server-Sent Events 형식으로 변환하여 반환
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader();
-      if (!reader) {
-        controller.close();
-        return;
-      }
+  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
+  if (!response.body) {
+    const encoder = new TextEncoder();
+    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
+    return new Response(fallback, { headers: SSE_HEADERS });
+  }
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+  const { transform } = createSSETransformStream(
+    (parsed) => parsed.choices?.[0]?.delta?.content || null,
+    'OpenAI'
+  );
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              
-              if (data === '[DONE]') {
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-                continue;
-              }
-
-              try {
-                const parsed = JSON.parse(data);
-                const content = parsed.choices?.[0]?.delta?.content;
-                
-                if (content) {
-                  // 청크를 SSE 형식으로 전달
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-                }
-              } catch (e) {
-                // 파싱 에러 무시
-              }
-            }
-          }
-        }
-      } catch (error) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('[OpenAI Streaming] Error:', error);
-        }
-      } finally {
-        controller.close();
-      }
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    }
-  });
+  const transformed = response.body.pipeThrough(transform);
+  return new Response(transformed, { headers: SSE_HEADERS });
 }
 
 // Google AI Studio (Gemini) 스트리밍 호출 (키 로테이션 지원)
@@ -521,60 +535,25 @@ async function callGeminiStreaming(model: string, messages: any[], userAttachmen
     throw error;
   }
 
-  // Gemini SSE 스트림을 우리 형식으로 변환
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
+  if (!response.body) {
+    const encoder = new TextEncoder();
+    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
+    return new Response(fallback, { headers: SSE_HEADERS });
+  }
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader();
-      if (!reader) { controller.close(); return; }
+  const { transform: geminiTransform } = createSSETransformStream(
+    (parsed) => {
+      // Gemini SSE: candidates[0].content.parts[*].text
+      const parts = parsed?.candidates?.[0]?.content?.parts || [];
+      const texts = parts.map((p: any) => p?.text).filter(Boolean);
+      return texts.length > 0 ? texts.join('') : null;
+    },
+    'Gemini'
+  );
 
-      let buffer = '';
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data: ')) continue;
-            const data = trimmed.slice(6);
-
-            try {
-              const parsed = JSON.parse(data);
-              // Gemini SSE: candidates[0].content.parts[*].text
-              const parts = parsed?.candidates?.[0]?.content?.parts || [];
-              for (const part of parts) {
-                if (part?.text) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: part.text })}\n\n`));
-                }
-              }
-            } catch { /* ignore parse errors */ }
-          }
-        }
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      } catch (err) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('[Gemini Streaming] Error:', err);
-        }
-      } finally {
-        controller.close();
-      }
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    }
-  });
+  const geminiTransformed = response.body.pipeThrough(geminiTransform);
+  return new Response(geminiTransformed, { headers: SSE_HEADERS });
 }
 
 
@@ -680,63 +659,25 @@ async function callAnthropicStreaming(model: string, messages: any[], userAttach
     throw error;
   }
 
-  // Anthropic SSE 스트림을 우리 형식으로 변환
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
+  if (!response.body) {
+    const encoder = new TextEncoder();
+    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
+    return new Response(fallback, { headers: SSE_HEADERS });
+  }
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader();
-      if (!reader) { controller.close(); return; }
-
-      let buffer = '';
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data: ')) continue;
-            const data = trimmed.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              // Anthropic SSE: content_block_delta 이벤트에서 텍스트 추출
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: parsed.delta.text })}\n\n`));
-              }
-              // message_stop 이벤트
-              if (parsed.type === 'message_stop') {
-                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              }
-            } catch { /* ignore parse errors */ }
-          }
-        }
-        // 스트림 끝에 DONE 보장
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      } catch (err) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('[Anthropic Streaming] Error:', err);
-        }
-      } finally {
-        controller.close();
+  const { transform: anthropicTransform } = createSSETransformStream(
+    (parsed) => {
+      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+        return parsed.delta.text;
       }
-    }
-  });
+      return null;
+    },
+    'Anthropic'
+  );
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    }
-  });
+  const anthropicTransformed = response.body.pipeThrough(anthropicTransform);
+  return new Response(anthropicTransformed, { headers: SSE_HEADERS });
 }
 
 // Perplexity API 스트리밍 호출 (키 로테이션 지원)
@@ -812,105 +753,47 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     throw error;
   }
 
-  // Perplexity SSE 스트림 (OpenAI 호환 형식) -> 우리 형식으로 변환
+  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
   const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
 
-  // Perplexity가 스트리밍을 지원하지 않는 경우 (일반 JSON 응답) 처리
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('text/event-stream')) {
-    // 비스트리밍 응답을 SSE 형식으로 래핑
+  // Perplexity가 스트리밍 대신 JSON을 반환하는 경우 처리
+  const pplxContentType = response.headers.get('content-type') || '';
+  if (!pplxContentType.includes('text/event-stream')) {
     try {
       const data = await response.json();
-      const content = data?.choices?.[0]?.message?.content || '';
+      const content = data?.choices?.[0]?.message?.content || '[Perplexity] 빈 응답';
       const wrapStream = new ReadableStream({
-        start(controller) {
-          if (content) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-          }
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
+        start(c) {
+          c.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+          c.enqueue(encoder.encode('data: [DONE]\n\n'));
+          c.close();
         }
       });
-      return new Response(wrapStream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
-      });
+      return new Response(wrapStream, { headers: SSE_HEADERS });
     } catch {
       const errStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
+        start(c) {
+          c.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
+          c.enqueue(encoder.encode('data: [DONE]\n\n'));
+          c.close();
         }
       });
-      return new Response(errStream, {
-        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' }
-      });
+      return new Response(errStream, { headers: SSE_HEADERS });
     }
   }
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader();
-      if (!reader) { controller.close(); return; }
+  if (!response.body) {
+    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
+    return new Response(fallback, { headers: SSE_HEADERS });
+  }
 
-      let buffer = '';
-      let hasContent = false;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+  const { transform: pplxTransform } = createSSETransformStream(
+    (parsed) => parsed?.choices?.[0]?.delta?.content || null,
+    'Perplexity'
+  );
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data:')) continue;
-            const data = trimmed.replace(/^data:\s*/, '');
-            if (data === '[DONE]') {
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              continue;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              // Perplexity uses OpenAI-compatible format: choices[0].delta.content
-              const content = parsed?.choices?.[0]?.delta?.content;
-              if (content) {
-                hasContent = true;
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-              }
-            } catch { /* ignore parse errors */ }
-          }
-        }
-        if (!hasContent) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 빈 응답이 반환되었습니다.' })}\n\n`));
-        }
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      } catch (err) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('[Perplexity Streaming] Error:', err);
-        }
-        // 에러 발생 시에도 DONE을 보내서 클라이언트가 정상 종료하도록
-        if (!hasContent) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 스트리밍 중 오류가 발생했습니다.' })}\n\n`));
-        }
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      } finally {
-        controller.close();
-      }
-    }
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    }
-  });
+  const pplxTransformed = response.body.pipeThrough(pplxTransform);
+  return new Response(pplxTransformed, { headers: SSE_HEADERS });
 }
 
 export async function POST(request: NextRequest) {
