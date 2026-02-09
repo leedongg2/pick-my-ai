@@ -109,6 +109,15 @@
     --theme-primary: 47.9 95.8% 53.1%;
     --theme-primary-foreground: 0 0% 100%;
   }
+
+  /* Dark mode */
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+  }
 }
 
 @layer base {
@@ -120,6 +129,44 @@
     font-feature-settings: 'kern' 1, 'liga' 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Dark mode overrides for common hardcoded backgrounds */
+  .dark .bg-white {
+    background-color: rgb(17, 24, 39) !important; /* gray-900 */
+  }
+  .dark .bg-gray-50 {
+    background-color: rgb(11, 15, 25) !important; /* darker than gray-900 */
+  }
+  .dark .bg-gray-100 {
+    background-color: rgb(31, 41, 55) !important; /* gray-800 */
+  }
+  .dark .bg-gray-200 {
+    background-color: rgb(55, 65, 81) !important; /* gray-700 */
+  }
+  .dark .text-gray-900 {
+    color: rgb(243, 244, 246) !important; /* gray-100 */
+  }
+  .dark .text-gray-800 {
+    color: rgb(229, 231, 235) !important; /* gray-200 */
+  }
+  .dark .text-gray-700 {
+    color: rgb(209, 213, 219) !important; /* gray-300 */
+  }
+  .dark .text-gray-600 {
+    color: rgb(156, 163, 175) !important; /* gray-400 */
+  }
+  .dark .text-gray-500 {
+    color: rgb(156, 163, 175) !important; /* gray-400 */
+  }
+  .dark .border-gray-200 {
+    border-color: rgb(55, 65, 81) !important; /* gray-700 */
+  }
+  .dark .border-gray-100 {
+    border-color: rgb(55, 65, 81) !important; /* gray-700 */
+  }
+  .dark .divide-gray-200 > * + * {
+    border-color: rgb(55, 65, 81) !important;
   }
 }
 

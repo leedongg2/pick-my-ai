@@ -9,7 +9,7 @@ import './globals.css';
 // 동적 임포트로 초기 로딩 최적화
 const Header = dynamic(() => import('@/components/Header').then(mod => ({ default: mod.Header })), {
   ssr: true,
-  loading: () => <div className="h-16 bg-white border-b border-gray-200" />
+  loading: () => <div className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700" />
 });
 
 const inter = Inter({ subsets: ['latin'] });

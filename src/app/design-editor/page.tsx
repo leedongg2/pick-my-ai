@@ -17,6 +17,7 @@ export default function DesignEditorPage() {
   const [selectedElement, setSelectedElement] = useState<DesignElement | null>(null);
   const [currentPage, setCurrentPage] = useState<'chat' | 'dashboard' | 'settings'>('chat');
   const [showCode, setShowCode] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   const didInitRef = useRef(false);
   const skipFirstSyncRef = useRef(true);
@@ -26,18 +27,20 @@ export default function DesignEditorPage() {
     if (didInitRef.current) return;
     didInitRef.current = true;
 
-    if (customDesignTheme.theme) {
+    if (customDesignTheme?.theme) {
       setTheme({ ...customDesignTheme.theme });
     } else {
       setTheme({ ...defaultTheme });
     }
 
-    if (customDesignTheme.elementColors) {
+    if (customDesignTheme?.elementColors) {
       setElementColors({ ...customDesignTheme.elementColors });
     } else {
       setElementColors({});
     }
-  }, [customDesignTheme.theme, customDesignTheme.elementColors]);
+
+    setIsReady(true);
+  }, [customDesignTheme?.theme, customDesignTheme?.elementColors]);
 
   // 스토어 동기화는 저장 버튼 클릭 시에만 (실시간 동기화 제거로 성능 향상)
   // 실시간 미리보기는 로컬 state만 사용
@@ -136,6 +139,17 @@ body {
 /* Custom element overrides */
 ${elementColorCss}`;
   }, [theme, elementColors]);
+
+  if (!isReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-100">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">디자인 에디터 로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">

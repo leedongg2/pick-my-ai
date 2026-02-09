@@ -105,26 +105,26 @@ export function SettingsForm() {
   return (
     <div className="max-w-3xl mx-auto space-y-6 px-6 py-8">
       {/* 디자인 에디터 */}
-      <div className="bg-white rounded-xl border border-gray-200 settings-card">
-        <div className="px-6 py-4 border-b border-gray-200">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 settings-card">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-              <Paintbrush className="w-5 h-5 text-purple-600" />
+            <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+              <Paintbrush className="w-5 h-5 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-gray-900">{t.settings.designEditor}</h3>
-              <p className="text-sm text-gray-600">{t.settings.designEditorDesc}</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t.settings.designEditor}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{t.settings.designEditorDesc}</p>
             </div>
           </div>
         </div>
         <div className="p-6">
-          <p className="text-sm text-gray-600 mb-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             {t.settings.designEditorDetail}
           </p>
           <button
             type="button"
             onClick={handleOpenDesignEditor}
-            className="w-full py-2.5 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center"
+            className="w-full py-2.5 px-4 bg-primary text-primary-foreground hover:opacity-90 rounded-lg font-medium text-sm transition-colors flex items-center justify-center"
           >
             <Paintbrush className="w-4 h-4 mr-2" />
             {t.settings.designButton}
@@ -133,15 +133,15 @@ export function SettingsForm() {
       </div>
 
       {/* 다크모드 설정 */}
-      <div className="bg-white rounded-xl border border-gray-200 settings-card">
-        <div className="px-6 py-4 border-b border-gray-200">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 settings-card">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
-              <Moon className="w-5 h-5 text-indigo-600" />
+            <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+              <Moon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-gray-900">{t.settings.darkMode}</h3>
-              <p className="text-sm text-gray-600">라이트, 다크, 시스템 모드 중 선택하세요</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t.settings.darkMode}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">라이트, 다크, 시스템 모드 중 선택하세요</p>
             </div>
           </div>
         </div>
@@ -151,15 +151,15 @@ export function SettingsForm() {
       </div>
 
       {/* 테마 설정 */}
-      <div className="bg-white rounded-xl border border-gray-200 settings-card">
-        <div className="px-6 py-4 border-b border-gray-200">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 settings-card">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
-              <Palette className="w-5 h-5 text-blue-600" />
+            <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+              <Palette className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-gray-900">{t.settings.themeColor}</h3>
-              <p className="text-sm text-gray-600">{t.settings.themeColorDesc}</p>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t.settings.themeColor}</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{t.settings.themeColorDesc}</p>
             </div>
           </div>
         </div>
@@ -171,7 +171,7 @@ export function SettingsForm() {
                 type="button"
                 onClick={() => handleThemeChange(theme.value)}
                 className={`w-11 h-11 rounded-lg ${theme.bg} ${theme.hover} ${
-                  selectedTheme === theme.value ? 'ring-2 ring-offset-2 ring-gray-900' : ''
+                  selectedTheme === theme.value ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-white dark:ring-offset-gray-900' : ''
                 } transition-all`}
                 title={t.settings[theme.nameKey]}
               >
@@ -179,14 +179,14 @@ export function SettingsForm() {
               </button>
             ))}
           </div>
-          <p className="mt-4 text-sm text-gray-600">
-            선택한 색상: <span className="font-medium text-gray-900">{colorThemes.find(ct => ct.value === selectedTheme) ? t.settings[colorThemes.find(ct => ct.value === selectedTheme)!.nameKey] : ''}</span>
+          <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">
+            선택한 색상: <span className="font-medium text-gray-900 dark:text-gray-100">{colorThemes.find(ct => ct.value === selectedTheme) ? t.settings[colorThemes.find(ct => ct.value === selectedTheme)!.nameKey] : ''}</span>
           </p>
         </div>
       </div>
 
       {/* 알림 설정 */}
-      <div className="bg-white rounded-xl border border-gray-200 settings-card">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 settings-card">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -198,14 +198,14 @@ export function SettingsForm() {
                 </svg>
               </div>
               <div>
-                <span className="text-sm font-medium text-gray-900">{t.settings.showSuccess}</span>
-                <p className="text-xs text-gray-500 mt-0.5">{t.settings.showSuccessDesc}</p>
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.settings.showSuccess}</span>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t.settings.showSuccessDesc}</p>
               </div>
             </div>
             <button
               type="button"
               onClick={toggleSuccessNotifications}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${settings.showSuccessNotifications ? 'bg-blue-600' : 'bg-gray-200'}`}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${settings.showSuccessNotifications ? 'bg-primary' : 'bg-gray-200 dark:bg-gray-600'}`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.showSuccessNotifications ? 'translate-x-6' : 'translate-x-1'}`}
