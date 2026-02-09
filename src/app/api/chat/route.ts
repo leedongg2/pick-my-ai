@@ -224,62 +224,42 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
       ]
     : transformedMessages;
 
+  // Codex 모델은 /v1/responses 엔드포인트 사용
+  const isCodex = selectedModel.includes('codex');
+  const endpoint = isCodex 
+    ? 'https://api.openai.com/v1/responses'
+    : 'https://api.openai.com/v1/chat/completions';
+
   // GPT-5 시리즈는 temperature를 지원하지 않으므로 제외
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: 4096 // GPT 시리즈 최대 출력 토큰
+    max_completion_tokens: 4096,
+    stream: !isCodex // Codex 외 모든 모델은 stream:true (Netlify 타임아웃 방지)
   };
   
   // GPT-5 시리즈가 아닌 경우에만 temperature 추가
   if (!isGPT5Series) {
     requestBody.temperature = 0.7;
   }
-  
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[OpenAI] Request body:`, {
-      model: requestBody.model,
-      messageCount: requestBody.messages.length,
-      maxTokens: requestBody.max_completion_tokens,
-      stream: requestBody.stream
-    });
-  }
-
-  // Codex 모델은 /v1/responses 엔드포인트 사용
-  const isCodex = selectedModel.includes('codex');
-  const endpoint = isCodex 
-    ? 'https://api.openai.com/v1/responses'
-    : 'https://api.openai.com/v1/chat/completions';
-  
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[OpenAI] Using endpoint: ${endpoint}`);
-  }
 
   // Responses API는 다른 파라미터 구조 사용
   let apiRequestBody: any;
   if (isCodex) {
-    // Responses API 형식
     apiRequestBody = {
       model: requestBody.model,
-      input: requestBody.messages, // messages -> input
+      input: requestBody.messages,
       max_tokens: requestBody.max_completion_tokens,
-      stream: requestBody.stream
     };
     if (requestBody.temperature !== undefined) {
       apiRequestBody.temperature = requestBody.temperature;
     }
   } else {
-    // Chat Completions API 형식
     apiRequestBody = requestBody;
   }
 
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[OpenAI] Request body structure:`, {
-      endpoint,
-      hasInput: 'input' in apiRequestBody,
-      hasMessages: 'messages' in apiRequestBody
-    });
+    console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
   const response = await fetch(endpoint, {
@@ -291,12 +271,8 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     body: JSON.stringify(apiRequestBody)
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[OpenAI] Response status: ${response.status}`);
-  }
-  
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData = await response.json().catch(() => ({}));
     if (process.env.NODE_ENV !== 'production') {
       console.error('[OpenAI] Error response:', errorData);
     }
@@ -309,19 +285,13 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
       const rateLimitInfo = parseRateLimitError(error);
       
       if (rateLimitInfo.isRateLimit) {
-        // 현재 키를 제한 목록에 추가
         apiKeyManager.handleRateLimitError('openai', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
         
-        // 다른 키로 재시도
         const nextKey = apiKeyManager.getAvailableKey('openai');
         if (nextKey && nextKey !== apiKey) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`OpenAI Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
-          }
           return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction);
         }
         
-        // 모든 키가 제한된 경우
         const availability = apiKeyManager.getNextAvailableTime('openai');
         throw new Error(availability.message || 'OpenAI API 요청 한도를 초과했습니다.');
       }
@@ -330,13 +300,44 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     throw error;
   }
 
-  const data = await response.json();
+  // 스트리밍 응답을 서버에서 모아서 반환 (Netlify 타임아웃 방지)
+  if (!isCodex && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer = '';
 
-  // Codex (Responses API) vs Chat Completions API
-  const isCodexResp = (modelMap[model] || '').includes('codex');
-  const content = isCodexResp
-    ? (data?.output?.[0]?.content?.[0]?.text || data?.choices?.[0]?.message?.content)
-    : data?.choices?.[0]?.message?.content;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const data = trimmed.slice(6);
+        if (data === '[DONE]') break;
+        
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) fullContent += delta;
+        } catch {}
+      }
+    }
+
+    if (!fullContent) {
+      throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
+    }
+    return fullContent;
+  }
+
+  // Codex (비스트리밍) 응답 처리
+  const data = await response.json();
+  const content = data?.output?.[0]?.content?.[0]?.text || data?.choices?.[0]?.message?.content;
 
   if (!content) {
     throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
@@ -408,8 +409,8 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     }
   }
 
-  // generateContent 엔드포인트 사용 (비스트리밍)
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${apiKey}`, {
+  // streamGenerateContent 엔드포인트 사용 (스트리밍으로 받아 서버에서 모아서 반환 - Netlify 타임아웃 방지)
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:streamGenerateContent?alt=sse&key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -440,9 +441,6 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         
         const nextKey = apiKeyManager.getAvailableKey('gemini');
         if (nextKey && nextKey !== apiKey) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`Gemini Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
-          }
           return callGemini(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
@@ -454,15 +452,43 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     throw error;
   }
 
-  const data = await response.json();
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  const content = parts.map((p: any) => p?.text).filter(Boolean).join('');
+  // SSE 스트림을 서버에서 모아서 반환
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer = '';
 
-  if (!content) {
-    throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const jsonStr = trimmed.slice(6);
+        
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const parts = parsed?.candidates?.[0]?.content?.parts || [];
+          for (const p of parts) {
+            if (p?.text) fullContent += p.text;
+          }
+        } catch {}
+      }
+    }
+
+    if (!fullContent) {
+      throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
+    }
+    return fullContent;
   }
 
-  return content;
+  throw new Error('Gemini API 응답을 읽을 수 없습니다.');
 }
 
 
@@ -533,14 +559,14 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
       max_tokens: 4096,
       temperature: temperature ?? 1.0,
       top_p: 0.9,
-      stream: false,
+      stream: true, // 스트리밍으로 받아 서버에서 모아서 반환 (Netlify 타임아웃 방지)
       system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
       messages: transformed
     })
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
+    const errorData = await response.json().catch(() => ({}));
     const error: any = new Error(errorData.error?.message || 'Anthropic API 오류');
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
@@ -554,9 +580,6 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
         
         const nextKey = apiKeyManager.getAvailableKey('anthropic');
         if (nextKey && nextKey !== apiKey) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`Anthropic Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
-          }
           return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature);
         }
         
@@ -568,14 +591,43 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     throw error;
   }
 
-  const data = await response.json();
-  const content = data?.content?.map((c: any) => c.type === 'text' ? c.text : '').filter(Boolean).join('') || '';
+  // SSE 스트림을 서버에서 모아서 반환
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer = '';
 
-  if (!content) {
-    throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const jsonStr = trimmed.slice(6);
+        
+        try {
+          const parsed = JSON.parse(jsonStr);
+          // Anthropic SSE: content_block_delta 이벤트에서 텍스트 추출
+          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+            fullContent += parsed.delta.text;
+          }
+        } catch {}
+      }
+    }
+
+    if (!fullContent) {
+      throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
+    }
+    return fullContent;
   }
 
-  return content;
+  throw new Error('Anthropic API 응답을 읽을 수 없습니다.');
 }
 
 // Perplexity API 호출 (비스트리밍 JSON - Netlify 완벽 호환)
@@ -617,7 +669,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      stream: false,
+      stream: true, // 스트리밍으로 받아 서버에서 모아서 반환 (Netlify 타임아웃 방지)
       messages: finalMessages,
       max_tokens: 2048,
       temperature: temperature ?? 0.7,
@@ -648,14 +700,42 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     throw error;
   }
 
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  // SSE 스트림을 서버에서 모아서 반환
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    let buffer = '';
 
-  if (!content) {
-    throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const data = trimmed.slice(6);
+        if (data === '[DONE]') break;
+        
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) fullContent += delta;
+        } catch {}
+      }
+    }
+
+    if (!fullContent) {
+      throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
+    }
+    return fullContent;
   }
 
-  return content;
+  throw new Error('Perplexity API 응답을 읽을 수 없습니다.');
 }
 
 export async function POST(request: NextRequest) {
