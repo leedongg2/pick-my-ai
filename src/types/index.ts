@@ -7,7 +7,7 @@ export interface TokenBudget {
 
 export interface AIModel {
   id: string;
-  series: 'gpt' | 'claude' | 'perplexity' | 'coding' | 'image' | 'gemini' | 'grok';
+  series: 'gpt' | 'claude' | 'perplexity' | 'coding' | 'image' | 'gemini';
   displayName: string;
   piWon: number; // 원가 (원)
   enabled: boolean;

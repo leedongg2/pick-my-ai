@@ -65,6 +65,16 @@ export const initialModels: AIModel[] = [
     maxCharacters: 1250,
   },
   {
+    id: 'haiku45',
+    series: 'claude',
+    displayName: 'Claude Haiku 4.5',
+    piWon: 5,
+    tier: 'low',
+    enabled: true,
+    description: '향상된 Haiku 4.5, 저비용 경량 모델',
+    maxCharacters: 1250,
+  },
+  {
     id: 'sonnet45',
     series: 'claude',
     displayName: 'Claude Sonnet 4.5',
@@ -108,7 +118,7 @@ export const initialModels: AIModel[] = [
     id: 'opus46',
     series: 'claude',
     displayName: 'Claude Opus 4.6',
-    piWon: 120,
+    piWon: 65,
     tier: 'high',
     enabled: true,
     description: '최고 성능의 Opus 4.6, 최첨단 추론 및 창의성',
@@ -171,16 +181,6 @@ export const initialModels: AIModel[] = [
 
   // 코딩
   {
-    id: 'codex',
-    series: 'coding',
-    displayName: 'Codex',
-    piWon: 50,
-    tier: 'low',
-    enabled: true,
-    description: '코드 생성에 특화된 모델',
-    maxCharacters: 2000,
-  },
-  {
     id: 'gpt5codex',
     series: 'coding',
     displayName: 'GPT-5 Codex',
@@ -198,6 +198,16 @@ export const initialModels: AIModel[] = [
     tier: 'low',
     enabled: true,
     description: '개선된 GPT-5.1 기반 코딩 모델',
+    maxCharacters: 2000,
+  },
+  {
+    id: 'gpt52codex',
+    series: 'coding',
+    displayName: 'GPT-5.2 Codex',
+    piWon: 15,
+    tier: 'low',
+    enabled: true,
+    description: '최신 GPT-5.2 기반 코딩 모델',
     maxCharacters: 2000,
   },
 
@@ -231,38 +241,6 @@ export const initialModels: AIModel[] = [
     enabled: true,
     description: '경량화된 o4 모델',
     maxCharacters: 1250,
-  },
-
-  // Grok 시리즈
-  {
-    id: 'grok3',
-    series: 'grok',
-    displayName: 'Grok 3',
-    piWon: 25,
-    tier: 'mid',
-    enabled: true,
-    description: 'xAI의 Grok 3, 실시간 정보 통합',
-    maxCharacters: 4000,
-  },
-  {
-    id: 'grok4',
-    series: 'grok',
-    displayName: 'Grok 4',
-    piWon: 35,
-    tier: 'mid',
-    enabled: true,
-    description: '향상된 Grok 4, 개선된 추론 능력',
-    maxCharacters: 4000,
-  },
-  {
-    id: 'grok41',
-    series: 'grok',
-    displayName: 'Grok 4.1',
-    piWon: 45,
-    tier: 'high',
-    enabled: true,
-    description: '최신 Grok 4.1, 최고 수준의 분석 및 통찰력',
-    maxCharacters: 4000,
   },
 
   // 이미지 모델
@@ -307,11 +285,6 @@ export const seriesInfo = {
   perplexity: {
     name: 'Perplexity 시리즈',
     description: '실시간 검색과 분석에 특화된 모델',
-    icon: '',
-  },
-  grok: {
-    name: 'Grok 시리즈',
-    description: 'xAI의 Grok 모델, 실시간 정보와 통찰력',
     icon: '',
   },
   coding: {

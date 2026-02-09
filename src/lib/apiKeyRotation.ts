@@ -33,7 +33,6 @@ interface ApiKeyPool {
   anthropic: ApiKeyStatus[];
   gemini: ApiKeyStatus[];
   perplexity: ApiKeyStatus[];
-  grok: ApiKeyStatus[];
 }
 
 class ApiKeyRotationManager {
@@ -42,7 +41,6 @@ class ApiKeyRotationManager {
     anthropic: [],
     gemini: [],
     perplexity: [],
-    grok: [],
   };
 
   private requestQueue: QueuedRequest[] = [];
@@ -136,28 +134,12 @@ class ApiKeyRotationManager {
         securityLog('info', `Perplexity API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
-
-    // Grok 키
-    for (let i = 1; i <= 3; i++) {
-      const key = process.env[`GROK_API_KEY_${i}`] || (i === 1 ? process.env.GROK_API_KEY : '');
-      if (key) {
-        if (!validateApiKey(key, 'grok')) {
-          securityLog('warn', `Grok API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
-          continue;
-        }
-        this.keyPools.grok.push({
-          key,
-          isAvailable: true,
-        });
-        securityLog('info', `Grok API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
-      }
-    }
   }
 
   /**
    * 사용 가능한 API 키 가져오기
    */
-  getAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok'): string | null {
+  getAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): string | null {
     const pool = this.keyPools[provider];
     
     if (!pool || pool.length === 0) {
@@ -192,7 +174,7 @@ class ApiKeyRotationManager {
    * Rate Limit 에러 처리
    */
   handleRateLimitError(
-    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok',
+    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity',
     apiKey: string,
     resetTime?: number,
     rateLimitType?: 'minute' | 'day'
@@ -232,7 +214,7 @@ class ApiKeyRotationManager {
   /**
    * 다음 사용 가능 시간 가져오기
    */
-  getNextAvailableTime(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok'): {
+  getNextAvailableTime(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): {
     available: boolean;
     resetTime?: number;
     waitSeconds?: number;
@@ -283,7 +265,7 @@ class ApiKeyRotationManager {
   /**
    * 키 상태 초기화 (테스트용)
    */
-  resetKeyStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok', apiKey: string): void {
+  resetKeyStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity', apiKey: string): void {
     const pool = this.keyPools[provider];
     const keyStatus = pool.find(k => k.key === apiKey);
 
@@ -298,7 +280,7 @@ class ApiKeyRotationManager {
   /**
    * 모든 키 상태 조회 (디버깅용)
    */
-  getKeyPoolStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok'): ApiKeyStatus[] {
+  getKeyPoolStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): ApiKeyStatus[] {
     return this.keyPools[provider].map(k => ({
       key: k.key.substring(0, 10) + '...',
       isAvailable: k.isAvailable,
@@ -312,7 +294,7 @@ class ApiKeyRotationManager {
    * 요청을 큐에 추가하고 실행
    */
   async enqueueRequest<T>(
-    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok',
+    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity',
     execute: () => Promise<T>,
     priority: number = 0
   ): Promise<T> {
@@ -348,7 +330,7 @@ class ApiKeyRotationManager {
 
     try {
       const request = this.requestQueue[0];
-      const provider = request.provider as 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok';
+      const provider = request.provider as 'openai' | 'anthropic' | 'gemini' | 'perplexity';
       
       // 사용 가능한 키 확인
       const keyStatus = this.findBestAvailableKey(provider);
@@ -397,7 +379,7 @@ class ApiKeyRotationManager {
   /**
    * 최적의 사용 가능 키 찾기
    */
-  private findBestAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'grok'): ApiKeyStatus | null {
+  private findBestAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): ApiKeyStatus | null {
     const pool = this.keyPools[provider];
     const now = Date.now();
 

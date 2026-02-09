@@ -127,9 +127,9 @@ async function executeOpenAIStreamingRequest(model: string, messages: any[], api
     'o3mini': 'o3-mini',
     'o4mini': 'o4-mini',
     // 코딩 모델
-    'codex': 'gpt-5-codex',
     'gpt5codex': 'gpt-5-codex',
     'gpt51codex': 'gpt-5.1-codex',
+    'gpt52codex': 'gpt-5.2-codex',
     // 이미지 모델
     'gptimage1': 'gpt-image-1',
     'dalle3': 'dall-e-3',
@@ -533,10 +533,11 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
 
   const modelMap: { [key: string]: string } = {
     'haiku35': 'claude-3-5-haiku-20241022',
+    'haiku45': 'claude-3-5-haiku-20241022',
     'sonnet45': 'claude-3-5-sonnet-20241022',
     'opus4': 'claude-opus-4-20250514',
-    'opus41': 'claude-opus-4.1-20250514',
-    'opus45': 'claude-opus-4.5-20250514',
+    'opus41': 'claude-opus-4.1-20241022',
+    'opus45': 'claude-opus-4.1-20241022', // 임시 매핑
     'opus46': 'claude-opus-4.6-20250514',
     // 레거시 매핑
     'claude-haiku': 'claude-3-haiku-20240307',
@@ -625,80 +626,6 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
 
   const data = await response.json();
   return data.content[0].text;
-}
-
-// Grok API 호출 (키 로테이션 지원)
-async function callGrok(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
-  const apiKey = apiKeyManager.getAvailableKey('grok');
-  
-  if (!apiKey) {
-    throw new Error('Grok API 키가 설정되지 않았습니다.');
-  }
-
-  const modelMap: { [key: string]: string } = {
-    'grok41': 'grok-beta',
-    'grok4': 'grok-beta',
-    'grok3': 'grok-2',
-    // 레거시 매핑
-    'grok-beta': 'grok-beta',
-    'grok-2': 'grok-2',
-  };
-
-  const selectedModel = modelMap[model] || 'grok-beta';
-
-  // Grok 형식으로 변환
-  const grokMessages = messages.map((m: any) => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: Array.isArray(m.content) 
-      ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-      : (typeof m.content === 'string' ? m.content : '')
-  }));
-
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: selectedModel,
-      messages: grokMessages,
-      max_tokens: 4096,
-      temperature: temperature ?? 0.7,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    const error: any = new Error(errorData.error?.message || 'Grok API 오류');
-    error.status = response.status;
-    error.response = { status: response.status, headers: response.headers };
-    
-    // 429 에러 처리
-    if (response.status === 429 && retryCount < 3) {
-      const rateLimitInfo = parseRateLimitError(error);
-      
-      if (rateLimitInfo.isRateLimit) {
-        apiKeyManager.handleRateLimitError('grok', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
-        
-        const nextKey = apiKeyManager.getAvailableKey('grok');
-        if (nextKey && nextKey !== apiKey) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`Grok Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
-          }
-          return callGrok(model, messages, userAttachments, retryCount + 1, temperature);
-        }
-        
-        const availability = apiKeyManager.getNextAvailableTime('grok');
-        throw new Error(availability.message || 'Grok API 요청 한도를 초과했습니다.');
-      }
-    }
-    
-    throw error;
-  }
-
-  const data = await response.json();
-  return data.choices[0]?.message?.content || '[Grok] 빈 응답';
 }
 
 // Perplexity API 호출 (키 로테이션 지원)
@@ -966,7 +893,7 @@ export async function POST(request: NextRequest) {
         console.log('[Chat API] Calling Gemini API');
       }
       response = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
-    } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45') {
+    } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'haiku45' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45' || modelId === 'opus46') {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Anthropic API');
       }
@@ -976,11 +903,6 @@ export async function POST(request: NextRequest) {
         console.log('[Chat API] Calling Perplexity API');
       }
       response = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
-    } else if (modelId.startsWith('grok') || modelId === 'grok41' || modelId === 'grok4' || modelId === 'grok3') {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Grok API');
-      }
-      response = await callGrok(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
