@@ -33,12 +33,24 @@ function createSSETransformStream(
   let buffer = '';
 
   let firstChunk = true;
+  let lastChunkTime = Date.now();
   const transform = new TransformStream<Uint8Array, Uint8Array>({
     start(controller) {
       // 즉시 keepalive 청크를 보내서 Netlify idle timeout 방지
       controller.enqueue(encoder.encode(': keepalive\n\n'));
+      
+      // 5초마다 keepalive 전송 (Netlify idle timeout 방지)
+      const keepaliveInterval = setInterval(() => {
+        if (Date.now() - lastChunkTime > 5000) {
+          controller.enqueue(encoder.encode(': keepalive\n\n'));
+        }
+      }, 5000);
+      
+      // cleanup을 위해 interval 저장 (실제로는 flush에서 정리)
+      (controller as any)._keepaliveInterval = keepaliveInterval;
     },
     transform(chunk, controller) {
+      lastChunkTime = Date.now();
       buffer += decoder.decode(chunk, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -73,6 +85,10 @@ function createSSETransformStream(
       }
     },
     flush(controller) {
+      // keepalive interval 정리
+      const interval = (controller as any)._keepaliveInterval;
+      if (interval) clearInterval(interval);
+      
       // 스트림 끝에 DONE 보장
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
     }
