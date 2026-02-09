@@ -32,7 +32,12 @@ function createSSETransformStream(
   const decoder = new TextDecoder();
   let buffer = '';
 
+  let firstChunk = true;
   const transform = new TransformStream<Uint8Array, Uint8Array>({
+    start(controller) {
+      // 즉시 keepalive 청크를 보내서 Netlify idle timeout 방지
+      controller.enqueue(encoder.encode(': keepalive\n\n'));
+    },
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true });
       const lines = buffer.split('\n');
@@ -62,6 +67,7 @@ function createSSETransformStream(
           const content = extractContent(parsed);
           if (content) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            firstChunk = false;
           }
         } catch { /* ignore parse errors */ }
       }
