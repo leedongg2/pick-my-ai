@@ -161,11 +161,11 @@ export const initialModels: AIModel[] = [
   {
     id: 'gemini3',
     series: 'gemini',
-    displayName: 'Gemini 3.0',
+    displayName: 'Gemini 3.0 Flash',
     piWon: 60,
     tier: 'low',
     enabled: true,
-    description: '최신 Gemini 3.0 모델, 향상된 멀티모달 성능',
+    description: '최신 Gemini 3.0 Flash 모델, 향상된 멀티모달 성능',
     maxCharacters: 2000,
   },
   {
