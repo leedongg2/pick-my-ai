@@ -732,9 +732,12 @@ export const useStore = create<AppState>()(
       createChatSession: (title) => {
         const now = Date.now();
         const lastCreatedAt = get().lastChatSessionCreatedAt;
+        const hasAnySession = get().chatSessions.length > 0;
+        const hasCurrent = !!get().currentSessionId;
         
         // 1.3초 쿨다운 확인
-        if (lastCreatedAt && now - lastCreatedAt < 1300) {
+        // 단, 세션이 하나도 없거나 현재 세션이 없으면 반드시 생성되도록 예외 처리
+        if (hasAnySession && hasCurrent && lastCreatedAt && now - lastCreatedAt < 1300) {
           return null;
         }
         

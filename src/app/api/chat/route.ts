@@ -42,7 +42,11 @@ function createSSETransformStream(
       // 5초마다 keepalive 전송 (Netlify idle timeout 방지)
       const keepaliveInterval = setInterval(() => {
         if (Date.now() - lastChunkTime > 5000) {
-          controller.enqueue(encoder.encode(': keepalive\n\n'));
+          try {
+            controller.enqueue(encoder.encode(': keepalive\n\n'));
+          } catch {
+            clearInterval(keepaliveInterval);
+          }
         }
       }, 5000);
       
@@ -728,7 +732,7 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      stream: false, // 비스트리밍으로 변경 (Netlify 호환)
+      stream: true,
       messages: (() => {
         if (!userAttachments?.length) return messages;
         const msgs = [...messages];
@@ -778,13 +782,26 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     throw error;
   }
 
-  // 비스트리밍 JSON 응답을 SSE 형식으로 래핑
   const encoder = new TextEncoder();
-  
+
+  const contentType = response.headers.get('content-type') || '';
+  const isEventStream = contentType.includes('text/event-stream');
+
+  // 스트리밍 응답
+  if (isEventStream && response.body) {
+    const { transform: pplxTransform } = createSSETransformStream(
+      (parsed) => parsed?.choices?.[0]?.delta?.content || null,
+      'Perplexity'
+    );
+    const transformed = response.body.pipeThrough(pplxTransform);
+    return new Response(transformed, { headers: SSE_HEADERS });
+  }
+
+  // 비스트리밍(또는 body 없음) 폴백: JSON을 SSE로 래핑
   try {
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || '[Perplexity] 빈 응답';
-    
+
     const wrapStream = new ReadableStream({
       start(c) {
         c.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
@@ -792,9 +809,9 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
         c.close();
       }
     });
-    
+
     return new Response(wrapStream, { headers: SSE_HEADERS });
-  } catch (err) {
+  } catch {
     const errStream = new ReadableStream({
       start(c) {
         c.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));

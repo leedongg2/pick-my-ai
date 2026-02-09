@@ -394,6 +394,12 @@ export const Chat: React.FC = () => {
       const sessionId = createChatSession('새 대화');
     }
   }, [currentSessionId, chatSessions.length, createChatSession]);
+
+  useEffect(() => {
+    if (!currentSessionId && chatSessions.length > 0) {
+      setCurrentSession(chatSessions[0].id);
+    }
+  }, [currentSessionId, chatSessions, setCurrentSession]);
   
   // Set default model when available models change (client-side only)
   useEffect(() => {
@@ -548,11 +554,10 @@ export const Chat: React.FC = () => {
     }
   }, []);
 
-  const handleSendMessage = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim() || !selectedModelId) return;
-
-    if (!selectedModel) return;
+  const handleSendMessage = useCallback(async () => {
+    if (!message.trim() || !selectedModelId || !selectedModel) {
+      return;
+    }
 
     // 이미지 생성 중에는 메시지 전송 차단
     if (isLoading && (selectedModelId === 'gptimage1' || selectedModelId === 'dalle3')) {
@@ -573,6 +578,14 @@ export const Chat: React.FC = () => {
     // 현재 선택된 모델 ID를 고정 (출력 중 모델 선택이 바뀌어도 메시지의 모델은 유지)
     const currentModelId = selectedModelId;
     
+    let sessionIdForThisRequest = currentSessionId;
+    if (!sessionIdForThisRequest) {
+      const created = createChatSession('새 대화');
+      sessionIdForThisRequest = created || useStore.getState().currentSessionId;
+    }
+
+    const assistantMessageId = sessionIdForThisRequest ? crypto.randomUUID() : null;
+
     try {
       const msg = message;
       setMessage('');
@@ -581,7 +594,11 @@ export const Chat: React.FC = () => {
       await deductCredit(selectedModelId);
       
       // API 호출을 위한 메시지 준비 (현재 메시지 포함)
-      const currentMessages = currentSession?.messages || [];
+      const liveState = useStore.getState();
+      const sessionForThisRequest = sessionIdForThisRequest
+        ? liveState.chatSessions.find((s: any) => s.id === sessionIdForThisRequest)
+        : null;
+      const currentMessages = sessionForThisRequest?.messages || currentSession?.messages || [];
       const newUserMessage = {
         role: 'user' as const,
         content: msg
@@ -604,11 +621,11 @@ export const Chat: React.FC = () => {
       }
       
       // 사용자 메시지를 세션에 추가
-      if (currentSessionId) {
+      if (sessionIdForThisRequest) {
         if (process.env.NODE_ENV !== 'production') {
-          console.log('[Chat] Adding user message to session:', currentSessionId);
+          console.log('[Chat] Adding user message to session:', sessionIdForThisRequest);
         }
-        addMessage(currentSessionId, {
+        addMessage(sessionIdForThisRequest, {
           id: crypto.randomUUID(),
           role: 'user' as const,
           content: msg,
@@ -620,6 +637,18 @@ export const Chat: React.FC = () => {
         if (process.env.NODE_ENV !== 'production') {
           console.error('[Chat] No session ID - cannot add user message');
         }
+      }
+
+      if (sessionIdForThisRequest && assistantMessageId) {
+        addMessage(sessionIdForThisRequest, {
+          id: assistantMessageId,
+          role: 'assistant' as const,
+          content: '',
+          modelId: selectedModelId,
+          timestamp: new Date().toISOString(),
+          creditUsed: 1
+        });
+        setTimeout(() => scrollToBottom(true), 100);
       }
 
       // API 호출
@@ -689,23 +718,12 @@ export const Chat: React.FC = () => {
       // 스트리밍 응답 처리 (OpenAI 모델)
       const isEventStream = response.headers.get('content-type')?.includes('text/event-stream');
       
-      if (isEventStream && currentSessionId) {
+      if (isEventStream && sessionIdForThisRequest && assistantMessageId) {
         if (process.env.NODE_ENV !== 'production') {
           console.log('Processing streaming response...');
         }
-        
-        // 빈 메시지 먼저 추가
-        const messageId = crypto.randomUUID();
-        addMessage(currentSessionId, {
-          id: messageId,
-          role: 'assistant' as const,
-          content: '',
-          modelId: selectedModelId,
-          timestamp: new Date().toISOString(),
-          creditUsed: 1
-        });
-        // AI 메시지 추가 직후 스크롤
-        setTimeout(() => scrollToBottom(true), 100);
+
+        const messageId = assistantMessageId;
 
         if (STREAMING_DRAFT_V2) {
           setDraftMessageId(messageId);
@@ -779,7 +797,7 @@ export const Chat: React.FC = () => {
                       }
                     }
                   } else {
-                    updateMessageContent(currentSessionId, messageId, fullContent);
+                    updateMessageContent(sessionIdForThisRequest, messageId, fullContent);
                     if (!userScrolledUpRef.current) {
                       scrollToBottom();
                     }
@@ -822,14 +840,14 @@ export const Chat: React.FC = () => {
         // 스트리밍 완료 또는 중간 끊김 시 기존 콘텐츠 확정
         if (STREAMING_DRAFT_V2) {
           setDraftContent(fullContent);
-          finalizeMessageContent(currentSessionId, messageId, fullContent);
+          finalizeMessageContent(sessionIdForThisRequest, messageId, fullContent);
           setDraftMessageId(null);
           draftContentRef.current = '';
           lastDraftFlushRef.current = 0;
           setTimeout(() => scrollToBottom(true), 100);
         } else {
           // DRAFT_V2가 아닌 경우에도 최종 콘텐츠 확정
-          updateMessageContent(currentSessionId, messageId, fullContent);
+          updateMessageContent(sessionIdForThisRequest, messageId, fullContent);
         }
         
         // 요약 추출 및 저장 (오류가 발생해도 스트리밍은 계속)
@@ -873,18 +891,22 @@ export const Chat: React.FC = () => {
         }
 
         // AI 응답 추가
-        if (currentSessionId) {
+        if (sessionIdForThisRequest) {
           if (process.env.NODE_ENV !== 'production') {
-            console.log('Adding AI message to session:', currentSessionId);
+            console.log('Adding AI message to session:', sessionIdForThisRequest);
           }
-          addMessage(currentSessionId, {
-            id: crypto.randomUUID(),
-            role: 'assistant' as const,
-            content: extracted.displayText,
-            modelId: selectedModelId,
-            timestamp: new Date().toISOString(),
-            creditUsed: 1
-          });
+          if (assistantMessageId) {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          } else {
+            addMessage(sessionIdForThisRequest, {
+              id: crypto.randomUUID(),
+              role: 'assistant' as const,
+              content: extracted.displayText,
+              modelId: selectedModelId,
+              timestamp: new Date().toISOString(),
+              creditUsed: 1
+            });
+          }
           // 비스트리밍 응답 후 스크롤
           setTimeout(() => scrollToBottom(true), 100);
         }
@@ -914,15 +936,21 @@ export const Chat: React.FC = () => {
       const errorMessage = error.message || '알 수 없는 오류가 발생했습니다.';
       
       // 에러 메시지를 채팅에 추가
-      if (currentSessionId) {
-        addMessage(currentSessionId, {
-          id: crypto.randomUUID(),
-          role: 'assistant' as const,
-          content: `⚠️ 오류가 발생했습니다: ${errorMessage}\n\n문제가 지속되면:\n1. 인터넷 연결을 확인하세요\n2. API 키가 올바른지 확인하세요\n3. 나중에 다시 시도하세요`,
-          modelId: currentModelId,
-          timestamp: new Date().toISOString(),
-          creditUsed: 1
-        });
+      const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
+      if (sid) {
+        const errContent = `⚠️ 오류가 발생했습니다: ${errorMessage}\n\n문제가 지속되면:\n1. 인터넷 연결을 확인하세요\n2. API 키가 올바른지 확인하세요\n3. 나중에 다시 시도하세요`;
+        if (assistantMessageId) {
+          updateMessageContent(sid, assistantMessageId, errContent);
+        } else {
+          addMessage(sid, {
+            id: crypto.randomUUID(),
+            role: 'assistant' as const,
+            content: errContent,
+            modelId: currentModelId,
+            timestamp: new Date().toISOString(),
+            creditUsed: 1
+          });
+        }
       }
       
       toast.error(`응답 생성 실패: ${errorMessage}`);
@@ -969,7 +997,7 @@ export const Chat: React.FC = () => {
       if (streamingRef.current || isLoading) {
         return;
       }
-      handleSendMessage(e as React.FormEvent);
+      handleSendMessage();
     }
   }, [handleSendMessage, isLoading]);
   
