@@ -712,7 +712,7 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      stream: true,
+      stream: false, // 비스트리밍으로 변경 (Netlify 호환)
       messages: (() => {
         if (!userAttachments?.length) return messages;
         const msgs = [...messages];
@@ -727,6 +727,9 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
       max_tokens: 2048,
       temperature: temperature ?? 0.7,
       top_p: 0.9,
+      search_recency_filter: 'month',
+      return_images: false,
+      return_related_questions: false,
     })
   });
 
@@ -759,47 +762,32 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     throw error;
   }
 
-  // TransformStream으로 upstream SSE를 변환 (Netlify 스트리밍 호환)
+  // 비스트리밍 JSON 응답을 SSE 형식으로 래핑
   const encoder = new TextEncoder();
-
-  // Perplexity가 스트리밍 대신 JSON을 반환하는 경우 처리
-  const pplxContentType = response.headers.get('content-type') || '';
-  if (!pplxContentType.includes('text/event-stream')) {
-    try {
-      const data = await response.json();
-      const content = data?.choices?.[0]?.message?.content || '[Perplexity] 빈 응답';
-      const wrapStream = new ReadableStream({
-        start(c) {
-          c.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-          c.enqueue(encoder.encode('data: [DONE]\n\n'));
-          c.close();
-        }
-      });
-      return new Response(wrapStream, { headers: SSE_HEADERS });
-    } catch {
-      const errStream = new ReadableStream({
-        start(c) {
-          c.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
-          c.enqueue(encoder.encode('data: [DONE]\n\n'));
-          c.close();
-        }
-      });
-      return new Response(errStream, { headers: SSE_HEADERS });
-    }
+  
+  try {
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || '[Perplexity] 빈 응답';
+    
+    const wrapStream = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+        c.enqueue(encoder.encode('data: [DONE]\n\n'));
+        c.close();
+      }
+    });
+    
+    return new Response(wrapStream, { headers: SSE_HEADERS });
+  } catch (err) {
+    const errStream = new ReadableStream({
+      start(c) {
+        c.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
+        c.enqueue(encoder.encode('data: [DONE]\n\n'));
+        c.close();
+      }
+    });
+    return new Response(errStream, { headers: SSE_HEADERS });
   }
-
-  if (!response.body) {
-    const fallback = new ReadableStream({ start(c) { c.enqueue(encoder.encode('data: [DONE]\n\n')); c.close(); } });
-    return new Response(fallback, { headers: SSE_HEADERS });
-  }
-
-  const { transform: pplxTransform } = createSSETransformStream(
-    (parsed) => parsed?.choices?.[0]?.delta?.content || null,
-    'Perplexity'
-  );
-
-  const pplxTransformed = response.body.pipeThrough(pplxTransform);
-  return new Response(pplxTransformed, { headers: SSE_HEADERS });
 }
 
 export async function POST(request: NextRequest) {
