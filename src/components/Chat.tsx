@@ -1284,7 +1284,7 @@ export const Chat: React.FC = () => {
         {/* 입력 영역 */}
         {wrapWithProfiler(
           'ChatInput',
-          <div className="border-t border-gray-200 p-4">
+          <div className="p-4">
           <div className="max-w-3xl mx-auto">
             {/* 모델 선택 */}
             <div className="mb-3">
