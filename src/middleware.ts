@@ -90,26 +90,38 @@ export async function middleware(request: NextRequest) {
     const isPublicEndpoint = publicEndpoints.some(ep => pathname.startsWith(ep));
 
     if (!isPublicEndpoint) {
-      const csrfCookie = request.cookies.get('csrf-token');
-      const csrfHeader = request.headers.get('x-csrf-token');
+      // same-origin 요청은 Origin/Referer 검증으로 통과 (브라우저가 httpOnly 쿠키를 읽을 수 없어
+      // x-csrf-token 헤더를 만들 수 없기 때문)
+      const expectedOrigin = request.nextUrl.origin;
+      const origin = request.headers.get('origin');
+      const referer = request.headers.get('referer');
 
-      if (!csrfCookie || !csrfHeader) {
-        return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
-      }
+      const isSameOrigin =
+        (origin && origin === expectedOrigin) ||
+        (referer && referer.startsWith(expectedOrigin));
 
-      const cookieValue = csrfCookie.value;
-      const headerValue = csrfHeader;
+      if (!isSameOrigin) {
+        const csrfCookie = request.cookies.get('csrf-token');
+        const csrfHeader = request.headers.get('x-csrf-token');
 
-      if (cookieValue.length !== headerValue.length) {
-        return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
-      }
+        if (!csrfCookie || !csrfHeader) {
+          return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
+        }
 
-      let mismatch = 0;
-      for (let i = 0; i < cookieValue.length; i++) {
-        mismatch |= cookieValue.charCodeAt(i) ^ headerValue.charCodeAt(i);
-      }
-      if (mismatch !== 0) {
-        return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
+        const cookieValue = csrfCookie.value;
+        const headerValue = csrfHeader;
+
+        if (cookieValue.length !== headerValue.length) {
+          return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
+        }
+
+        let mismatch = 0;
+        for (let i = 0; i < cookieValue.length; i++) {
+          mismatch |= cookieValue.charCodeAt(i) ^ headerValue.charCodeAt(i);
+        }
+        if (mismatch !== 0) {
+          return NextResponse.json({ error: '요청이 유효하지 않습니다.' }, { status: 403 });
+        }
       }
     }
   }
