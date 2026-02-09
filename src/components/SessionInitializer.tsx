@@ -10,8 +10,6 @@ import { useStore } from '@/store';
 export function SessionInitializer() {
   const checkedRef = useRef(false);
   const isAuthenticated = useStore((s) => s.isAuthenticated);
-  const setCurrentUser = useStore((s) => s.setCurrentUser);
-  const setIsAuthenticated = useStore((s) => s.setIsAuthenticated);
 
   useEffect(() => {
     if (isAuthenticated || checkedRef.current) return;
@@ -31,18 +29,54 @@ export function SessionInitializer() {
         if (data.authenticated && data.user) {
           const userId = data.user.id;
 
-          setCurrentUser({
-            id: userId,
-            email: data.user.email,
-            name: data.user.name,
-            credits: 100,
-            subscription: 'free',
-            theme: 'blue',
-            createdAt: new Date(),
-          });
-          setIsAuthenticated(true);
+          // ★ 핵심: setCurrentUser 호출 전에 localStorage에서 기존 크레딧을 읽어둠
+          // setCurrentUser가 partialize를 트리거하여 wallet:null을 저장하면 기존 데이터가 소멸하기 때문
+          let savedLocalCredits: Record<string, number> = {};
+          let savedLocalTransactions: any[] = [];
+          let savedLocalHasFirstPurchase = false;
+          try {
+            const raw = localStorage.getItem('pick-my-ai-storage');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const ps = parsed?.state;
+              if (ps) {
+                const userWallet = ps[`user_${userId}_wallet`];
+                if (userWallet?.credits && Object.keys(userWallet.credits).length > 0) {
+                  savedLocalCredits = { ...userWallet.credits };
+                  savedLocalTransactions = userWallet.transactions || [];
+                }
+                if (Object.keys(savedLocalCredits).length === 0 && ps.wallet?.credits && Object.keys(ps.wallet.credits).length > 0) {
+                  savedLocalCredits = { ...ps.wallet.credits };
+                  savedLocalTransactions = ps.wallet?.transactions || [];
+                }
+                const userHfp = ps[`user_${userId}_hasFirstPurchase`];
+                if (userHfp) savedLocalHasFirstPurchase = true;
+              }
+            }
+          } catch { /* ignore */ }
 
-          // 서버에서 사용자 데이터(지갑 + 설정) 로드
+          // setCurrentUser + wallet을 한 번에 설정하여 partialize가 빈 wallet을 저장하는 것을 방지
+          const initialWallet = {
+            userId,
+            credits: savedLocalCredits,
+            transactions: savedLocalTransactions,
+          };
+          useStore.setState({
+            currentUser: {
+              id: userId,
+              email: data.user.email,
+              name: data.user.name,
+              credits: 100,
+              subscription: 'free' as const,
+              theme: 'blue',
+              createdAt: new Date(),
+            },
+            isAuthenticated: true,
+            wallet: initialWallet,
+            hasFirstPurchase: savedLocalHasFirstPurchase || Object.keys(savedLocalCredits).length > 0,
+          });
+
+          // 서버에서 사용자 데이터(지갑 + 설정) 로드 후 병합
           try {
             const { loadUserData } = await import('@/lib/userDataSync');
             const userData = await loadUserData();
@@ -50,13 +84,10 @@ export function SessionInitializer() {
             if (userData) {
               const stateUpdate: Record<string, any> = {};
 
-              // 지갑 복원: 서버 크레딧과 로컬 크레딧을 병합 (각 모델별 큰 값 사용)
-              const localWallet = useStore.getState().wallet;
-              const localCredits = localWallet?.credits || {};
               const serverCredits = userData.credits || {};
               
               // 병합: 서버와 로컬 중 더 큰 값을 사용
-              const mergedCredits: Record<string, number> = { ...localCredits };
+              const mergedCredits: Record<string, number> = { ...savedLocalCredits };
               for (const [modelId, amount] of Object.entries(serverCredits)) {
                 const serverVal = typeof amount === 'number' ? amount : 0;
                 const localVal = mergedCredits[modelId] || 0;
@@ -72,7 +103,7 @@ export function SessionInitializer() {
               stateUpdate.wallet = {
                 userId,
                 credits: mergedCredits,
-                transactions: localWallet?.transactions || [],
+                transactions: savedLocalTransactions,
               };
               if (hasCredits) {
                 stateUpdate.hasFirstPurchase = true;
@@ -139,7 +170,7 @@ export function SessionInitializer() {
         // 세션 확인 실패 시 무시 (비로그인 상태 유지)
       }
     })();
-  }, [isAuthenticated, setCurrentUser, setIsAuthenticated]);
+  }, [isAuthenticated]);
 
   return null;
 }
