@@ -706,8 +706,8 @@ async function callAnthropicStreaming(model: string, messages: any[], userAttach
   return new Response(anthropicTransformed, { headers: SSE_HEADERS });
 }
 
-// Perplexity API 스트리밍 호출 (키 로테이션 지원)
-async function callPerplexityStreaming(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<Response> {
+// Perplexity API 호출 (비스트리밍 JSON - Netlify 완벽 호환)
+async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
@@ -718,11 +718,24 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     'sonar': 'sonar',
     'sonarPro': 'sonar-pro',
     'deepResearch': 'sonar-reasoning',
-    // 레거시 매핑
     'perplexity-sonar': 'sonar',
     'perplexity-sonar-pro': 'sonar-pro',
     'perplexity-deep-research': 'sonar-reasoning'
   };
+
+  // 첨부파일 메모 추가
+  let finalMessages = messages;
+  if (userAttachments?.length) {
+    finalMessages = [...messages];
+    const lastUserIdx = finalMessages.map((m: any) => m.role).lastIndexOf('user');
+    if (lastUserIdx !== -1) {
+      const last = finalMessages[lastUserIdx];
+      finalMessages[lastUserIdx] = {
+        ...last,
+        content: `${last.content || ''}\n\n[첨부 ${userAttachments.length}개는 이 모델에서 직접 처리되지 않아 제외되었습니다.]`
+      };
+    }
+  }
 
   const response = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
@@ -732,95 +745,45 @@ async function callPerplexityStreaming(model: string, messages: any[], userAttac
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      stream: true,
-      messages: (() => {
-        if (!userAttachments?.length) return messages;
-        const msgs = [...messages];
-        const lastIdx = [...msgs].reverse().findIndex((m: any) => m.role === 'user');
-        if (lastIdx === -1) return messages;
-        const idx = msgs.length - 1 - lastIdx;
-        const last = msgs[idx];
-        const note = `\n\n[첨부 ${userAttachments.length}개는 이 모델에서 직접 처리되지 않아 제외되었습니다.]`;
-        msgs[idx] = { ...last, content: `${last.content || ''}${note}` };
-        return msgs;
-      })(),
+      stream: false,
+      messages: finalMessages,
       max_tokens: 2048,
       temperature: temperature ?? 0.7,
       top_p: 0.9,
-      search_recency_filter: 'month',
-      return_images: false,
-      return_related_questions: false,
     })
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    const error: any = new Error(errorData.error?.message || 'Perplexity API 오류');
+    let errorData: any = {};
+    try { errorData = await response.json(); } catch {}
+    const error: any = new Error(errorData.error?.message || `Perplexity API 오류 (${response.status})`);
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
-    
-    // 429 에러 처리
+
     if (response.status === 429 && retryCount < 3) {
       const rateLimitInfo = parseRateLimitError(error);
-      
       if (rateLimitInfo.isRateLimit) {
         apiKeyManager.handleRateLimitError('perplexity', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
-        
         const nextKey = apiKeyManager.getAvailableKey('perplexity');
         if (nextKey && nextKey !== apiKey) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`Perplexity Rate Limit 감지. 다른 키로 재시도 중... (${retryCount + 1}/3)`);
-          }
-          return callPerplexityStreaming(model, messages, userAttachments, retryCount + 1, temperature);
+          return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
         }
-        
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
         throw new Error(availability.message || 'Perplexity API 요청 한도를 초과했습니다.');
       }
     }
-    
+
     throw error;
   }
 
-  const encoder = new TextEncoder();
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
 
-  const contentType = response.headers.get('content-type') || '';
-  const isEventStream = contentType.includes('text/event-stream');
-
-  // 스트리밍 응답
-  if (isEventStream && response.body) {
-    const { transform: pplxTransform } = createSSETransformStream(
-      (parsed) => parsed?.choices?.[0]?.delta?.content || null,
-      'Perplexity'
-    );
-    const transformed = response.body.pipeThrough(pplxTransform);
-    return new Response(transformed, { headers: SSE_HEADERS });
+  if (!content) {
+    throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
   }
 
-  // 비스트리밍(또는 body 없음) 폴백: JSON을 SSE로 래핑
-  try {
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content || '[Perplexity] 빈 응답';
-
-    const wrapStream = new ReadableStream({
-      start(c) {
-        c.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-        c.enqueue(encoder.encode('data: [DONE]\n\n'));
-        c.close();
-      }
-    });
-
-    return new Response(wrapStream, { headers: SSE_HEADERS });
-  } catch {
-    const errStream = new ReadableStream({
-      start(c) {
-        c.enqueue(encoder.encode(`data: ${JSON.stringify({ content: '[Perplexity] 응답 파싱 실패' })}\n\n`));
-        c.enqueue(encoder.encode('data: [DONE]\n\n'));
-        c.close();
-      }
-    });
-    return new Response(errStream, { headers: SSE_HEADERS });
-  }
+  return content;
 }
 
 export async function POST(request: NextRequest) {
@@ -1009,9 +972,10 @@ export async function POST(request: NextRequest) {
       streamResponse = await callAnthropicStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else if (modelId.startsWith('perplexity') || modelId === 'sonar' || modelId === 'sonarPro' || modelId === 'deepResearch') {
       if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Perplexity API (Streaming)');
+        console.log('[Chat API] Calling Perplexity API (JSON)');
       }
-      streamResponse = await callPerplexityStreaming(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      const perplexityContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      return NextResponse.json({ content: perplexityContent });
     } else {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
