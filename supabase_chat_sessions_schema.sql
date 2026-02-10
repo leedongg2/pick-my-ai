@@ -1,5 +1,31 @@
--- 채팅 세션 테이블 생성
+-- ============================================
+-- 🔧 기존 테이블 진단 & 수정 (먼저 실행)
+-- ============================================
+
+-- 1) 컬럼 타입 확인 (messages가 jsonb인지 체크)
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'chat_sessions'
+ORDER BY ordinal_position;
+
+-- 2) 인덱스 확인 (UNIQUE 인덱스 있는지 체크)
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'chat_sessions';
+
+-- 3) messages 컬럼이 jsonb가 아니면 변환 (필요 시 실행)
+-- ALTER TABLE public.chat_sessions
+-- ALTER COLUMN messages TYPE jsonb
+-- USING messages::jsonb;
+
+-- 4) UNIQUE 인덱스가 없으면 추가 (필요 시 실행)
+-- CREATE UNIQUE INDEX IF NOT EXISTS chat_sessions_user_session_idx
+-- ON public.chat_sessions (user_id, session_id);
+
+-- ============================================
+-- 채팅 세션 테이블 생성 (신규 설치용)
 -- 다른 기기/브라우저에서도 대화 내용을 동기화하기 위한 테이블
+-- ============================================
 
 CREATE TABLE IF NOT EXISTS public.chat_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

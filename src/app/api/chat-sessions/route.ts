@@ -19,8 +19,13 @@ export async function GET(request: NextRequest) {
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.error('Chat sessions fetch error:', error);
-      return NextResponse.json({ error: '채팅 세션을 불러오는데 실패했습니다.' }, { status: 500 });
+      console.error('Chat sessions fetch error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      return NextResponse.json({ error: '채팅 세션을 불러오는데 실패했습니다.', code: error.code, hint: error.hint }, { status: 500 });
     }
 
     return NextResponse.json({ sessions: sessions || [] });
@@ -61,8 +66,13 @@ export async function POST(request: NextRequest) {
       .select();
 
     if (error) {
-      console.error('Chat session save error:', error);
-      return NextResponse.json({ error: '채팅 세션 저장에 실패했습니다.' }, { status: 500 });
+      console.error('Chat session save error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      return NextResponse.json({ error: '채팅 세션 저장에 실패했습니다.', code: error.code, hint: error.hint }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, session: data?.[0] });
@@ -95,8 +105,13 @@ export async function DELETE(request: NextRequest) {
       .eq('session_id', sessionId);
 
     if (error) {
-      console.error('Chat session delete error:', error);
-      return NextResponse.json({ error: '채팅 세션 삭제에 실패했습니다.' }, { status: 500 });
+      console.error('Chat session delete error:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      return NextResponse.json({ error: '채팅 세션 삭제에 실패했습니다.', code: error.code, hint: error.hint }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
