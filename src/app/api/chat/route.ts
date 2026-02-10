@@ -230,12 +230,17 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     ? 'https://api.openai.com/v1/responses'
     : 'https://api.openai.com/v1/chat/completions';
 
-  // GPT-5 시리즈는 temperature를 지원하지 않으므로 제외
+  // 모델별 max_tokens 설정
+  let maxTokens = 700; // GPT-5/5.1/5.2/Codex 기본값
+  if (model === 'gpt4o' || model === 'gpt41') {
+    maxTokens = 500; // GPT-4.1 / GPT-4o
+  }
+  
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: 1500, // 응답 시간 단축을 위해 1500으로 제한
-    stream: false // 비스트리밍으로 변경 (간결한 응답)
+    max_completion_tokens: maxTokens,
+    stream: false
   };
   
   // GPT-5 시리즈가 아닌 경우에만 temperature 추가
@@ -522,6 +527,14 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     }
   }
 
+  // 모델별 max_tokens 설정
+  let maxTokens = 1000; // Sonnet 기본값
+  if (model.includes('haiku')) {
+    maxTokens = 600; // Haiku
+  } else if (model.includes('opus')) {
+    maxTokens = 1200; // Opus
+  }
+  
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -531,10 +544,10 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     },
     body: JSON.stringify({
       model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: 2048,
+      max_tokens: maxTokens,
       temperature: temperature ?? 1.0,
       top_p: 0.9,
-      stream: false, // 비스트리밍으로 변경 (간결한 응답)
+      stream: false,
       system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
       messages: transformed
     })
@@ -616,9 +629,9 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     },
     body: JSON.stringify({
       model: modelMap[model] || 'sonar',
-      stream: false, // 비스트리밍으로 변경 (간결한 응답)
+      stream: false,
       messages: finalMessages,
-      max_tokens: 2048,
+      max_tokens: 300, // Perplexity 모든 모델 300 토큰 고정
       temperature: temperature ?? 0.7,
       top_p: 0.9,
     })
