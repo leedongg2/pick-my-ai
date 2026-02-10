@@ -857,13 +857,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ content: responseContent });
 
   } catch (error: any) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('Chat API Error:', error);
-      console.error('Error stack:', error.stack);
-    }
+    // 모든 환경에서 에러 로깅 (디버깅용)
+    console.error('[Chat API] Error caught:', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack?.split('\n').slice(0, 3).join('\n'), // 스택 일부만
+      timestamp: new Date().toISOString()
+    });
     
     // API 키가 없는 경우 데모 응답
-    if (error.message.includes('API 키가 설정되지 않았습니다')) {
+    if (error.message?.includes('API 키가 설정되지 않았습니다')) {
       return NextResponse.json({ 
         content: `💡 데모 모드: 실제 AI 응답을 받으려면 .env.local 파일에 API 키를 추가하세요.\n\n` +
                  `설정 방법:\n` +
@@ -891,14 +894,6 @@ export async function POST(request: NextRequest) {
       statusCode = 503;
     } else if (error.message) {
       errorMessage = error.message;
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.error(`[Chat API] Error:`, {
-        message: errorMessage,
-        stack: error.stack,
-        timestamp: new Date().toISOString()
-      });
     }
     
     return NextResponse.json(
