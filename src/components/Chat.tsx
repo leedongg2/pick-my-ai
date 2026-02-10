@@ -723,51 +723,104 @@ export const Chat: React.FC = () => {
         throw new Error(errorData.error || `API 호출 실패 (상태 코드: ${response.status})`);
       }
       
-      // JSON 응답 처리 (모든 모델 공통)
-      let data;
-      try {
-        data = await response.json();
-      } catch (e) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('Failed to parse response:', e);
-        }
-        throw new Error('서버 응답을 파싱할 수 없습니다.');
-      }
-
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('API Response data:', data);
-      }
+      const contentType = response.headers.get('content-type') || '';
       
-      if (!data || !data.content) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('Empty response from API:', data);
+      if (contentType.includes('text/event-stream')) {
+        // GPT 스트리밍 SSE 응답 처리
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = '';
+        let sseBuffer = '';
+        
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
+            
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data: ')) continue;
+              const jsonStr = trimmed.slice(6);
+              if (jsonStr === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(jsonStr);
+                const delta = parsed.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  accumulated += delta;
+                  if (sessionIdForThisRequest && assistantMessageId) {
+                    updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+                  }
+                }
+              } catch {}
+            }
+            
+            scrollToBottom(false);
+          }
+        } finally {
+          reader.releaseLock();
         }
-        throw new Error('AI로부터 응답을 받지 못했습니다.');
-      }
-      
-      const extracted = extractMemoryForDisplay(data.content);
-      if (extracted.facts.length) {
-        addStoredFacts(extracted.facts);
-      }
-
-      // AI 응답 표시
-      if (sessionIdForThisRequest && assistantMessageId) {
-        updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
-        setTimeout(() => scrollToBottom(true), 100);
-      }
-      
-      // 요약 추출
-      try {
-        const { summary } = extractSummary(data.content);
-        if (summary) {
-          setConversationSummaries(prev => [...prev, summary]);
+        
+        if (!accumulated.trim()) {
+          throw new Error('AI로부터 응답을 받지 못했습니다.');
         }
-      } catch (summaryError) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('Summary extraction failed:', summaryError);
+        
+        // 스트리밍 완료 후 메모리/요약 추출
+        const extracted = extractMemoryForDisplay(accumulated);
+        if (extracted.facts.length) {
+          addStoredFacts(extracted.facts);
+        }
+        if (sessionIdForThisRequest && assistantMessageId) {
+          updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+        }
+        try {
+          const { summary } = extractSummary(accumulated);
+          if (summary) {
+            setConversationSummaries(prev => [...prev, summary]);
+          }
+        } catch {}
+        
+      } else {
+        // JSON 응답 처리 (Claude, Perplexity, Codex, 이미지 등)
+        let data;
+        try {
+          data = await response.json();
+        } catch (e) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Failed to parse response:', e);
+          }
+          throw new Error('서버 응답을 파싱할 수 없습니다.');
+        }
+        
+        if (!data || !data.content) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Empty response from API:', data);
+          }
+          throw new Error('AI로부터 응답을 받지 못했습니다.');
+        }
+        
+        const extracted = extractMemoryForDisplay(data.content);
+        if (extracted.facts.length) {
+          addStoredFacts(extracted.facts);
+        }
+        if (sessionIdForThisRequest && assistantMessageId) {
+          updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          setTimeout(() => scrollToBottom(true), 100);
+        }
+        try {
+          const { summary } = extractSummary(data.content);
+          if (summary) {
+            setConversationSummaries(prev => [...prev, summary]);
+          }
+        } catch (summaryError) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('Summary extraction failed:', summaryError);
+          }
         }
       }
-      
       
       setAttachments([]);
       // toast.success(`${model.displayName} 크레딧 1회 사용 (잔여: ${credits - 1}회)`);

@@ -79,8 +79,8 @@ async function callDALLE(prompt: string): Promise<string> {
   });
 }
 
-// OpenAI API 호출 (키 로테이션 및 큐 시스템 지원) - 비스트리밍 JSON 문자열 반환
-async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string): Promise<string> {
+// OpenAI API 호출 (키 로테이션 및 큐 시스템 지원)
+async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
   // 이미지 생성 모델인 경우 DALL-E API 사용
   if (model === 'gptimage1' || model === 'dalle3') {
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
@@ -95,11 +95,11 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
-  return await executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction);
+  return await executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction, streaming);
 }
 
-// OpenAI 실제 요청 실행 - JSON 문자열 반환
-async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string): Promise<string> {
+// OpenAI 실제 요청 실행 - 스트리밍 시 Response, 아니면 문자열 반환
+async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
 
   const modelMap: { [key: string]: string } = {
     // GPT 시리즈
@@ -240,7 +240,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     model: selectedModel,
     messages: finalMessages,
     max_completion_tokens: maxTokens,
-    stream: false
+    stream: !!(streaming && !isCodex)
   };
   
   // GPT-5 시리즈가 아닌 경우에만 temperature 추가
@@ -310,7 +310,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
         
         const nextKey = apiKeyManager.getAvailableKey('openai');
         if (nextKey && nextKey !== apiKey) {
-          return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction);
+          return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction, streaming);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('openai');
@@ -321,7 +321,18 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     throw error;
   }
 
-  // 비스트리밍 JSON 응답 처리
+  // 스트리밍 모드: OpenAI SSE 응답을 클라이언트로 직접 전달
+  if (streaming && !isCodex && response.body) {
+    return new Response(response.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  }
+
+  // 비스트리밍 JSON 응답 처리 (Codex, 이미지 등)
   const data = await response.json();
   
   // choices 배열 확인
@@ -836,14 +847,30 @@ export async function POST(request: NextRequest) {
       console.log(`[Chat API] Model: ${modelId}, Messages: ${messages.length}`);
     }
 
-    // 모델 시리즈별로 API 호출 - 모든 모델 JSON 응답 반환
+    // OpenAI 모델 판별
+    const isOpenAIModel = modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex')
+      || modelId === 'gptimage1' || modelId === 'dalle3'
+      || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini';
+    
+    // GPT 스트리밍 가능 모델 (이미지/Codex 제외)
+    const isStreamableGPT = isOpenAIModel
+      && !modelId.endsWith('codex') && modelId !== 'codex'
+      && modelId !== 'gptimage1' && modelId !== 'dalle3';
+
+    // GPT 스트리밍 모델은 SSE 응답 직접 반환
+    if (isStreamableGPT) {
+      const streamResponse = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true);
+      return streamResponse as Response;
+    }
+
+    // 나머지 모델은 JSON 응답
     let responseContent: string;
 
-    if (modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex') || modelId === 'gptimage1' || modelId === 'dalle3') {
+    if (isOpenAIModel) {
       if (process.env.NODE_ENV !== 'production') {
         console.log(`[Chat API] Calling OpenAI API${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
       }
-      responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory);
+      responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory) as string;
     } else if (modelId.startsWith('gemini')) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Gemini API');
