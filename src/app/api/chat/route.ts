@@ -323,20 +323,37 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log('[OpenAI] Full response data:', JSON.stringify(data, null, 2));
   }
   
+  // choices 배열 확인
+  if (!data?.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+    console.error('[OpenAI] No choices in response. Full data:', JSON.stringify(data));
+    throw new Error('OpenAI API 응답에 choices가 없습니다. 관리자에게 문의하세요.');
+  }
+
+  const choice = data.choices[0];
+  
+  // refusal 체크 (GPT-4o 이상에서 거부 응답)
+  if (choice.message?.refusal) {
+    console.warn('[OpenAI] Request was refused:', choice.message.refusal);
+    throw new Error(`OpenAI가 요청을 거부했습니다: ${choice.message.refusal}`);
+  }
+  
   // Codex (Responses API) vs Chat Completions API
   const content = isCodex
-    ? (data?.output?.[0]?.content?.[0]?.text || data?.choices?.[0]?.message?.content)
-    : data?.choices?.[0]?.message?.content;
+    ? (data?.output?.[0]?.content?.[0]?.text || choice.message?.content)
+    : choice.message?.content;
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[OpenAI] Extracted content:', content);
     console.log('[OpenAI] Content type:', typeof content);
     console.log('[OpenAI] Content length:', content?.length);
+    console.log('[OpenAI] Choice structure:', JSON.stringify(choice, null, 2));
   }
 
-  if (!content || !content.trim()) {
-    console.error('[OpenAI] Empty content detected. Full data:', JSON.stringify(data));
-    throw new Error('OpenAI API에서 빈 응답을 반환했습니다.');
+  if (!content || (typeof content === 'string' && !content.trim())) {
+    console.error('[OpenAI] Empty content detected.');
+    console.error('[OpenAI] Choice:', JSON.stringify(choice));
+    console.error('[OpenAI] Full data:', JSON.stringify(data));
+    throw new Error('OpenAI API에서 빈 응답을 반환했습니다. 다른 질문을 시도해보세요.');
   }
 
   return content;

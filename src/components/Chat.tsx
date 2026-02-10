@@ -782,7 +782,25 @@ export const Chat: React.FC = () => {
       // 에러 메시지를 채팅에 추가
       const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
       if (sid) {
-        const errContent = `⚠️ 오류가 발생했습니다: ${errorMessage}\n\n문제가 지속되면:\n1. 인터넷 연결을 확인하세요\n2. API 키가 올바른지 확인하세요\n3. 나중에 다시 시도하세요`;
+        let errContent: string;
+        
+        // 504 Gateway Timeout 에러
+        if (error.message?.includes('504') || error.message?.includes('Gateway Timeout') || error.message?.includes('20초를 초과')) {
+          errContent = `⚠️ **서버 응답 시간 초과**\n\n현재 질문이 처리 시간 제한(26초)을 초과했습니다.\n\n**해결 방법:**\n• 더 짧고 간단한 질문으로 나눠서 시도해보세요\n• 복잡한 요청은 여러 단계로 나눠 질문하세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
+        }
+        // 빈 응답 에러
+        else if (errorMessage.includes('빈 응답')) {
+          errContent = `⚠️ **AI 응답을 받지 못했습니다**\n\n${errorMessage}\n\n**해결 방법:**\n• 잠시 후 다시 시도해주세요\n• 다른 모델을 선택해보세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
+        }
+        // API 키 관련 에러
+        else if (errorMessage.includes('API 키') || errorMessage.includes('401') || errorMessage.includes('403')) {
+          errContent = `⚠️ **인증 오류**\n\n${errorMessage}\n\n**관리자에게 문의**해주세요.\nAPI 키 설정에 문제가 있을 수 있습니다.`;
+        }
+        // 기타 에러
+        else {
+          errContent = `⚠️ **오류가 발생했습니다**\n\n${errorMessage}\n\n**해결 방법:**\n• 인터넷 연결을 확인하세요\n• 잠시 후 다시 시도해주세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
+        }
+        
         if (assistantMessageId) {
           updateMessageContent(sid, assistantMessageId, errContent);
         } else {
