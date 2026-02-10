@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
         session_id: sessionId,
         title,
         messages,
-        is_starred: isStarred || false,
+        is_starred: Boolean(isStarred),
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'user_id,session_id'
