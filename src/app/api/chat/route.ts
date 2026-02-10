@@ -32,6 +32,25 @@ function extractBase64(dataUrl: string): { mime: string; base64: string } | null
   }
 }
 
+// 강제 타임아웃 유틸 (Netlify 15초 컷 방지)
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('MODEL_RESPONSE_TIMEOUT'));
+    }, ms);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 // DALL-E 이미지 생성 API 호출
 async function callDALLE(prompt: string): Promise<string> {
   return apiKeyManager.enqueueRequest('openai', async () => {
@@ -94,7 +113,14 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
-  return await executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction, streaming);
+  // Netlify 환경에서 streaming 강제 차단
+  streaming = false;
+
+  // 8초 강제 타임아웃 적용
+  return await withTimeout(
+    executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction, streaming),
+    8000
+  );
 }
 
 // OpenAI 실제 요청 실행 - 스트리밍 시 Response, 아니면 문자열 반환
@@ -940,6 +966,14 @@ export async function POST(request: NextRequest) {
                  `   - PERPLEXITY_API_KEY=your_key (Perplexity 모델용)\n\n` +
                  `자세한 내용은 env.example 파일을 참고하세요.`
       });
+    }
+
+    // 모델 응답 타임아웃 처리
+    if (error.message === 'MODEL_RESPONSE_TIMEOUT') {
+      return NextResponse.json(
+        { error: '모델 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.' },
+        { status: 504 }
+      );
     }
 
     // 에러 타입별 처리
