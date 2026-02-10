@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { verifySession } from '@/lib/apiAuth';
 
 export async function GET(request: NextRequest) {
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
-    const { data: sessions, error } = await supabase
+    const { data: sessions, error } = await supabaseAdmin
       .from('chat_sessions')
       .select('*')
       .eq('user_id', userId)
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '필수 파라미터가 누락되었습니다.' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('chat_sessions')
       .upsert({
         user_id: userId,
@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'sessionId가 필요합니다.' }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('chat_sessions')
       .delete()
       .eq('user_id', userId)
