@@ -43,27 +43,13 @@ class ApiKeyRotationManager {
     perplexity: [],
   };
 
-  private requestQueue: QueuedRequest[] = [];
-  private isProcessingQueue: boolean = false;
-  
-  // 설정 값
+  // 설정 값 (서버리스 환경용 - 큐 시스템 제거됨)
   private readonly MIN_REQUEST_INTERVAL = 150; // ms - 요청 간 최소 간격
   private readonly MAX_CONCURRENT_REQUESTS_PER_KEY = 3; // 키당 최대 동시 요청
   private readonly MAX_REQUESTS_PER_MINUTE = 50; // 분당 최대 요청 수
-  private readonly QUEUE_PROCESS_INTERVAL = 50; // ms - 큐 처리 간격
 
   constructor() {
     this.initializeKeyPools();
-    this.startQueueProcessor();
-  }
-
-  /**
-   * 큐 프로세서 시작
-   */
-  private startQueueProcessor(): void {
-    setInterval(() => {
-      this.processQueue();
-    }, this.QUEUE_PROCESS_INTERVAL);
   }
 
   /**
@@ -291,175 +277,19 @@ class ApiKeyRotationManager {
   }
 
   /**
-   * 요청을 큐에 추가하고 실행
+   * 요청 즉시 실행 (서버리스 환경용)
    */
   async enqueueRequest<T>(
     provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity',
     execute: () => Promise<T>,
     priority: number = 0
   ): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const requestId = `${provider}-${Date.now()}-${Math.random()}`;
-      
-      this.requestQueue.push({
-        id: requestId,
-        provider,
-        priority,
-        createdAt: Date.now(),
-        execute,
-        resolve,
-        reject,
-      });
-
-      // 우선순위에 따라 정렬 (높은 우선순위 먼저)
-      this.requestQueue.sort((a, b) => b.priority - a.priority);
-
-      console.log(`[Queue] 요청 추가: ${requestId}, 대기 중: ${this.requestQueue.length}`);
-    });
+    return await execute();
   }
 
-  /**
-   * 큐 처리
-   */
-  private async processQueue(): Promise<void> {
-    if (this.isProcessingQueue || this.requestQueue.length === 0) {
-      return;
-    }
 
-    this.isProcessingQueue = true;
 
-    try {
-      const request = this.requestQueue[0];
-      const provider = request.provider as 'openai' | 'anthropic' | 'gemini' | 'perplexity';
-      
-      // 사용 가능한 키 확인
-      const keyStatus = this.findBestAvailableKey(provider);
-      
-      if (!keyStatus) {
-        // 사용 가능한 키가 없으면 대기
-        this.isProcessingQueue = false;
-        return;
-      }
 
-      // 요청 간 최소 간격 확인
-      const now = Date.now();
-      const timeSinceLastUse = keyStatus.lastUsedTime ? now - keyStatus.lastUsedTime : Infinity;
-      
-      if (timeSinceLastUse < this.MIN_REQUEST_INTERVAL) {
-        // 아직 간격이 부족하면 대기
-        this.isProcessingQueue = false;
-        return;
-      }
-
-      // 요청 실행
-      this.requestQueue.shift(); // 큐에서 제거
-      
-      keyStatus.lastUsedTime = now;
-      keyStatus.activeRequests = (keyStatus.activeRequests || 0) + 1;
-      
-      // 요청 카운트 업데이트
-      this.updateRequestCount(keyStatus);
-
-      console.log(`[Queue] 요청 실행: ${request.id}, 남은 큐: ${this.requestQueue.length}`);
-
-      try {
-        const result = await request.execute();
-        request.resolve(result);
-      } catch (error) {
-        console.error(`[Queue] 요청 실패: ${request.id}`, error);
-        request.reject(error);
-      } finally {
-        keyStatus.activeRequests = Math.max(0, (keyStatus.activeRequests || 1) - 1);
-      }
-    } finally {
-      this.isProcessingQueue = false;
-    }
-  }
-
-  /**
-   * 최적의 사용 가능 키 찾기
-   */
-  private findBestAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): ApiKeyStatus | null {
-    const pool = this.keyPools[provider];
-    const now = Date.now();
-
-    // 1. 사용 가능하고 활성 요청이 적은 키 찾기
-    const availableKeys = pool.filter(k => {
-      // 기본 가용성 확인
-      if (!k.isAvailable || (k.rateLimitResetTime && k.rateLimitResetTime > now)) {
-        return false;
-      }
-
-      // 동시 요청 수 확인
-      if ((k.activeRequests || 0) >= this.MAX_CONCURRENT_REQUESTS_PER_KEY) {
-        return false;
-      }
-
-      // 분당 요청 수 확인
-      if (k.requestCount && k.requestCount >= this.MAX_REQUESTS_PER_MINUTE) {
-        if (k.requestCountResetTime && k.requestCountResetTime > now) {
-          return false;
-        }
-      }
-
-      // 최소 간격 확인
-      if (k.lastUsedTime && (now - k.lastUsedTime) < this.MIN_REQUEST_INTERVAL) {
-        return false;
-      }
-
-      return true;
-    });
-
-    if (availableKeys.length === 0) {
-      return null;
-    }
-
-    // 2. 가장 최근에 사용되지 않은 키 선택 (로드 밸런싱)
-    availableKeys.sort((a, b) => {
-      const aLastUsed = a.lastUsedTime || 0;
-      const bLastUsed = b.lastUsedTime || 0;
-      return aLastUsed - bLastUsed;
-    });
-
-    return availableKeys[0];
-  }
-
-  /**
-   * 요청 카운트 업데이트
-   */
-  private updateRequestCount(keyStatus: ApiKeyStatus): void {
-    const now = Date.now();
-    
-    // 카운트 리셋 시간이 지났으면 초기화
-    if (keyStatus.requestCountResetTime && keyStatus.requestCountResetTime <= now) {
-      keyStatus.requestCount = 0;
-      keyStatus.requestCountResetTime = undefined;
-    }
-
-    // 카운트 증가
-    keyStatus.requestCount = (keyStatus.requestCount || 0) + 1;
-    
-    // 리셋 시간 설정 (1분 후)
-    if (!keyStatus.requestCountResetTime) {
-      keyStatus.requestCountResetTime = now + 60 * 1000;
-    }
-  }
-
-  /**
-   * 큐 상태 조회
-   */
-  getQueueStatus(): {
-    queueLength: number;
-    isProcessing: boolean;
-    oldestRequestAge?: number;
-  } {
-    const oldestRequest = this.requestQueue[0];
-    return {
-      queueLength: this.requestQueue.length,
-      isProcessing: this.isProcessingQueue,
-      oldestRequestAge: oldestRequest ? Date.now() - oldestRequest.createdAt : undefined,
-    };
-  }
 }
 
 // 싱글톤 인스턴스
