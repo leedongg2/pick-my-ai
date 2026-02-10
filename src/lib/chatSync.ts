@@ -21,8 +21,6 @@ export interface ChatSession {
 }
 
 export class ChatSyncService {
-  private static syncInProgress = false;
-  private static syncQueue: Array<() => Promise<void>> = [];
 
   static async saveChatSession(
     sessionId: string,
@@ -136,36 +134,7 @@ export class ChatSyncService {
     messages: ChatMessage[],
     isStarred: boolean = false
   ): Promise<void> {
-    const syncTask = async () => {
-      await this.saveChatSession(sessionId, title, messages, isStarred);
-    };
-
-    this.syncQueue.push(syncTask);
-
-    if (!this.syncInProgress) {
-      this.processSyncQueue();
-    }
-  }
-
-  private static async processSyncQueue(): Promise<void> {
-    if (this.syncInProgress || this.syncQueue.length === 0) {
-      return;
-    }
-
-    this.syncInProgress = true;
-
-    while (this.syncQueue.length > 0) {
-      const task = this.syncQueue.shift();
-      if (task) {
-        try {
-          await task();
-        } catch (error) {
-          console.error('Sync queue error:', error);
-        }
-      }
-    }
-
-    this.syncInProgress = false;
+    await this.saveChatSession(sessionId, title, messages, isStarred);
   }
 
   static debounce<T extends (...args: any[]) => any>(
