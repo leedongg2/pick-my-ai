@@ -367,14 +367,16 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   }
 
   const geminiModelMap: { [key: string]: string } = {
-    'gemini3': 'gemini-1.5-flash',
-    'gemini3pro': 'gemini-1.5-pro',
-    // 레거시 매핑
-    'gemini-flash': 'gemini-1.5-flash',
-    'gemini-pro': 'gemini-1.5-pro',
+    // 실제 Gemini 3.0 엔드포인트
+    'gemini3': 'gemini-3.0-flash',
+    'gemini3pro': 'gemini-3.0-pro',
+    // 레거시 매핑 (과거 1.5 명칭 호환)
+    'gemini-flash': 'gemini-3.0-flash',
+    'gemini-pro': 'gemini-3.0-pro',
   };
 
-  const selectedModel = geminiModelMap[model] || 'gemini-1.5-flash';
+  // 기본값도 3.0 flash로 사용
+  const selectedModel = geminiModelMap[model] || 'gemini-3.0-flash';
 
   // Gemini contents 변환
   const contents: Array<{ role: string; parts: any[] }> = [];
