@@ -748,6 +748,10 @@ export const Chat: React.FC = () => {
               if (jsonStr === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(jsonStr);
+                // 서버에서 보낸 에러 이벤트 처리
+                if (parsed.error) {
+                  throw new Error(parsed.error);
+                }
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   accumulated += delta;
@@ -755,7 +759,11 @@ export const Chat: React.FC = () => {
                     updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
                   }
                 }
-              } catch {}
+              } catch (parseErr: any) {
+                if (parseErr.message && !parseErr.message.includes('JSON')) {
+                  throw parseErr;
+                }
+              }
             }
             
             scrollToBottom(false);

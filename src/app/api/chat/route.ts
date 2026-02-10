@@ -3,8 +3,7 @@ import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
 
-// Netlify/Vercel 서버리스 함수 타임아웃 설정 (60초)
-export const maxDuration = 60;
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const isStaticExportPhase =
@@ -267,9 +266,10 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  // 25초 타임아웃 설정 (Netlify 26초 제한 직전까지)
+  // 스트리밍은 15초 연결 타임아웃, 비스트리밍은 25초
+  const connectTimeout = streaming ? 15000 : 25000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const timeoutId = setTimeout(() => controller.abort(), connectTimeout);
 
   let response: Response;
   try {
@@ -321,15 +321,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     throw error;
   }
 
-  // 스트리밍 모드: OpenAI SSE 응답을 클라이언트로 직접 전달
+  // 스트리밍 모드: OpenAI response body를 반환 (POST 핸들러에서 ReadableStream으로 감싸서 즉시 반환)
   if (streaming && !isCodex && response.body) {
-    return new Response(response.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    return response;
   }
 
   // 비스트리밍 JSON 응답 처리 (Codex, 이미지 등)
@@ -857,10 +851,40 @@ export async function POST(request: NextRequest) {
       && !modelId.endsWith('codex') && modelId !== 'codex'
       && modelId !== 'gptimage1' && modelId !== 'dalle3';
 
-    // GPT 스트리밍 모델은 SSE 응답 직접 반환
+    // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
     if (isStreamableGPT) {
-      const streamResponse = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true);
-      return streamResponse as Response;
+      const stream = new ReadableStream({
+        async start(ctrl) {
+          try {
+            const openaiRes = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true) as Response;
+            const reader = openaiRes.body!.getReader();
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                ctrl.enqueue(value);
+              }
+            } finally {
+              reader.releaseLock();
+            }
+            ctrl.close();
+          } catch (err: any) {
+            // 스트림 내부 에러를 SSE 형식으로 전달
+            const errMsg = err.message || '응답 생성 중 오류가 발생했습니다.';
+            const errEvent = `data: ${JSON.stringify({ error: errMsg })}\n\ndata: [DONE]\n\n`;
+            ctrl.enqueue(new TextEncoder().encode(errEvent));
+            ctrl.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
     }
 
     // 나머지 모델은 JSON 응답
