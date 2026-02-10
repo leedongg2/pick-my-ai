@@ -262,14 +262,30 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(apiRequestBody)
-  });
+  // 20초 타임아웃 설정 (Netlify 26초 제한보다 여유있게)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(apiRequestBody),
+      signal: controller.signal
+    });
+  } catch (fetchError: any) {
+    clearTimeout(timeoutId);
+    if (fetchError.name === 'AbortError') {
+      throw new Error('OpenAI API 요청이 20초를 초과했습니다. 더 짧은 질문을 시도해보세요.');
+    }
+    throw new Error(`OpenAI API 호출 실패: ${fetchError.message}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
