@@ -267,9 +267,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  // 20초 타임아웃 설정 (OpenAI API 응답 시간 고려)
+  // 25초 타임아웃 설정 (Netlify 26초 제한 직전까지)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   let response: Response;
   try {
