@@ -234,7 +234,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   const requestBody: any = {
     model: selectedModel,
     messages: finalMessages,
-    max_completion_tokens: 2048,
+    max_completion_tokens: 1500, // 응답 시간 단축을 위해 1500으로 제한
     stream: false // 비스트리밍으로 변경 (간결한 응답)
   };
   
@@ -262,9 +262,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  // 15초 타임아웃 설정 (Netlify 26초 제한 내 여유 확보)
+  // 20초 타임아웃 설정 (OpenAI API 응답 시간 고려)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
 
   let response: Response;
   try {
