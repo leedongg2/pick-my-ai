@@ -231,9 +231,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     : 'https://api.openai.com/v1/chat/completions';
 
   // 모델별 max_tokens 설정
-  let maxTokens = 700; // GPT-5/5.1/5.2/Codex 기본값
+  let maxTokens = 1200; // GPT-5/5.1/5.2/Codex 기본값
   if (model === 'gpt4o' || model === 'gpt41') {
-    maxTokens = 500; // GPT-4.1 / GPT-4o
+    maxTokens = 800; // GPT-4.1 / GPT-4o
   }
   
   const requestBody: any = {
@@ -528,11 +528,11 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   }
 
   // 모델별 max_tokens 설정
-  let maxTokens = 1000; // Sonnet 기본값
+  let maxTokens = 1500; // Sonnet 기본값
   if (model.includes('haiku')) {
-    maxTokens = 600; // Haiku
+    maxTokens = 1000; // Haiku
   } else if (model.includes('opus')) {
-    maxTokens = 1200; // Opus
+    maxTokens = 2000; // Opus
   }
   
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -631,7 +631,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
       model: modelMap[model] || 'sonar',
       stream: false,
       messages: finalMessages,
-      max_tokens: 300, // Perplexity 모든 모델 300 토큰 고정
+      max_tokens: 800, // Perplexity 모든 모델
       temperature: temperature ?? 0.7,
       top_p: 0.9,
     })
