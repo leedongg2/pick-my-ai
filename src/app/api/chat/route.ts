@@ -194,19 +194,19 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   
   // 코드 블록 규칙 (첫 메시지에만 포함)
   const codeBlockRule = isFirstMessage 
-    ? '\n\n코드를 출력할 때는 반드시 ///로 코드를 둘러싸세요.\n예시:\n///\nfunction example() {\n  return "code here";\n}\n///'
+    ? '凡出碼，必以///夾之。'
     : '';
   
   // 요약 규칙 (첫 메시지에만 포함)
   const summaryRule = isFirstMessage
-    ? '\n\n**중요**: 답변 마지막에 요약을 작성하세요 (사용자에게 보이지 않음):\n~~\nQ: [질문 5단어 이내]\nA: [답변 핵심 10단어 이내]\nPrev: [이전 답변 요약 또는 None]\n~~'
+    ? '終附隱要，格式以~包：Q≤5字，A≤10字，Prev要或無。'
     : '';
   
   const baseSystemPrompt = isGPT5Series
-    ? `당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 최대한 상세하고 포괄적으로 답변하세요.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}\n\n답변을 구조화할 때 ## 제목을 적극 활용하세요.`
+    ? `汝為助理，盡詳全答其問，重者以標**，分節以##題，以韓語親切而答。**섹션 제목이나 주요 주제: ##제목 내용${codeBlockRule}${summaryRule}`
     : isCodingModel
-    ? `당신은 전문 프로그래밍 어시스턴트입니다. 코드 작성, 디버깅, 최적화, 설명에 특화되어 있습니다.\n\n서식 규칙:${codeBlockRule}${summaryRule}\n- 중요한 부분: **강조**\n- 섹션 제목: ## 제목\n\n답변을 구조화할 때 ## 제목을 사용하세요.`
-    : `당신은 도움이 되는 AI 어시스턴트입니다.\n\n서식 규칙:\n- 중요하거나 강조하고 싶은 내용: **강조할 내용**\n- 섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}`;
+    ? `汝為程式專助，擅撰碼、除錯、優化、釋義，重者以標**，分節以##題而答** 서식 규칙:${codeBlockRule}${summaryRule}`
+    : `汝為助理，重者以標** **섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}`;
   
   const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
 
@@ -262,9 +262,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  // 20초 타임아웃 설정 (Netlify 26초 제한보다 여유있게)
+  // 15초 타임아웃 설정 (Netlify 26초 제한 내 여유 확보)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   let response: Response;
   try {
@@ -280,7 +280,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   } catch (fetchError: any) {
     clearTimeout(timeoutId);
     if (fetchError.name === 'AbortError') {
-      throw new Error('OpenAI API 요청이 20초를 초과했습니다. 더 짧은 질문을 시도해보세요.');
+      throw new Error('API 요청 도중 에러가 발생했습니다. 의견 보내기 창을 통해 관리자에게 문의해주세요.');
     }
     throw new Error(`OpenAI API 호출 실패: ${fetchError.message}`);
   } finally {
@@ -319,13 +319,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   // 비스트리밍 JSON 응답 처리
   const data = await response.json();
   
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[OpenAI] Full response data:', JSON.stringify(data, null, 2));
-  }
-  
   // choices 배열 확인
   if (!data?.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-    console.error('[OpenAI] No choices in response. Full data:', JSON.stringify(data));
+    console.error('[OpenAI] No choices in response');
     throw new Error('OpenAI API 응답에 choices가 없습니다. 관리자에게 문의하세요.');
   }
 
@@ -333,7 +329,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   
   // refusal 체크 (GPT-4o 이상에서 거부 응답)
   if (choice.message?.refusal) {
-    console.warn('[OpenAI] Request was refused:', choice.message.refusal);
+    console.warn('[OpenAI] Request refused:', choice.message.refusal);
     throw new Error(`OpenAI가 요청을 거부했습니다: ${choice.message.refusal}`);
   }
   
@@ -342,17 +338,8 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     ? (data?.output?.[0]?.content?.[0]?.text || choice.message?.content)
     : choice.message?.content;
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('[OpenAI] Extracted content:', content);
-    console.log('[OpenAI] Content type:', typeof content);
-    console.log('[OpenAI] Content length:', content?.length);
-    console.log('[OpenAI] Choice structure:', JSON.stringify(choice, null, 2));
-  }
-
   if (!content || (typeof content === 'string' && !content.trim())) {
-    console.error('[OpenAI] Empty content detected.');
-    console.error('[OpenAI] Choice:', JSON.stringify(choice));
-    console.error('[OpenAI] Full data:', JSON.stringify(data));
+    console.error('[OpenAI] Empty content. Has choices:', !!data.choices, 'Has message:', !!choice.message);
     throw new Error('OpenAI API에서 빈 응답을 반환했습니다. 다른 질문을 시도해보세요.');
   }
 
