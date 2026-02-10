@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
+import { fetchWithRetry } from '@/utils/fetchWithRetry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,13 @@ const isStaticExportPhase =
 
 // Rate Limiter 인스턴스 생성 (분당 20회 제한)
 const chatRateLimiter = new RateLimiter(20, 60 * 1000);
+
+const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY_LOCAL === 'true';
+const OPENAI_STREAMING_ALLOWED = process.env.OPENAI_STREAMING_DISABLED !== 'true';
+const DEFAULT_API_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS) || (isNetlify ? 25000 : 60000);
+const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_MS) || (isNetlify ? 15000 : 30000);
+const DEFAULT_API_RETRIES = Number(process.env.AI_API_MAX_RETRIES) || 2;
+const DEFAULT_RETRY_DELAY_MS = Number(process.env.AI_API_RETRY_DELAY_MS) || 800;
 
 type UserAttachment = {
   type: 'image' | 'text';
@@ -32,25 +40,6 @@ function extractBase64(dataUrl: string): { mime: string; base64: string } | null
   }
 }
 
-// 강제 타임아웃 유틸 (Netlify 15초 컷 방지)
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error('MODEL_RESPONSE_TIMEOUT'));
-    }, ms);
-
-    promise
-      .then((res) => {
-        clearTimeout(timer);
-        resolve(res);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
-
 // DALL-E 이미지 생성 API 호출
 async function callDALLE(prompt: string): Promise<string> {
   return apiKeyManager.enqueueRequest('openai', async () => {
@@ -64,20 +53,32 @@ async function callDALLE(prompt: string): Promise<string> {
       console.log('[DALL-E] Generating image with prompt:', prompt);
     }
 
-    const response = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'dall-e-3',
-        prompt: prompt,
-        n: 1,
-        size: '1024x1024',
-        quality: 'standard'
-      })
-    });
+    let response: Response;
+    try {
+      response = await fetchWithRetry('https://api.openai.com/v1/images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'dall-e-3',
+          prompt: prompt,
+          n: 1,
+          size: '1024x1024',
+          quality: 'standard'
+        })
+      }, {
+        timeout: DEFAULT_API_TIMEOUT_MS,
+        maxRetries: DEFAULT_API_RETRIES,
+        retryDelay: DEFAULT_RETRY_DELAY_MS
+      });
+    } catch (fetchError: any) {
+      if (fetchError?.name === 'AbortError') {
+        throw new Error('MODEL_RESPONSE_TIMEOUT');
+      }
+      throw new Error(`DALL-E API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+    }
 
     if (!response.ok) {
       const errorData = await response.json();
@@ -113,13 +114,17 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
-  // Netlify 환경에서 streaming 강제 차단
-  streaming = false;
+  const shouldStream = !!(streaming && OPENAI_STREAMING_ALLOWED);
 
-  // 8초 강제 타임아웃 적용
-  return await withTimeout(
-    executeOpenAIRequest(model, messages, apiKey, userAttachments, persona, 0, languageInstruction, streaming),
-    8000
+  return await executeOpenAIRequest(
+    model,
+    messages,
+    apiKey,
+    userAttachments,
+    persona,
+    0,
+    languageInstruction,
+    shouldStream
   );
 }
 
@@ -292,30 +297,28 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
   }
 
-  // 스트리밍은 15초 연결 타임아웃, 비스트리밍은 25초
-  const connectTimeout = streaming ? 15000 : 25000;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), connectTimeout);
+  // 스트리밍은 연결 타임아웃, 비스트리밍은 응답 타임아웃
+  const connectTimeout = streaming ? STREAM_CONNECT_TIMEOUT_MS : DEFAULT_API_TIMEOUT_MS;
 
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(apiRequestBody),
-      signal: controller.signal
+      body: JSON.stringify(apiRequestBody)
+    }, {
+      timeout: connectTimeout,
+      maxRetries: streaming ? 1 : DEFAULT_API_RETRIES,
+      retryDelay: DEFAULT_RETRY_DELAY_MS
     });
   } catch (fetchError: any) {
-    clearTimeout(timeoutId);
-    if (fetchError.name === 'AbortError') {
-      throw new Error('API 요청 도중 에러가 발생했습니다. 의견 보내기 창을 통해 관리자에게 문의해주세요.');
+    if (fetchError?.name === 'AbortError') {
+      throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`OpenAI API 호출 실패: ${fetchError.message}`);
-  } finally {
-    clearTimeout(timeoutId);
+    throw new Error(`OpenAI API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
   }
 
   if (!response.ok) {
@@ -447,19 +450,31 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   }
 
   // generateContent 엔드포인트 사용 (비스트리밍 - Netlify 타임아웃 방지)
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents,
-      generationConfig: { 
-        temperature: temperature ?? 0.7,
-        maxOutputTokens: 2048,
-        topP: 0.95,
-        topK: 40
-      },
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: { 
+          temperature: temperature ?? 0.7,
+          maxOutputTokens: 2048,
+          topP: 0.95,
+          topK: 40
+        },
+      }),
+    }, {
+      timeout: DEFAULT_API_TIMEOUT_MS,
+      maxRetries: DEFAULT_API_RETRIES,
+      retryDelay: DEFAULT_RETRY_DELAY_MS
+    });
+  } catch (fetchError: any) {
+    if (fetchError?.name === 'AbortError') {
+      throw new Error('MODEL_RESPONSE_TIMEOUT');
+    }
+    throw new Error(`Gemini API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+  }
 
   if (!response.ok) {
     let data: any = {};
@@ -565,23 +580,35 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     maxTokens = 2000; // Opus
   }
   
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: modelMap[model] || 'claude-3-5-sonnet-20241022',
-      max_tokens: maxTokens,
-      temperature: temperature ?? 1.0,
-      top_p: 0.9,
-      stream: false,
-      system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
-      messages: transformed
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: modelMap[model] || 'claude-3-5-sonnet-20241022',
+        max_tokens: maxTokens,
+        temperature: temperature ?? 1.0,
+        top_p: 0.9,
+        stream: false,
+        system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
+        messages: transformed
+      })
+    }, {
+      timeout: DEFAULT_API_TIMEOUT_MS,
+      maxRetries: DEFAULT_API_RETRIES,
+      retryDelay: DEFAULT_RETRY_DELAY_MS
+    });
+  } catch (fetchError: any) {
+    if (fetchError?.name === 'AbortError') {
+      throw new Error('MODEL_RESPONSE_TIMEOUT');
+    }
+    throw new Error(`Anthropic API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -651,21 +678,33 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     }
   }
 
-  const response = await fetch('https://api.perplexity.ai/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: modelMap[model] || 'sonar',
-      stream: false,
-      messages: finalMessages,
-      max_tokens: 800, // Perplexity 모든 모델
-      temperature: temperature ?? 0.7,
-      top_p: 0.9,
-    })
-  });
+  let response: Response;
+  try {
+    response = await fetchWithRetry('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: modelMap[model] || 'sonar',
+        stream: false,
+        messages: finalMessages,
+        max_tokens: 800, // Perplexity 모든 모델
+        temperature: temperature ?? 0.7,
+        top_p: 0.9,
+      })
+    }, {
+      timeout: DEFAULT_API_TIMEOUT_MS,
+      maxRetries: DEFAULT_API_RETRIES,
+      retryDelay: DEFAULT_RETRY_DELAY_MS
+    });
+  } catch (fetchError: any) {
+    if (fetchError?.name === 'AbortError') {
+      throw new Error('MODEL_RESPONSE_TIMEOUT');
+    }
+    throw new Error(`Perplexity API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+  }
 
   if (!response.ok) {
     let errorData: any = {};
@@ -878,7 +917,7 @@ export async function POST(request: NextRequest) {
       && modelId !== 'gptimage1' && modelId !== 'dalle3';
 
     // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
-    if (isStreamableGPT) {
+    if (isStreamableGPT && OPENAI_STREAMING_ALLOWED) {
       const stream = new ReadableStream({
         async start(ctrl) {
           try {
