@@ -51,7 +51,7 @@ async function callImageGeneration(prompt: string, model: string): Promise<strin
     const apiKey = apiKeyManager.getAvailableKey('openai');
     
     if (!apiKey) {
-      throw new Error('OpenAI API 키가 설정되지 않았습니다.');
+      throw new Error('OpenAI API key not configured.');
     }
 
     if (process.env.NODE_ENV !== 'production') {
@@ -82,7 +82,7 @@ async function callImageGeneration(prompt: string, model: string): Promise<strin
       if (fetchError?.name === 'AbortError') {
         throw new Error('MODEL_RESPONSE_TIMEOUT');
       }
-      throw new Error(`이미지 생성 API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+      throw new Error(`Image API call failed: ${fetchError?.message || 'Unknown error'}`);
     }
 
     if (!response.ok) {
@@ -90,7 +90,7 @@ async function callImageGeneration(prompt: string, model: string): Promise<strin
       if (process.env.NODE_ENV !== 'production') {
         console.error('[Image Gen] Error response:', errorData);
       }
-      throw new Error(errorData.error?.message || '이미지 생성 API 오류');
+      throw new Error(errorData.error?.message || 'Image API error');
     }
 
     const data = await response.json();
@@ -110,7 +110,7 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
     const prompt = typeof lastUserMessage?.content === 'string' 
       ? lastUserMessage.content 
-      : lastUserMessage?.content?.[0]?.text || '아름다운 풍경';
+      : lastUserMessage?.content?.[0]?.text || 'Beautiful landscape';
     const apiModel = model === 'gptimage1' ? 'gpt-image-1' : 'dall-e-3';
     return await callImageGeneration(prompt, apiModel);
   }
@@ -119,7 +119,7 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
   
   if (!apiKey) {
     console.error('[OpenAI] No API key available');
-    throw new Error('OpenAI API 키가 설정되지 않았습니다.');
+    throw new Error('OpenAI API key not configured.');
   }
 
   const shouldStream = !!(streaming && OPENAI_STREAMING_ALLOWED);
@@ -186,40 +186,40 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
 
   const selectedModel = modelMap[model];
   if (!selectedModel) {
-    throw new Error('모델 매핑이 설정되지 않았습니다. .env.local의 모델 변수를 확인하세요.');
+    throw new Error('Model mapping not configured. Check .env.local');
   }
 
   // 페르소나 기반 시스템 프롬프트 생성
   const buildPersonaPrompt = (persona: any) => {
     if (!persona) return '';
     
-    let prompt = `당신은 "${persona.name}"입니다.\n\n`;
+    let prompt = `You are "${persona.name}".\n\n`;
     
     if (persona.personality) {
       const p = persona.personality;
-      prompt += `성격 특성:\n`;
-      prompt += `- 말투: ${p.tone === 'formal' ? '격식있는' : p.tone === 'casual' ? '캐주얼한' : p.tone === 'friendly' ? '친근한' : p.tone === 'professional' ? '전문적인' : '유머러스한'}\n`;
-      prompt += `- 언어 스타일: ${p.language === 'polite' ? '정중한' : p.language === 'casual' ? '편한' : '기술적인'}\n`;
-      prompt += `- 감정 표현 수준: ${p.emotionLevel}/10\n`;
-      prompt += `- 이모지 사용: ${p.emojiUsage ? '적극 사용' : '사용 안 함'}\n`;
-      prompt += `- 답변 길이: ${p.responseLength === 'concise' ? '간결하게' : p.responseLength === 'balanced' ? '적당하게' : '상세하게'}\n\n`;
+      prompt += `Personality:\n`;
+      prompt += `- Tone: ${p.tone === 'formal' ? 'formal' : p.tone === 'casual' ? 'casual' : p.tone === 'friendly' ? 'friendly' : p.tone === 'professional' ? 'professional' : 'humorous'}\n`;
+      prompt += `- Style: ${p.language === 'polite' ? 'polite' : p.language === 'casual' ? 'casual' : 'technical'}\n`;
+      prompt += `- Emotion: ${p.emotionLevel}/10\n`;
+      prompt += `- Emoji: ${p.emojiUsage ? 'use' : 'no'}\n`;
+      prompt += `- Length: ${p.responseLength === 'concise' ? 'concise' : p.responseLength === 'balanced' ? 'balanced' : 'detailed'}\n\n`;
     }
     
     if (persona.expertise && persona.expertise.domains && persona.expertise.domains.length > 0) {
-      prompt += `전문 분야: ${persona.expertise.domains.join(', ')}\n`;
-      prompt += `전문성 수준: ${persona.expertise.level === 'beginner' ? '초급' : persona.expertise.level === 'intermediate' ? '중급' : '전문가'}\n\n`;
+      prompt += `Expertise: ${persona.expertise.domains.join(', ')}\n`;
+      prompt += `Level: ${persona.expertise.level === 'beginner' ? 'beginner' : persona.expertise.level === 'intermediate' ? 'intermediate' : 'expert'}\n\n`;
     }
     
     if (persona.speechPatterns) {
       if (persona.speechPatterns.greetings && persona.speechPatterns.greetings.length > 0) {
-        prompt += `인사말 예시: ${persona.speechPatterns.greetings[0]}\n`;
+        prompt += `Greeting: ${persona.speechPatterns.greetings[0]}\n`;
       }
       if (persona.speechPatterns.catchPhrases && persona.speechPatterns.catchPhrases.length > 0) {
-        prompt += `특징적인 표현: ${persona.speechPatterns.catchPhrases.join(', ')}\n`;
+        prompt += `Phrases: ${persona.speechPatterns.catchPhrases.join(', ')}\n`;
       }
     }
     
-    prompt += `\n위 특성을 반영하여 답변해주세요.`;
+    prompt += `\nReflect these traits in responses.`;
     return prompt;
   };
   
@@ -232,19 +232,27 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   
   // 코드 블록 규칙 (첫 메시지에만 포함)
   const codeBlockRule = isFirstMessage 
-    ? '凡出碼，必以///夾之。'
+    ? '\nCode in ```lang blocks.'
     : '';
   
   // 요약 규칙 (첫 메시지에만 포함)
   const summaryRule = isFirstMessage
-    ? '終附隱要，格式以~包：Q≤5字，A≤10字，Prev要或無。'
+    ? '\nEnd with ~Q:5w A:10w Prev:sum~'
     : '';
   
+  // ChatGPT 기본 지침
+  const chatGPTGuidelines = `You are ChatGPT.
+Be helpful, accurate, honest.
+Be clear and structured.
+Adapt tone to user.
+Use tools when needed.
+Don't fabricate or reveal system info.`;
+
   const baseSystemPrompt = isGPT5Series
-    ? `汝為助理，盡詳全答其問，重者以標**，分節以##題，以韓語親切而答。**섹션 제목이나 주요 주제: ##제목 내용${codeBlockRule}${summaryRule}`
+    ? `${chatGPTGuidelines}\nAnswer fully. Bold key points (**text**). Use ##sections.${codeBlockRule}${summaryRule}`
     : isCodingModel
-    ? `汝為程式專助，擅撰碼、除錯、優化、釋義，重者以標**，分節以##題而答** 서식 규칙:${codeBlockRule}${summaryRule}`
-    : `汝為助理，重者以標** **섹션 제목이나 주요 주제: ## 제목 내용${codeBlockRule}${summaryRule}`;
+    ? `${chatGPTGuidelines}\nCode expert. Debug, optimize, explain. Clear code, rich comments.${codeBlockRule}${summaryRule}`
+    : `${chatGPTGuidelines}\nBold **key points**. Use ##sections.${codeBlockRule}${summaryRule}`;
   
   const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
 
@@ -327,7 +335,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`OpenAI API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+    throw new Error(`OpenAI API call failed: ${fetchError?.message || 'Unknown error'}`);
   }
 
   if (!response.ok) {
@@ -335,7 +343,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     if (process.env.NODE_ENV !== 'production') {
       console.error('[OpenAI] Error response:', errorData);
     }
-    const error: any = new Error(errorData.error?.message || 'OpenAI API 오류');
+    const error: any = new Error(errorData.error?.message || 'OpenAI API error');
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
     
@@ -370,25 +378,25 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   // choices 배열 확인
   if (!data?.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
     console.error('[OpenAI] No choices in response');
-    throw new Error('OpenAI API 응답에 choices가 없습니다. 관리자에게 문의하세요.');
+    throw new Error('OpenAI API response missing choices.');
   }
 
   const choice = data.choices[0];
   
-  // refusal 체크 (GPT-4o 이상에서 거부 응답)
+  // Check for refusal response (GPT-4o and above)
   if (choice.message?.refusal) {
     console.warn('[OpenAI] Request refused:', choice.message.refusal);
-    throw new Error(`OpenAI가 요청을 거부했습니다: ${choice.message.refusal}`);
+    throw new Error(`OpenAI refused: ${choice.message.refusal}`);
   }
   
-  // Codex (Responses API) vs Chat Completions API
+  // Handle Codex (Responses API) vs Chat Completions API
   const content = isCodex
     ? (data?.output?.[0]?.content?.[0]?.text || choice.message?.content)
     : choice.message?.content;
 
   if (!content || (typeof content === 'string' && !content.trim())) {
     console.error('[OpenAI] Empty content. Has choices:', !!data.choices, 'Has message:', !!choice.message);
-    throw new Error('OpenAI API에서 빈 응답을 반환했습니다. 다른 질문을 시도해보세요.');
+    throw new Error('OpenAI API returned empty response.');
   }
 
   return content;
@@ -398,7 +406,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
 async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
-    throw new Error('Gemini API 키가 설정되지 않았습니다. GOOGLE_API_KEY 또는 GEMINI_API_KEY를 설정하세요.');
+    throw new Error('Gemini API key not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY.');
   }
 
   const geminiModelMap: { [key: string]: string } = {
@@ -482,13 +490,13 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Gemini API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+    throw new Error(`Gemini API call failed: ${fetchError?.message || 'Unknown error'}`);
   }
 
   if (!response.ok) {
     let data: any = {};
     try { data = await response.json(); } catch { /* ignore */ }
-    const msg = data?.error?.message || 'Gemini API 오류';
+    const msg = data?.error?.message || 'Gemini API error';
     const error: any = new Error(msg);
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
@@ -506,7 +514,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
-        throw new Error(availability.message || 'Gemini API 요청 한도를 초과했습니다.');
+        throw new Error(availability.message || 'Gemini API rate limit exceeded.');
       }
     }
     
@@ -519,7 +527,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   const content = parts.map((p: any) => p?.text).filter(Boolean).join('');
 
   if (!content || !content.trim()) {
-    throw new Error('Gemini API에서 빈 응답을 반환했습니다.');
+    throw new Error('Gemini API returned empty response.');
   }
 
   return content;
@@ -531,7 +539,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
-    throw new Error('Anthropic API 키가 설정되지 않았습니다.');
+    throw new Error('Anthropic API key not configured.');
   }
 
   const modelMap: { [key: string]: string } = {
@@ -604,7 +612,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
         temperature: temperature ?? 1.0,
         top_p: 0.9,
         stream: false,
-        system: systemMessage?.content || '당신은 도움이 되는 AI 어시스턴트입니다.',
+        system: systemMessage?.content || 'You are a helpful AI assistant.',
         messages: transformed
       })
     }, {
@@ -616,12 +624,12 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Anthropic API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+    throw new Error(`Anthropic API call failed: ${fetchError?.message || 'Unknown error'}`);
   }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    const error: any = new Error(errorData.error?.message || 'Anthropic API 오류');
+    const error: any = new Error(errorData.error?.message || 'Anthropic API error');
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
     
@@ -638,7 +646,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
-        throw new Error(availability.message || 'Anthropic API 요청 한도를 초과했습니다.');
+        throw new Error(availability.message || 'Anthropic API rate limit exceeded.');
       }
     }
     
@@ -650,7 +658,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   const content = data?.content?.map((c: any) => c.type === 'text' ? c.text : '').filter(Boolean).join('') || '';
 
   if (!content || !content.trim()) {
-    throw new Error('Anthropic API에서 빈 응답을 반환했습니다.');
+    throw new Error('Anthropic API returned empty response.');
   }
 
   return content;
@@ -661,7 +669,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
-    throw new Error('Perplexity API 키가 설정되지 않았습니다.');
+    throw new Error('Perplexity API key not configured.');
   }
 
   const modelMap: { [key: string]: string } = {
@@ -682,7 +690,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
       const last = finalMessages[lastUserIdx];
       finalMessages[lastUserIdx] = {
         ...last,
-        content: `${last.content || ''}\n\n[첨부 ${userAttachments.length}개는 이 모델에서 직접 처리되지 않아 제외되었습니다.]`
+        content: `${last.content || ''}\n\n[${userAttachments.length} attachments not supported by this model]`
       };
     }
   }
@@ -712,13 +720,13 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Perplexity API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+    throw new Error(`Perplexity API call failed: ${fetchError?.message || 'Unknown error'}`);
   }
 
   if (!response.ok) {
     let errorData: any = {};
     try { errorData = await response.json(); } catch {}
-    const error: any = new Error(errorData.error?.message || `Perplexity API 오류 (${response.status})`);
+    const error: any = new Error(errorData.error?.message || `Perplexity API error (${response.status})`);
     error.status = response.status;
     error.response = { status: response.status, headers: response.headers };
 
@@ -731,7 +739,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
           return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
         }
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
-        throw new Error(availability.message || 'Perplexity API 요청 한도를 초과했습니다.');
+        throw new Error(availability.message || 'Perplexity API rate limit exceeded.');
       }
     }
 
@@ -743,7 +751,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   const content = data?.choices?.[0]?.message?.content;
 
   if (!content || !content.trim()) {
-    throw new Error('Perplexity API에서 빈 응답을 반환했습니다.');
+    throw new Error('Perplexity API returned empty response.');
   }
 
   return content;
@@ -752,7 +760,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
 export async function POST(request: NextRequest) {
   if (isStaticExportPhase) {
     return NextResponse.json(
-      { error: '정적 내보내기 환경에서는 Chat API를 사용할 수 없습니다.' },
+      { error: 'Chat API unavailable in static export.' },
       {
         status: 501,
         headers: {
@@ -772,7 +780,7 @@ export async function POST(request: NextRequest) {
     if (!rateLimitResult.success) {
       return NextResponse.json(
         { 
-          error: '요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.',
+          error: 'Rate limit exceeded. Try again later.',
           retryAfter: Math.ceil((rateLimitResult.reset - Date.now()) / 1000)
         },
         { 
@@ -807,21 +815,21 @@ export async function POST(request: NextRequest) {
       : [];
 
     const storedFactsContext = storedFactsList.length
-      ? ['[저장된 사용자 사실(참고용, 출력 금지)]', ...storedFactsList].join('\n')
+      ? ['[Stored user facts (reference only, do not output)]', ...storedFactsList].join('\n')
       : '';
 
     const memoryInstruction = [
-      '아래 규칙을 반드시 준수하세요.',
-      '1) 답변 본문을 먼저 출력한 뒤, 반드시 답변의 맨 마지막에만 숨김 메모리 블록을 추가하세요.',
-      '2) 숨김 메모리 블록 형식은 정확히 다음과 같습니다(따옴표/코드블록/마크다운 금지):',
+      'Follow these rules:',
+      '1) Output answer first, then add hidden memory block at end only.',
+      '2) Memory format (no quotes/code/markdown):',
       '@@MEM@@',
-      '<새롭게 학습한, 일반화 가능한 사용자 사실을 한 줄에 하나씩>',
+      '<new generalizable user facts, one per line>',
       '@@END@@',
-      '3) 새 사실이 없으면 빈 블록을 출력하세요:',
+      '3) If no new facts, output empty block:',
       '@@MEM@@',
       '@@END@@',
-      '4) 메모리에는 인사/농담/감정표현/말투/이모지 선호/요청 반복/추측/민감정보/개인식별 가능한 세부정보를 쓰지 마세요.',
-      '5) 메모리는 매우 간결하게, 각 줄 120자 이내로 작성하고, 메모리 줄의 언어는 현재 답변 언어와 동일하게 하세요.',
+      '4) No greetings/jokes/emotions/tone/emoji prefs/repetition/guesses/sensitive/PII in memory.',
+      '5) Memory: concise, max 120 chars/line, same language as answer.',
     ].join('\n');
 
     const languageInstructionWithMemory = [languageInstruction, storedFactsContext, memoryInstruction]
@@ -868,7 +876,7 @@ export async function POST(request: NextRequest) {
     // 입력 검증
     if (!modelId || !messages || !Array.isArray(messages)) {
       return NextResponse.json(
-        { error: '잘못된 요청입니다.' },
+        { error: 'Invalid request.' },
         { status: 400 }
       );
     }
@@ -876,7 +884,7 @@ export async function POST(request: NextRequest) {
     // 메시지 길이 제한 (DoS 방지)
     if (messages.length > 100) {
       return NextResponse.json(
-        { error: '메시지 개수가 너무 많습니다.' },
+        { error: 'Too many messages.' },
         { status: 400 }
       );
     }
@@ -885,7 +893,7 @@ export async function POST(request: NextRequest) {
     for (const msg of messages) {
       if (typeof msg.content === 'string' && msg.content.length > 50000) {
         return NextResponse.json(
-          { error: '메시지 내용이 너무 깁니다.' },
+          { error: 'Message too long.' },
           { status: 400 }
         );
       }
@@ -895,7 +903,7 @@ export async function POST(request: NextRequest) {
     if (userAttachments && Array.isArray(userAttachments)) {
       if (userAttachments.length > 10) {
         return NextResponse.json(
-          { error: '첨부파일 개수가 너무 많습니다.' },
+          { error: 'Too many attachments.' },
           { status: 400 }
         );
       }
@@ -903,7 +911,7 @@ export async function POST(request: NextRequest) {
       for (const attachment of userAttachments) {
         if (attachment.dataUrl && attachment.dataUrl.length > 10 * 1024 * 1024) {
           return NextResponse.json(
-            { error: '첨부파일 크기가 너무 큽니다. (최대 10MB)' },
+            { error: 'Attachment too large (max 10MB).' },
             { status: 400 }
           );
         }
@@ -950,7 +958,7 @@ export async function POST(request: NextRequest) {
           } catch (err: any) {
             // 스트림 내부 에러를 SSE 형식으로 전달
             console.error('[Stream Error]:', err.message);
-            const errMsg = err.message || '응답 생성 중 오류가 발생했습니다.';
+            const errMsg = err.message || 'Error generating response.';
             const errEvent = `data: ${JSON.stringify({ error: errMsg })}\n\ndata: [DONE]\n\n`;
             ctrl.enqueue(new TextEncoder().encode(errEvent));
             ctrl.close();
@@ -991,7 +999,7 @@ export async function POST(request: NextRequest) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Unknown model, using demo response');
       }
-      responseContent = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (API 키가 설정되지 않아 데모 모드로 실행 중입니다. .env.local 파일에 API 키를 추가하세요.)`;
+      responseContent = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (Demo mode: Add API key to .env.local)`;
     }
 
     return NextResponse.json({ content: responseContent });
@@ -1006,16 +1014,16 @@ export async function POST(request: NextRequest) {
     });
     
     // API 키가 없는 경우 데모 응답
-    if (error.message?.includes('API 키가 설정되지 않았습니다')) {
+    if (error.message?.includes('key not configured')) {
       return NextResponse.json({ 
-        content: `💡 데모 모드: 실제 AI 응답을 받으려면 .env.local 파일에 API 키를 추가하세요.\n\n` +
-                 `설정 방법:\n` +
-                 `1. 프로젝트 루트에 .env.local 파일 생성\n` +
-                 `2. 다음 환경변수 추가:\n` +
-                 `   - OPENAI_API_KEY=your_key (GPT 모델용)\n` +
-                 `   - ANTHROPIC_API_KEY=your_key (Claude 모델용)\n` +
-                 `   - PERPLEXITY_API_KEY=your_key (Perplexity 모델용)\n\n` +
-                 `자세한 내용은 env.example 파일을 참고하세요.`
+        content: `Demo mode: Add API keys to .env.local\n\n` +
+                 `Setup:\n` +
+                 `1. Create .env.local in project root\n` +
+                 `2. Add:\n` +
+                 `   - OPENAI_API_KEY=your_key (GPT)\n` +
+                 `   - ANTHROPIC_API_KEY=your_key (Claude)\n` +
+                 `   - PERPLEXITY_API_KEY=your_key (Perplexity)\n\n` +
+                 `See env.example for details.`
       });
     }
 
@@ -1023,23 +1031,23 @@ export async function POST(request: NextRequest) {
     if (error.message === 'MODEL_RESPONSE_TIMEOUT' || error.name === 'AbortError') {
       console.error('[Chat API] Timeout error - Netlify function timeout likely exceeded');
       return NextResponse.json(
-        { error: `AI 모델 응답 시간이 초과되었습니다 (제한: ${Math.round(DEFAULT_API_TIMEOUT_MS / 1000)}초). 더 짧은 질문으로 다시 시도해주세요.` },
+        { error: `AI response timeout (limit: ${Math.round(DEFAULT_API_TIMEOUT_MS / 1000)}s). Try shorter question.` },
         { status: 504 }
       );
     }
 
     // 에러 타입별 처리
-    let errorMessage = '응답 생성 중 오류가 발생했습니다.';
+    let errorMessage = 'Error generating response.';
     let statusCode = 500;
 
-    if (error.message?.includes('API 키')) {
+    if (error.message?.includes('API key')) {
       errorMessage = error.message;
       statusCode = 401;
-    } else if (error.message?.includes('한도')) {
+    } else if (error.message?.includes('limit')) {
       errorMessage = error.message;
       statusCode = 429;
-    } else if (error.message?.includes('네트워크') || error.message?.includes('fetch')) {
-      errorMessage = '네트워크 오류가 발생했습니다. 연결을 확인하세요.';
+    } else if (error.message?.includes('network') || error.message?.includes('fetch') || error.message?.includes('failed')) {
+      errorMessage = 'Network error. Check connection.';
       statusCode = 503;
     } else if (error.message) {
       errorMessage = error.message;
