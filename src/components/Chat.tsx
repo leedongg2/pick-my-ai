@@ -406,6 +406,12 @@ export const Chat: React.FC = () => {
       setCurrentSession(chatSessions[0].id);
     }
   }, [currentSessionId, chatSessions, setCurrentSession]);
+
+  // 세션 전환 시 로딩 상태 초기화
+  useEffect(() => {
+    setIsLoading(false);
+    streamingRef.current = false;
+  }, [currentSessionId]);
   
   // Set default model when available models change (client-side only)
   useEffect(() => {
