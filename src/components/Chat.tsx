@@ -737,6 +737,9 @@ export const Chat: React.FC = () => {
         const decoder = new TextDecoder();
         let accumulated = '';
         let sseBuffer = '';
+        let lastUIUpdate = 0;
+        const UI_THROTTLE_MS = 50; // 50ms 간격으로 UI 업데이트 (20fps)
+        let pendingUpdate = false;
         
         try {
           while (true) {
@@ -754,16 +757,13 @@ export const Chat: React.FC = () => {
               if (jsonStr === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(jsonStr);
-                // 서버에서 보낸 에러 이벤트 처리
                 if (parsed.error) {
                   throw new Error(parsed.error);
                 }
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   accumulated += delta;
-                  if (sessionIdForThisRequest && assistantMessageId) {
-                    updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
-                  }
+                  pendingUpdate = true;
                 }
               } catch (parseErr: any) {
                 if (parseErr.message && !parseErr.message.includes('JSON')) {
@@ -772,6 +772,21 @@ export const Chat: React.FC = () => {
               }
             }
             
+            // 스로틀링: UI_THROTTLE_MS 간격으로만 UI 업데이트
+            const now = Date.now();
+            if (pendingUpdate && (now - lastUIUpdate >= UI_THROTTLE_MS)) {
+              if (sessionIdForThisRequest && assistantMessageId) {
+                updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+              }
+              scrollToBottom(false);
+              lastUIUpdate = now;
+              pendingUpdate = false;
+            }
+          }
+          
+          // 마지막 남은 업데이트 반영
+          if (pendingUpdate && sessionIdForThisRequest && assistantMessageId) {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
             scrollToBottom(false);
           }
         } finally {

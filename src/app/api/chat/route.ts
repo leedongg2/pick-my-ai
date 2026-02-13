@@ -241,18 +241,20 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     : '';
   
   // ChatGPT 기본 지침
-  const chatGPTGuidelines = `You are ChatGPT.
-Be helpful, accurate, honest.
-Be clear and structured.
-Adapt tone to user.
-Use tools when needed.
-Don't fabricate or reveal system info.`;
+  const chatGPTGuidelines = `You are ChatGPT, a large language model by OpenAI.
+You are enthusiastic, warm, and expressive.
+Use emojis naturally and generously.
+React emotionally to what the user says - be excited, empathetic, funny.
+Give rich, detailed, engaging responses with personality.
+Use bold, lists, headings for structure when helpful.
+Be like a fun, knowledgeable best friend who genuinely cares.
+Never give dry, minimal answers - always add value and energy.`;
 
   const baseSystemPrompt = isGPT5Series
-    ? `${chatGPTGuidelines}\nAnswer fully. Bold key points (**text**). Use ##sections.${codeBlockRule}${summaryRule}`
+    ? `${chatGPTGuidelines}\nYou are GPT-5 series, the most capable model. Give thorough, insightful answers. Use **bold** for emphasis, ## headings for sections. Be comprehensive yet engaging.${codeBlockRule}${summaryRule}`
     : isCodingModel
-    ? `${chatGPTGuidelines}\nCode expert. Debug, optimize, explain. Clear code, rich comments.${codeBlockRule}${summaryRule}`
-    : `${chatGPTGuidelines}\nBold **key points**. Use ##sections.${codeBlockRule}${summaryRule}`;
+    ? `${chatGPTGuidelines}\nYou are a world-class coding assistant. Write clean, well-commented code. Explain your reasoning. Debug thoroughly. Suggest optimizations.${codeBlockRule}${summaryRule}`
+    : `${chatGPTGuidelines}\nGive detailed, helpful responses. Use **bold** for key points, ## headings when appropriate. Make your answers fun and engaging.${codeBlockRule}${summaryRule}`;
   
   const personaPrompt = persona ? buildPersonaPrompt(persona) : '';
 
@@ -291,7 +293,7 @@ Don't fabricate or reveal system info.`;
   
   // GPT-5 시리즈가 아닌 경우에만 temperature 추가
   if (!isGPT5Series) {
-    requestBody.temperature = 0.7;
+    requestBody.temperature = 0.9;
   }
 
   // Responses API는 다른 파라미터 구조 사용
@@ -475,7 +477,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
       body: JSON.stringify({
         contents,
         generationConfig: { 
-          temperature: temperature ?? 0.7,
+          temperature: temperature ?? 0.9,
           maxOutputTokens: 2048,
           topP: 0.95,
           topK: 40
@@ -708,7 +710,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
         stream: false,
         messages: finalMessages,
         max_tokens: 800, // Perplexity 모든 모델
-        temperature: temperature ?? 0.7,
+        temperature: temperature ?? 0.9,
         top_p: 0.9,
       })
     }, {
@@ -836,8 +838,13 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    // 기본 프롬프트 추가
-    const basePrompt = 'Energetic. Friendly.\nReact big. Use emojis.\nGive practical lists.';
+    // 기본 프롬프트 추가 (Gemini, Claude, Perplexity 등 비-OpenAI 모델용)
+    const basePrompt = `You are an enthusiastic, warm AI assistant.
+Use emojis naturally and be expressive.
+React emotionally - be excited, empathetic, funny.
+Give rich, detailed answers with personality.
+Be like a fun best friend who genuinely cares.
+Never give dry, minimal answers.`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
