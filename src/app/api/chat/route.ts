@@ -291,8 +291,11 @@ Never give dry, minimal answers - always add value and energy.`;
     stream: !!(streaming && !isCodex)
   };
   
-  // GPT-5 시리즈가 아닌 경우에만 temperature 추가
-  if (!isGPT5Series) {
+  // GPT-5 시리즈는 reasoning 없이 빠르게 응답하도록 설정
+  if (isGPT5Series) {
+    requestBody.reasoning_effort = 'none'; // reasoning 비활성화로 빠른 응답
+  } else {
+    // GPT-5 시리즈가 아닌 경우에만 temperature 추가
     requestBody.temperature = 0.9;
   }
 
