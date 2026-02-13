@@ -56,12 +56,16 @@ class ApiKeyRotationManager {
    * 환경 변수에서 API 키 풀 초기화
    */
   private initializeKeyPools(): void {
+    console.log('[API Key Manager] Initializing key pools...');
+    
     // OpenAI 키 (OPENAI_API_KEY_1, OPENAI_API_KEY_2, OPENAI_API_KEY_3)
+    let openaiKeyCount = 0;
     for (let i = 1; i <= 3; i++) {
       const key = process.env[`OPENAI_API_KEY_${i}`] || (i === 1 ? process.env.OPENAI_API_KEY : '');
       if (key) {
         // API 키 유효성 검증
         if (!validateApiKey(key, 'openai')) {
+          console.warn(`[API Key Manager] OpenAI API 키 ${i} 형식이 올바르지 않습니다: ${maskApiKey(key)}`);
           securityLog('warn', `OpenAI API 키 ${i} 형식이 올바르지 않습니다`, { keyMask: maskApiKey(key) });
           continue;
         }
@@ -69,8 +73,16 @@ class ApiKeyRotationManager {
           key,
           isAvailable: true,
         });
+        openaiKeyCount++;
+        console.log(`[API Key Manager] OpenAI API 키 ${i} 로드 완료: ${maskApiKey(key)}`);
         securityLog('info', `OpenAI API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
+    }
+    
+    if (openaiKeyCount === 0) {
+      console.error('[API Key Manager] WARNING: No valid OpenAI API keys found!');
+    } else {
+      console.log(`[API Key Manager] Total OpenAI keys loaded: ${openaiKeyCount}`);
     }
 
     // Anthropic 키
@@ -129,16 +141,22 @@ class ApiKeyRotationManager {
     const pool = this.keyPools[provider];
     
     if (!pool || pool.length === 0) {
+      console.error(`[API Key Manager] No keys in pool for provider: ${provider}`);
       return null;
     }
+    
+    console.log(`[API Key Manager] Getting key for ${provider}, pool size: ${pool.length}`);
 
     const now = Date.now();
 
     // 1. 사용 가능한 키 찾기
     const availableKey = pool.find(k => k.isAvailable && (!k.rateLimitResetTime || k.rateLimitResetTime <= now));
     if (availableKey) {
+      console.log(`[API Key Manager] Found available key for ${provider}: ${maskApiKey(availableKey.key)}`);
       return availableKey.key;
     }
+    
+    console.warn(`[API Key Manager] No immediately available key for ${provider}, checking rate limits...`);
 
     // 2. 모든 키가 제한된 경우, 가장 빨리 풀리는 키 찾기
     const soonestKey = pool

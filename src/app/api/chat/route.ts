@@ -115,11 +115,15 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
   }
 
   const apiKey = apiKeyManager.getAvailableKey('openai');
+  console.log('[OpenAI] API key check:', { hasKey: !!apiKey, keyPrefix: apiKey?.substring(0, 7) });
+  
   if (!apiKey) {
+    console.error('[OpenAI] No API key available');
     throw new Error('OpenAI API 키가 설정되지 않았습니다.');
   }
 
   const shouldStream = !!(streaming && OPENAI_STREAMING_ALLOWED);
+  console.log('[OpenAI] Request config:', { model, streaming: shouldStream, isNetlify });
 
   return await executeOpenAIRequest(
     model,
@@ -298,15 +302,20 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     apiRequestBody = requestBody;
   }
 
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[OpenAI] Request:`, { endpoint, model: selectedModel, stream: requestBody.stream });
-  }
-
   // 스트리밍은 연결 타임아웃, 비스트리밍은 응답 타임아웃
   const connectTimeout = streaming ? STREAM_CONNECT_TIMEOUT_MS : DEFAULT_API_TIMEOUT_MS;
 
+  console.log('[OpenAI] Making API request:', { 
+    endpoint, 
+    model: selectedModel, 
+    stream: requestBody.stream,
+    timeout: connectTimeout,
+    retries: streaming ? 1 : DEFAULT_API_RETRIES
+  });
+
   let response: Response;
   try {
+    console.log('[OpenAI] Calling fetchWithRetry...');
     response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: {
@@ -319,7 +328,9 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
       maxRetries: streaming ? 1 : DEFAULT_API_RETRIES,
       retryDelay: DEFAULT_RETRY_DELAY_MS
     });
+    console.log('[OpenAI] API response received:', { status: response.status, ok: response.ok });
   } catch (fetchError: any) {
+    console.error('[OpenAI] Fetch error:', { name: fetchError?.name, message: fetchError?.message });
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
@@ -906,10 +917,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 개발 환경에서만 로깅
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[Chat API] Model: ${modelId}, Messages: ${messages.length}`);
-    }
+    // 모든 환경에서 요청 추적
+    console.log('[Chat API] Request received:', { 
+      modelId, 
+      messageCount: messages.length,
+      hasAttachments: !!userAttachments?.length,
+      isNetlify,
+      nodeEnv: process.env.NODE_ENV
+    });
 
     // OpenAI 모델 판별
     const isOpenAIModel = modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex')
@@ -923,15 +938,30 @@ export async function POST(request: NextRequest) {
 
     // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
     if (isStreamableGPT && OPENAI_STREAMING_ALLOWED) {
+      console.log('[Chat API] Using streaming path for model:', modelId);
       const stream = new ReadableStream({
         async start(ctrl) {
+          console.log('[Chat API Stream] Stream started, calling OpenAI...');
           try {
+            console.log('[Chat API Stream] About to call callOpenAI with streaming=true');
             const openaiRes = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true) as Response;
-            const reader = openaiRes.body!.getReader();
+            console.log('[Chat API Stream] callOpenAI returned, status:', openaiRes.status);
+            
+            if (!openaiRes.body) {
+              throw new Error('OpenAI response has no body');
+            }
+            
+            const reader = openaiRes.body.getReader();
+            console.log('[Chat API Stream] Reading stream...');
             try {
+              let chunkCount = 0;
               while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                  console.log('[Chat API Stream] Stream complete, chunks received:', chunkCount);
+                  break;
+                }
+                chunkCount++;
                 ctrl.enqueue(value);
               }
             } finally {
@@ -940,6 +970,11 @@ export async function POST(request: NextRequest) {
             ctrl.close();
           } catch (err: any) {
             // 스트림 내부 에러를 SSE 형식으로 전달
+            console.error('[Chat API Stream] Error in stream:', {
+              name: err.name,
+              message: err.message,
+              stack: err.stack?.split('\n').slice(0, 3).join('\n')
+            });
             const errMsg = err.message || '응답 생성 중 오류가 발생했습니다.';
             const errEvent = `data: ${JSON.stringify({ error: errMsg })}\n\ndata: [DONE]\n\n`;
             ctrl.enqueue(new TextEncoder().encode(errEvent));
@@ -961,10 +996,9 @@ export async function POST(request: NextRequest) {
     let responseContent: string;
 
     if (isOpenAIModel) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[Chat API] Calling OpenAI API${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
-      }
+      console.log(`[Chat API] Calling OpenAI API for model: ${modelId}${modelId === 'gptimage1' || modelId === 'dalle3' ? ' (Image Generation)' : ''}`);
       responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory) as string;
+      console.log('[Chat API] OpenAI response received, length:', responseContent?.length || 0);
     } else if (modelId.startsWith('gemini')) {
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat API] Calling Gemini API');
