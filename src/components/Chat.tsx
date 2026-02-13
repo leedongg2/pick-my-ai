@@ -857,6 +857,10 @@ export const Chat: React.FC = () => {
         else if (errorMessage.includes('API 키') || errorMessage.includes('401') || errorMessage.includes('403')) {
           errContent = `⚠️ **인증 오류**\n\n${errorMessage}\n\n**관리자에게 문의**해주세요.\nAPI 키 설정에 문제가 있을 수 있습니다.`;
         }
+        // OpenAI Safety System 에러
+        else if (errorMessage.includes('safety system') || errorMessage.includes('content policy') || errorMessage.includes('not allowed')) {
+          errContent = `🛡️ **안전 정책 위반**\n\n입력하신 내용이 AI 안전 정책에 위배되어 처리할 수 없습니다.\n\n**해결 방법:**\n• 폭력적, 성적, 혐오적 표현을 제거해주세요\n• 개인정보나 민감한 정보가 포함되지 않았는지 확인하세요\n• 더 중립적이고 안전한 표현으로 다시 작성해주세요\n\n건전하고 안전한 대화를 위해 협조 부탁드립니다.`;
+        }
         // 기타 에러
         else {
           errContent = `⚠️ **오류가 발생했습니다**\n\n${errorMessage}\n\n**해결 방법:**\n• 인터넷 연결을 확인하세요\n• 잠시 후 다시 시도해주세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;

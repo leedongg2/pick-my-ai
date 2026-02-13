@@ -16,9 +16,13 @@ const chatRateLimiter = new RateLimiter(20, 60 * 1000);
 
 const isNetlify = process.env.NETLIFY === 'true' || process.env.NETLIFY_LOCAL === 'true';
 const OPENAI_STREAMING_ALLOWED = process.env.OPENAI_STREAMING_DISABLED !== 'true';
-const DEFAULT_API_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS) || (isNetlify ? 25000 : 60000);
-const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_MS) || (isNetlify ? 15000 : 30000);
-const DEFAULT_API_RETRIES = Number(process.env.AI_API_MAX_RETRIES) || 2;
+// Netlify 무료 플랜: 함수 타임아웃 10초 → API 호출은 8초 이내 완료 필요
+// Netlify Pro 플랜: 함수 타임아웃 26초 → API 호출은 24초 이내
+const NETLIFY_FUNCTION_TIMEOUT = Number(process.env.NETLIFY_FUNCTION_TIMEOUT_MS) || 10000;
+const DEFAULT_API_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 2000, 5000) : 60000);
+const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 3000, 4000) : 30000);
+// Netlify에서는 재시도 시간이 부족하므로 0회, 로컬에서는 2회
+const DEFAULT_API_RETRIES = process.env.AI_API_MAX_RETRIES != null ? Number(process.env.AI_API_MAX_RETRIES) : (isNetlify ? 0 : 2);
 const DEFAULT_RETRY_DELAY_MS = Number(process.env.AI_API_RETRY_DELAY_MS) || 800;
 
 type UserAttachment = {
@@ -40,8 +44,8 @@ function extractBase64(dataUrl: string): { mime: string; base64: string } | null
   }
 }
 
-// DALL-E 이미지 생성 API 호출
-async function callDALLE(prompt: string): Promise<string> {
+// 이미지 생성 API 호출 (gpt-image-1, dall-e-3 등)
+async function callImageGeneration(prompt: string, model: string): Promise<string> {
   return apiKeyManager.enqueueRequest('openai', async () => {
     const apiKey = apiKeyManager.getAvailableKey('openai');
     
@@ -50,7 +54,7 @@ async function callDALLE(prompt: string): Promise<string> {
     }
 
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[DALL-E] Generating image with prompt:', prompt);
+      console.log(`[Image Gen] Generating image with ${model}, prompt:`, prompt);
     }
 
     let response: Response;
@@ -62,11 +66,11 @@ async function callDALLE(prompt: string): Promise<string> {
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: 'dall-e-3',
+          model: model === 'gpt-image-1' ? 'gpt-image-1' : 'dall-e-3',
           prompt: prompt,
           n: 1,
           size: '1024x1024',
-          quality: 'standard'
+          quality: model === 'gpt-image-1' ? 'hd' : 'standard'
         })
       }, {
         timeout: DEFAULT_API_TIMEOUT_MS,
@@ -77,20 +81,20 @@ async function callDALLE(prompt: string): Promise<string> {
       if (fetchError?.name === 'AbortError') {
         throw new Error('MODEL_RESPONSE_TIMEOUT');
       }
-      throw new Error(`DALL-E API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
+      throw new Error(`이미지 생성 API 호출 실패: ${fetchError?.message || '알 수 없는 오류'}`);
     }
 
     if (!response.ok) {
       const errorData = await response.json();
       if (process.env.NODE_ENV !== 'production') {
-        console.error('[DALL-E] Error response:', errorData);
+        console.error('[Image Gen] Error response:', errorData);
       }
-      throw new Error(errorData.error?.message || 'DALL-E API 오류');
+      throw new Error(errorData.error?.message || '이미지 생성 API 오류');
     }
 
     const data = await response.json();
     if (process.env.NODE_ENV !== 'production') {
-      console.log('[DALL-E] Image generated successfully');
+      console.log(`[Image Gen] Image generated successfully with ${model}`);
     }
 
     // 이미지 URL 반환
@@ -100,13 +104,14 @@ async function callDALLE(prompt: string): Promise<string> {
 
 // OpenAI API 호출 (키 로테이션 및 큐 시스템 지원)
 async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
-  // 이미지 생성 모델인 경우 DALL-E API 사용
+  // 이미지 생성 모델인 경우 이미지 생성 API 사용
   if (model === 'gptimage1' || model === 'dalle3') {
     const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
     const prompt = typeof lastUserMessage?.content === 'string' 
       ? lastUserMessage.content 
       : lastUserMessage?.content?.[0]?.text || '아름다운 풍경';
-    return await callDALLE(prompt);
+    const apiModel = model === 'gptimage1' ? 'gpt-image-1' : 'dall-e-3';
+    return await callImageGeneration(prompt, apiModel);
   }
 
   const apiKey = apiKeyManager.getAvailableKey('openai');
@@ -1008,9 +1013,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 모델 응답 타임아웃 처리
-    if (error.message === 'MODEL_RESPONSE_TIMEOUT') {
+    if (error.message === 'MODEL_RESPONSE_TIMEOUT' || error.name === 'AbortError') {
+      console.error('[Chat API] Timeout error - Netlify function timeout likely exceeded');
       return NextResponse.json(
-        { error: '모델 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.' },
+        { error: `AI 모델 응답 시간이 초과되었습니다 (제한: ${Math.round(DEFAULT_API_TIMEOUT_MS / 1000)}초). 더 짧은 질문으로 다시 시도해주세요.` },
         { status: 504 }
       );
     }
@@ -1025,7 +1031,7 @@ export async function POST(request: NextRequest) {
     } else if (error.message?.includes('한도')) {
       errorMessage = error.message;
       statusCode = 429;
-    } else if (error.message?.includes('네트워크')) {
+    } else if (error.message?.includes('네트워크') || error.message?.includes('fetch')) {
       errorMessage = '네트워크 오류가 발생했습니다. 연결을 확인하세요.';
       statusCode = 503;
     } else if (error.message) {

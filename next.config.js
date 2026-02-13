@@ -10,7 +10,7 @@ const nextConfig = {
   // 성능 최적화
   swcMinify: true,
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production',
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
     reactRemoveProperties: true,
   },
 
@@ -95,7 +95,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://api.openai.com https://api.anthropic.com https://api.perplexity.ai https://generativelanguage.googleapis.com https://*.supabase.co wss://*.supabase.co",
+              "connect-src 'self' https://api.openai.com https://api.anthropic.com https://api.perplexity.ai https://generativelanguage.googleapis.com https://*.supabase.co wss://*.supabase.co https://*.nsvcs.net",
               "frame-src 'self' https://www.google.com https://js.toss.im",
               "object-src 'none'",
               "base-uri 'self'",
