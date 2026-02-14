@@ -50,6 +50,8 @@ interface AppState {
   };
 
   language: AppLanguage;
+  speechLevel: 'formal' | 'informal';
+  setSpeechLevel: (level: 'formal' | 'informal') => void;
   
   // 커스텀 디자인 테마
   customDesignTheme: {
@@ -295,6 +297,7 @@ export const useStore = create<AppState>()(
       },
       currentUser: null,
       isAuthenticated: false,
+      speechLevel: 'formal' as 'formal' | 'informal',
       models: initialModels,
       selections: [],
       policy: defaultPolicy,
@@ -1652,9 +1655,8 @@ export const useStore = create<AppState>()(
         }));
       },
 
-      setLanguage: (language) => {
-        set({ language });
-      },
+      setLanguage: (language) => set({ language }),
+      setSpeechLevel: (level) => set({ speechLevel: level }),
       
       setCustomDesignTheme: (theme, elementColors) => {
         set({ customDesignTheme: { theme, elementColors } });
@@ -1824,6 +1826,7 @@ useStore.subscribe((state) => {
     up: state.userPlan,
     pmc: state.pmcBalance?.amount,
     lang: state.language,
+    sl: state.speechLevel,
   });
 
   if (snapshot === _prevSnapshot) return;

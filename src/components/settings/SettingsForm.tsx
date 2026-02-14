@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
-import { Palette, Paintbrush, Moon } from 'lucide-react';
+import { Palette, Paintbrush, Moon, MessageCircle } from 'lucide-react';
 import type { ThemeColor } from '@/types';
 import dynamic from 'next/dynamic';
 import { useTranslation } from '@/utils/translations';
@@ -13,7 +13,7 @@ import { useTranslation } from '@/utils/translations';
 const DarkModeToggle = dynamic(() => import('@/components/DarkModeToggle').then(mod => ({ default: mod.DarkModeToggle })), { ssr: false });
 
 export function SettingsForm() {
-  const { themeSettings, setThemeSettings, settings, toggleSuccessNotifications } = useStore();
+  const { themeSettings, setThemeSettings, settings, toggleSuccessNotifications, speechLevel, setSpeechLevel } = useStore();
   const router = useRouter();
   const { t } = useTranslation();
   
@@ -129,6 +129,49 @@ export function SettingsForm() {
             <Paintbrush className="w-4 h-4 mr-2" />
             {t.settings.designButton}
           </button>
+        </div>
+      </div>
+
+      {/* 반말/존댓말 설정 */}
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 settings-card">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-lg bg-pink-100 dark:bg-pink-900/30 flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-pink-600 dark:text-pink-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">AI 말투 설정</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">AI가 존댓말 또는 반말로 답변하도록 설정합니다</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => { setSpeechLevel('formal'); toast.success('존댓말로 변경되었습니다.'); }}
+              className={`flex-1 py-3 px-4 rounded-lg border-2 text-sm font-medium transition-all ${
+                speechLevel === 'formal'
+                  ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300'
+                  : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-gray-300'
+              }`}
+            >
+              🙏 존댓말
+              <p className="text-xs mt-1 font-normal">안녕하세요, 도와드릴게요!</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSpeechLevel('informal'); toast.success('반말로 변경되었습니다.'); }}
+              className={`flex-1 py-3 px-4 rounded-lg border-2 text-sm font-medium transition-all ${
+                speechLevel === 'informal'
+                  ? 'border-pink-500 bg-pink-50 dark:bg-pink-900/20 text-pink-700 dark:text-pink-300'
+                  : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:border-gray-300'
+              }`}
+            >
+              😎 반말
+              <p className="text-xs mt-1 font-normal">안녕, 도와줄게!</p>
+            </button>
+          </div>
         </div>
       </div>
 

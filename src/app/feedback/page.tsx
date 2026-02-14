@@ -84,14 +84,14 @@ export default function FeedbackPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-white dark:bg-gray-900">
         <div className="max-w-3xl mx-auto px-6 py-8">
           <div className="mb-8">
-            <h1 className="text-3xl font-semibold text-gray-900 mb-2">{t.feedback.title}</h1>
-            <p className="text-gray-600 text-sm">{t.feedback.subtitle}</p>
+            <h1 className="text-3xl font-semibold text-gray-900 dark:text-gray-100 mb-2">{t.feedback.title}</h1>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">{t.feedback.subtitle}</p>
           </div>
           
-          <div className="bg-white rounded-xl border border-gray-200">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="p-6">
               {sent && (
                 <div className="mb-6 p-4 rounded-lg bg-green-50 border border-green-200">
@@ -102,11 +102,11 @@ export default function FeedbackPage() {
               )}
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.type}</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.feedback.type}</label>
                   <select
                     value={type}
                     onChange={handleTypeChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="question">{t.feedback.typeQuestion}</option>
                     <option value="suggestion">{t.feedback.typeSuggestion}</option>
@@ -116,23 +116,23 @@ export default function FeedbackPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.titleLabel}</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.feedback.titleLabel}</label>
                   <input
                     value={title}
                     onChange={handleTitleChange}
                     placeholder={t.feedback.titlePlaceholder}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.content}</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.feedback.content}</label>
                   <textarea
                     value={content}
                     onChange={handleContentChange}
                     placeholder={t.feedback.contentPlaceholder}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[140px] resize-none"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[140px] resize-none"
                     maxLength={900}
                     required
                   />
@@ -140,7 +140,7 @@ export default function FeedbackPage() {
 
                 {/* 스크린샷 업로드 */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">{t.feedback.screenshots}</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t.feedback.screenshots}</label>
                   <input
                     ref={fileRef}
                     type="file"

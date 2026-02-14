@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useStore } from '@/store';
 import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
-import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle } from 'lucide-react';
+import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
@@ -96,6 +96,23 @@ type Attachment = {
   content?: string;
 };
 
+ // ~요약~ 숨기기: ~~로 감싼 요약 부분을 제거
+ const stripSummaryBlock = (text: string): string => {
+   if (!text) return text;
+   // ~~...~~ 블록 제거 (여러 줄 가능)
+   return text.replace(/~~[\s\S]*?~~/g, '').trim();
+ };
+
+ // 복사 함수
+ const handleCopyText = (text: string) => {
+   const cleaned = stripSummaryBlock(text);
+   navigator.clipboard.writeText(cleaned).then(() => {
+     toast.success('복사되었습니다!');
+   }).catch(() => {
+     toast.error('복사에 실패했습니다.');
+   });
+ };
+
  type ChatMessageRowProps = {
    msg: any;
    msgIndex: number;
@@ -103,13 +120,16 @@ type Attachment = {
    modelById: Map<string, any>;
    formatMessage: (text: string) => React.ReactNode;
    onDownloadImage: (imageUrl: string, filename?: string) => void;
+   isStreaming?: boolean;
  };
 
  const ChatMessageRow = React.memo((props: ChatMessageRowProps) => {
-   const { msg, msgIndex, overrideContent, modelById, formatMessage, onDownloadImage } = props;
+   const { msg, msgIndex, overrideContent, modelById, formatMessage, onDownloadImage, isStreaming } = props;
    const model = msg.modelId ? (modelById.get(msg.modelId) ?? null) : null;
 
-   const content = (overrideContent ?? (msg.content as unknown as string)) as unknown as string;
+   const rawContent = (overrideContent ?? (msg.content as unknown as string)) as unknown as string;
+   // ~요약~ 숨기기 적용
+   const content = rawContent ? stripSummaryBlock(rawContent) : rawContent;
    const isImage = typeof content === 'string' && (
      content.startsWith('http://') ||
      content.startsWith('https://') ||
@@ -120,7 +140,7 @@ type Attachment = {
      <div className={cn('group mb-4', msgIndex === 0 ? 'mt-2' : '')}>
        {msg.role === 'user' ? (
          <div className="flex justify-end">
-           <div className="inline-block bg-blue-100 text-gray-900 rounded-2xl px-4 py-3 max-w-[80%]">
+           <div className="relative inline-block bg-blue-100 text-gray-900 rounded-2xl px-4 py-3 max-w-[80%]">
              <div className="text-[15px] leading-6">
                {isImage ? (
                  <div className="relative group">
@@ -142,6 +162,16 @@ type Attachment = {
                  <div className="whitespace-pre-wrap">{formatMessage(content)}</div>
                )}
              </div>
+             {/* 사용자 메시지 복사 버튼 */}
+             {content && !isImage && (
+               <button
+                 onClick={() => handleCopyText(rawContent)}
+                 className="absolute -bottom-6 right-0 p-1 rounded hover:bg-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                 title="복사"
+               >
+                 <Copy className="w-3.5 h-3.5 text-gray-400" />
+               </button>
+             )}
            </div>
          </div>
        ) : (
@@ -154,12 +184,14 @@ type Attachment = {
                {model?.displayName || 'ChatGPT'}
              </div>
              <div className="text-gray-800 text-[15px] leading-7">
-               {!content ? (
+               {(!content && isStreaming) ? (
                  <div className="flex space-x-1 py-2">
                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}} />
                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
                  </div>
+               ) : !content ? (
+                 <div className="text-gray-400 italic text-sm">응답을 불러올 수 없습니다.</div>
                ) : isImage ? (
                  <div className="relative group">
                    {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -180,6 +212,16 @@ type Attachment = {
                  <div className="whitespace-pre-wrap">{formatMessage(content)}</div>
                )}
              </div>
+             {/* AI 메시지 복사 버튼 */}
+             {content && !isImage && !isStreaming && (
+               <button
+                 onClick={() => handleCopyText(rawContent)}
+                 className="mt-1 p-1 rounded hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
+                 title="복사"
+               >
+                 <Copy className="w-3.5 h-3.5 text-gray-400" />
+               </button>
+             )}
            </div>
          </div>
        )}
@@ -208,6 +250,7 @@ export const Chat: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
   const [draftContent, setDraftContent] = useState('');
   const draftContentRef = useRef('');
@@ -566,6 +609,16 @@ export const Chat: React.FC = () => {
     }
   }, []);
 
+  const handleCancelStream = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    streamingRef.current = false;
+    setIsLoading(false);
+    toast.info('응답 생성이 취소되었습니다.');
+  }, []);
+
   const handleSendMessage = useCallback(async () => {
     if (!message.trim() || !selectedModelId || !selectedModel) {
       return;
@@ -667,6 +720,7 @@ export const Chat: React.FC = () => {
 
       // API 호출
       const controller = new AbortController();
+      abortControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 180000); // 3분 타임아웃
       
       let response;
@@ -682,6 +736,7 @@ export const Chat: React.FC = () => {
             temperature: temperature,
             maxTokens: 4096,
             language,
+            speechLevel: useStore.getState().speechLevel,
             storedFacts,
             conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
             persona: activePersona ? {
@@ -702,9 +757,9 @@ export const Chat: React.FC = () => {
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
-          throw new Error('응답 시간 초과 (3분). 요청이 너무 오래 걸립니다.');
+          throw new Error('ERR_TIMEOUT');
         }
-        throw new Error(`네트워크 연결 실패: ${fetchError.message}. 인터넷 연결을 확인해주세요.`);
+        throw new Error('ERR_NET_00');
       }
       clearTimeout(timeoutId);
 
@@ -721,12 +776,12 @@ export const Chat: React.FC = () => {
           if (process.env.NODE_ENV !== 'production') {
             console.error('Failed to parse error response:', e);
           }
-          throw new Error(`API 호출 실패 (상태 코드: ${response.status})`);
         }
+        const errorCode = errorData?.error || 'ERR_UNKNOWN';
         if (process.env.NODE_ENV !== 'production') {
-          console.error('API Error response:', errorData);
+          console.error('API Error:', errorCode, 'Status:', response.status);
         }
-        throw new Error(errorData.error || `API 호출 실패 (상태 코드: ${response.status})`);
+        throw new Error(errorCode);
       }
       
       const contentType = response.headers.get('content-type') || '';
@@ -794,7 +849,7 @@ export const Chat: React.FC = () => {
         }
         
         if (!accumulated.trim()) {
-          throw new Error('서버에서 빈 응답을 받았습니다. 잠시 후 다시 시도해주세요.');
+          throw new Error('ERR_EMPTY_01');
         }
         
         // 스트리밍 완료 후 메모리/요약 추출
@@ -821,14 +876,14 @@ export const Chat: React.FC = () => {
           if (process.env.NODE_ENV !== 'production') {
             console.error('Failed to parse response:', e);
           }
-          throw new Error('서버 응답을 파싱할 수 없습니다.');
+          throw new Error('ERR_RESP_00');
         }
         
         if (!data || !data.content) {
           if (process.env.NODE_ENV !== 'production') {
             console.error('Empty response from API:', data);
           }
-          throw new Error('서버에서 빈 응답을 받았습니다. 잠시 후 다시 시도해주세요.');
+          throw new Error('ERR_EMPTY_00');
         }
         
         const extracted = extractMemoryForDisplay(data.content);
@@ -859,33 +914,72 @@ export const Chat: React.FC = () => {
         console.error('Chat error:', error);
       }
       
-      const errorMessage = error.message || '알 수 없는 오류가 발생했습니다.';
+      const errorCode = error.message || 'ERR_UNKNOWN';
+      
+      // 에러코드 → 사용자 친화적 메시지 매핑
+      const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
+        // 타임아웃
+        if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
+          return {
+            icon: '⏱️', title: '응답 시간 초과',
+            message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.',
+            tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요']
+          };
+        }
+        // 요청 한도 초과
+        if (code.startsWith('ERR_RATE')) {
+          return {
+            icon: '🕐', title: '잠시만 기다려주세요',
+            message: '요청이 너무 많아 잠시 쉬어가고 있어요.',
+            tips: ['1~2분 후에 다시 시도해주세요', '다른 AI 모델을 사용해보세요']
+          };
+        }
+        // 서비스 인증 문제 (사용자가 해결 불가)
+        if (code.startsWith('ERR_KEY') || code === 'ERR_AUTH') {
+          return {
+            icon: '🔧', title: '서비스 점검 중',
+            message: '현재 이 AI 모델의 서비스를 일시적으로 이용할 수 없어요.',
+            tips: ['다른 AI 모델을 선택해보세요', '잠시 후 다시 시도해주세요']
+          };
+        }
+        // 네트워크 에러
+        if (code.startsWith('ERR_NET')) {
+          return {
+            icon: '🌐', title: '연결 오류',
+            message: 'AI 서버와 연결하는 데 문제가 발생했어요.',
+            tips: ['인터넷 연결을 확인해주세요', '잠시 후 다시 시도해주세요']
+          };
+        }
+        // 빈 응답
+        if (code.startsWith('ERR_EMPTY') || code.startsWith('ERR_RESP')) {
+          return {
+            icon: '💬', title: 'AI가 응답하지 못했어요',
+            message: 'AI가 적절한 답변을 생성하지 못했어요.',
+            tips: ['질문을 다시 한번 보내보세요', '다른 방식으로 질문해보세요']
+          };
+        }
+        // 안전 정책
+        if (code.startsWith('ERR_SAFE')) {
+          return {
+            icon: '🛡️', title: '요청을 처리할 수 없어요',
+            message: '입력하신 내용이 AI 이용 정책에 맞지 않아 처리할 수 없었어요.',
+            tips: ['표현을 바꿔서 다시 시도해보세요', '민감한 내용은 피해주세요']
+          };
+        }
+        // 기타 알 수 없는 에러
+        return {
+          icon: '⚠️', title: '일시적인 오류가 발생했어요',
+          message: '요청을 처리하는 중 문제가 발생했어요.',
+          tips: ['잠시 후 다시 시도해주세요', '문제가 계속되면 다른 모델을 이용해보세요']
+        };
+      };
+
+      const display = getErrorDisplay(errorCode);
       
       // 에러 메시지를 채팅에 추가
       const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
       if (sid) {
-        let errContent: string;
-        
-        // 504 Gateway Timeout 에러
-        if (error.message?.includes('504') || error.message?.includes('Gateway Timeout') || error.message?.includes('20초를 초과')) {
-          errContent = `⚠️ **서버 응답 시간 초과**\n\n현재 질문이 처리 시간 제한(26초)을 초과했습니다.\n\n**해결 방법:**\n• 더 짧고 간단한 질문으로 나눠서 시도해보세요\n• 복잡한 요청은 여러 단계로 나눠 질문하세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
-        }
-        // 빈 응답 에러
-        else if (errorMessage.includes('빈 응답') || errorMessage.includes('empty response') || errorMessage.includes('Empty response') || errorMessage.includes('returned empty')) {
-          errContent = `⚠️ **AI 응답을 받지 못했습니다**\n\n서버에서 빈 응답을 받았습니다.\n\n**해결 방법:**\n• 잠시 후 다시 시도해주세요\n• 다른 모델을 선택해보세요\n• 질문을 더 구체적으로 작성해보세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
-        }
-        // API 키 관련 에러
-        else if (errorMessage.includes('API 키') || errorMessage.includes('API key') || errorMessage.includes('key not configured') || errorMessage.includes('401') || errorMessage.includes('403')) {
-          errContent = `⚠️ **인증 오류**\n\n${errorMessage}\n\n**관리자에게 문의**해주세요.\nAPI 키 설정에 문제가 있을 수 있습니다.`;
-        }
-        // OpenAI Safety System 에러
-        else if (errorMessage.includes('safety system') || errorMessage.includes('content policy') || errorMessage.includes('not allowed')) {
-          errContent = `🛡️ **안전 정책 위반**\n\n입력하신 내용이 AI 안전 정책에 위배되어 처리할 수 없습니다.\n\n**해결 방법:**\n• 폭력적, 성적, 혐오적 표현을 제거해주세요\n• 개인정보나 민감한 정보가 포함되지 않았는지 확인하세요\n• 더 중립적이고 안전한 표현으로 다시 작성해주세요\n\n건전하고 안전한 대화를 위해 협조 부탁드립니다.`;
-        }
-        // 기타 에러
-        else {
-          errContent = `⚠️ **오류가 발생했습니다**\n\n${errorMessage}\n\n**해결 방법:**\n• 인터넷 연결을 확인하세요\n• 잠시 후 다시 시도해주세요\n\n문제가 계속되면 **관리자에게 문의**해주세요.`;
-        }
+        const errContent = `${display.icon} **${display.title}**\n\n${display.message}\n\n**이렇게 해보세요:**\n${display.tips.map(t => '• ' + t).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
         
         if (assistantMessageId) {
           updateMessageContent(sid, assistantMessageId, errContent);
@@ -901,10 +995,11 @@ export const Chat: React.FC = () => {
         }
       }
       
-      toast.error(`응답 생성 실패: ${errorMessage}`);
+      toast.error(display.message);
     } finally {
       setIsLoading(false);
       streamingRef.current = false;
+      abortControllerRef.current = null;
       if (chatPerfRunId) {
         requestAnimationFrame(() => {
           endChatPerfRun(chatPerfRunId);
@@ -1318,6 +1413,7 @@ export const Chat: React.FC = () => {
                     modelById={modelById}
                     formatMessage={formatMessage}
                     onDownloadImage={handleDownloadImage}
+                    isStreaming={isLoading && msg.role === 'assistant' && !msg.content && msgIndex === messages.length - 1}
                   />
                 );
 
@@ -1341,43 +1437,16 @@ export const Chat: React.FC = () => {
                 );
               })()}
               
-              {isLoading && !(currentSession?.messages?.length && currentSession.messages[currentSession.messages.length - 1]?.role === 'assistant' && !currentSession.messages[currentSession.messages.length - 1]?.content) && (
-                <div className="group mb-4">
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white">
-                      <Bot className="w-5 h-5" />
-                    </div>
-                    <div className="flex-1 pt-1">
-                      <div className="font-semibold text-gray-900 text-sm mb-1">
-                        {(() => {
-                          const lastMsg = currentSession?.messages?.[currentSession.messages.length - 1];
-                          if (lastMsg?.role === 'assistant' && lastMsg.modelId) {
-                            return modelById.get(lastMsg.modelId)?.displayName || 'ChatGPT';
-                          }
-                          return selectedModel?.displayName || 'ChatGPT';
-                        })()}
-                      </div>
-                      {(() => {
-                        const isReasoningModel = selectedModelId?.startsWith('o3') || selectedModelId?.startsWith('o4');
-                        return isReasoningModel ? (
-                          <div className="flex items-center space-x-2">
-                            <div className="flex space-x-1">
-                              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" />
-                              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}} />
-                              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
-                            </div>
-                            <span className="text-sm text-blue-600 font-medium">추론 중...</span>
-                          </div>
-                        ) : (
-                          <div className="flex space-x-1">
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}} />
-                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
+              {/* 취소 버튼 - 로딩 중에만 표시 */}
+              {isLoading && (
+                <div className="flex justify-center py-2">
+                  <button
+                    onClick={handleCancelStream}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-full text-sm text-gray-600 dark:text-gray-300 transition-colors"
+                  >
+                    <Square className="w-3.5 h-3.5" />
+                    응답 중지
+                  </button>
                 </div>
               )}
               

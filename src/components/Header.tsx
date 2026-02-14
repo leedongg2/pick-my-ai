@@ -159,6 +159,16 @@ export const Header = React.memo(() => {
                 >
                   {ui.feedback}
                 </Link>
+                <Link 
+                  href="/guide"
+                  className={`px-3 py-2 rounded-lg text-sm transition-colors ${
+                    pathname === '/guide' 
+                      ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-medium' 
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  가이드
+                </Link>
                 <button
                   onClick={() => setIsPollModalOpen(true)}
                   className="px-3 py-2 rounded-lg text-sm transition-colors text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white flex items-center gap-1 relative"

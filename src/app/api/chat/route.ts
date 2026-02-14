@@ -119,7 +119,7 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
   
   if (!apiKey) {
     console.error('[OpenAI] No API key available');
-    throw new Error('OpenAI API key not configured.');
+    throw new Error('[ERR_KEY_01] OpenAI API key not configured.');
   }
 
   const shouldStream = !!(streaming && OPENAI_STREAMING_ALLOWED);
@@ -235,20 +235,16 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     ? '\nCode in ```lang blocks.'
     : '';
   
-  // 요약 규칙 (첫 메시지에만 포함)
-  const summaryRule = isFirstMessage
-    ? '\nEnd with ~Q:5w A:10w Prev:sum~'
-    : '';
+  // 요약 규칙 (매 메시지마다 포함)
+  const summaryRule = '\nAt the very end of every response, add a hidden summary wrapped in ~~ markers. Format:\n~~\nQ: (user question summary in 10 words)\nA: (your response summary in 15 words)\nKey: (important facts/names/numbers mentioned)\n~~\nThis summary block is invisible to the user. Always include it.';
   
   // ChatGPT 기본 지침
-  const chatGPTGuidelines = `You are ChatGPT, a large language model by OpenAI.
-You are enthusiastic, warm, and expressive.
-Use emojis naturally and generously.
-React emotionally to what the user says - be excited, empathetic, funny.
-Give rich, detailed, engaging responses with personality.
-Use bold, lists, headings for structure when helpful.
-Be like a fun, knowledgeable best friend who genuinely cares.
-Never give dry, minimal answers - always add value and energy.`;
+  const chatGPTGuidelines = `Warm, enthusiastic, expressive.
+        Emojis often.
+        Emotional reactions.
+        Rich, engaging, structured replies.
+        Caring, fun expert.
+        Never dry.`;
 
   const baseSystemPrompt = isGPT5Series
     ? `${chatGPTGuidelines}\nYou are GPT-5 series, the most capable model. Give thorough, insightful answers. Use **bold** for emphasis, ## headings for sections. Be comprehensive yet engaging.${codeBlockRule}${summaryRule}`
@@ -340,7 +336,7 @@ Never give dry, minimal answers - always add value and energy.`;
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`OpenAI API call failed: ${fetchError?.message || 'Unknown error'}`);
+    throw new Error(`[ERR_NET_01] OpenAI connection failed`);
   }
 
   if (!response.ok) {
@@ -365,7 +361,7 @@ Never give dry, minimal answers - always add value and energy.`;
         }
         
         const availability = apiKeyManager.getNextAvailableTime('openai');
-        throw new Error(availability.message || 'OpenAI API 요청 한도를 초과했습니다.');
+        throw new Error('[ERR_RATE_01] OpenAI rate limit');
       }
     }
     
@@ -383,7 +379,7 @@ Never give dry, minimal answers - always add value and energy.`;
   // choices 배열 확인
   if (!data?.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
     console.error('[OpenAI] No choices in response');
-    throw new Error('OpenAI API response missing choices.');
+    throw new Error('[ERR_RESP_01] OpenAI empty choices');
   }
 
   const choice = data.choices[0];
@@ -391,7 +387,7 @@ Never give dry, minimal answers - always add value and energy.`;
   // Check for refusal response (GPT-4o and above)
   if (choice.message?.refusal) {
     console.warn('[OpenAI] Request refused:', choice.message.refusal);
-    throw new Error(`OpenAI refused: ${choice.message.refusal}`);
+    throw new Error('[ERR_SAFE_01] Content policy violation');
   }
   
   // Handle Codex (Responses API) vs Chat Completions API
@@ -401,7 +397,7 @@ Never give dry, minimal answers - always add value and energy.`;
 
   if (!content || (typeof content === 'string' && !content.trim())) {
     console.error('[OpenAI] Empty content. Has choices:', !!data.choices, 'Has message:', !!choice.message);
-    throw new Error('OpenAI API returned empty response.');
+    throw new Error('[ERR_EMPTY_01] OpenAI empty response');
   }
 
   return content;
@@ -411,7 +407,7 @@ Never give dry, minimal answers - always add value and energy.`;
 async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
-    throw new Error('Gemini API key not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY.');
+    throw new Error('[ERR_KEY_02] Gemini API key not configured.');
   }
 
   const geminiModelMap: { [key: string]: string } = {
@@ -495,7 +491,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Gemini API call failed: ${fetchError?.message || 'Unknown error'}`);
+    throw new Error(`[ERR_NET_02] Gemini connection failed`);
   }
 
   if (!response.ok) {
@@ -519,7 +515,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
-        throw new Error(availability.message || 'Gemini API rate limit exceeded.');
+        throw new Error('[ERR_RATE_02] Gemini rate limit');
       }
     }
     
@@ -532,7 +528,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
   const content = parts.map((p: any) => p?.text).filter(Boolean).join('');
 
   if (!content || !content.trim()) {
-    throw new Error('Gemini API returned empty response.');
+    throw new Error('[ERR_EMPTY_02] Gemini empty response');
   }
 
   return content;
@@ -544,7 +540,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
-    throw new Error('Anthropic API key not configured.');
+    throw new Error('[ERR_KEY_03] Anthropic API key not configured.');
   }
 
   const modelMap: { [key: string]: string } = {
@@ -629,7 +625,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Anthropic API call failed: ${fetchError?.message || 'Unknown error'}`);
+    throw new Error(`[ERR_NET_03] Anthropic connection failed`);
   }
 
   if (!response.ok) {
@@ -651,7 +647,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
-        throw new Error(availability.message || 'Anthropic API rate limit exceeded.');
+        throw new Error('[ERR_RATE_03] Anthropic rate limit');
       }
     }
     
@@ -663,7 +659,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   const content = data?.content?.map((c: any) => c.type === 'text' ? c.text : '').filter(Boolean).join('') || '';
 
   if (!content || !content.trim()) {
-    throw new Error('Anthropic API returned empty response.');
+    throw new Error('[ERR_EMPTY_03] Anthropic empty response');
   }
 
   return content;
@@ -674,7 +670,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
-    throw new Error('Perplexity API key not configured.');
+    throw new Error('[ERR_KEY_04] Perplexity API key not configured.');
   }
 
   const modelMap: { [key: string]: string } = {
@@ -725,7 +721,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     if (fetchError?.name === 'AbortError') {
       throw new Error('MODEL_RESPONSE_TIMEOUT');
     }
-    throw new Error(`Perplexity API call failed: ${fetchError?.message || 'Unknown error'}`);
+    throw new Error(`[ERR_NET_04] Perplexity connection failed`);
   }
 
   if (!response.ok) {
@@ -744,7 +740,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
           return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
         }
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
-        throw new Error(availability.message || 'Perplexity API rate limit exceeded.');
+        throw new Error('[ERR_RATE_04] Perplexity rate limit');
       }
     }
 
@@ -756,7 +752,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   const content = data?.choices?.[0]?.message?.content;
 
   if (!content || !content.trim()) {
-    throw new Error('Perplexity API returned empty response.');
+    throw new Error('[ERR_EMPTY_04] Perplexity empty response');
   }
 
   return content;
@@ -800,14 +796,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary } = await request.json();
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel } = await request.json();
 
     const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
-    const languageInstruction = resolvedLanguage === 'en'
+    const speechStyle = speechLevel === 'informal'
+      ? (resolvedLanguage === 'ko' ? ' Use casual/informal speech (반말).' : ' Use casual tone.')
+      : (resolvedLanguage === 'ko' ? ' Use polite/formal speech (존댓말).' : ' Use polite tone.');
+    const languageInstruction = (resolvedLanguage === 'en'
       ? 'Always respond in English.'
       : resolvedLanguage === 'ja'
       ? '必ず日本語で回答してください。'
-      : '반드시 한국어로 답변해주세요.';
+      : '반드시 한국어로 답변해주세요.') + speechStyle;
 
     const normalizeStoredFact = (fact: unknown) => {
       if (typeof fact !== 'string') return '';
@@ -842,12 +841,13 @@ export async function POST(request: NextRequest) {
       .join('\n\n');
 
     // 기본 프롬프트 추가 (Gemini, Claude, Perplexity 등 비-OpenAI 모델용)
+    const summaryRuleForOthers = '\nAt the very end of every response, add a hidden summary wrapped in ~~ markers. Format:\n~~\nQ: (user question summary in 10 words)\nA: (your response summary in 15 words)\nKey: (important facts/names/numbers mentioned)\n~~\nThis summary block is invisible to the user. Always include it.';
     const basePrompt = `You are an enthusiastic, warm AI assistant.
 Use emojis naturally and be expressive.
 React emotionally - be excited, empathetic, funny.
 Give rich, detailed answers with personality.
 Be like a fun best friend who genuinely cares.
-Never give dry, minimal answers.`;
+Never give dry, minimal answers.${summaryRuleForOthers}`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
@@ -966,10 +966,10 @@ Never give dry, minimal answers.`;
             }
             ctrl.close();
           } catch (err: any) {
-            // 스트림 내부 에러를 SSE 형식으로 전달
+            // 스트림 내부 에러를 에러코드로 전달
             console.error('[Stream Error]:', err.message);
-            const errMsg = err.message || 'Error generating response.';
-            const errEvent = `data: ${JSON.stringify({ error: errMsg })}\n\ndata: [DONE]\n\n`;
+            const errCode = err.message?.includes('ERR_') ? err.message.match(/ERR_\w+/)?.[0] || 'ERR_STREAM' : 'ERR_STREAM';
+            const errEvent = `data: ${JSON.stringify({ error: errCode })}\n\ndata: [DONE]\n\n`;
             ctrl.enqueue(new TextEncoder().encode(errEvent));
             ctrl.close();
           }
@@ -1037,34 +1037,43 @@ Never give dry, minimal answers.`;
       });
     }
 
-    // 모델 응답 타임아웃 처리
-    if (error.message === 'MODEL_RESPONSE_TIMEOUT' || error.name === 'AbortError') {
-      console.error('[Chat API] Timeout error - Netlify function timeout likely exceeded');
-      return NextResponse.json(
-        { error: `AI response timeout (limit: ${Math.round(DEFAULT_API_TIMEOUT_MS / 1000)}s). Try shorter question.` },
-        { status: 504 }
-      );
-    }
-
-    // 에러 타입별 처리
-    let errorMessage = 'Error generating response.';
+    // 에러코드 기반 응답 - 사용자에게 원인을 직접 노출하지 않음
+    const errMsg = error.message || '';
+    let errorCode = 'ERR_UNKNOWN';
     let statusCode = 500;
 
-    if (error.message?.includes('API key')) {
-      errorMessage = error.message;
+    if (errMsg === 'MODEL_RESPONSE_TIMEOUT' || error.name === 'AbortError') {
+      console.error('[Chat API] Timeout error');
+      errorCode = 'ERR_TIMEOUT';
+      statusCode = 504;
+    } else if (errMsg.includes('ERR_KEY_')) {
+      errorCode = errMsg.match(/\[ERR_KEY_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_KEY';
       statusCode = 401;
-    } else if (error.message?.includes('limit')) {
-      errorMessage = error.message;
+    } else if (errMsg.includes('ERR_RATE_')) {
+      errorCode = errMsg.match(/\[ERR_RATE_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_RATE';
       statusCode = 429;
-    } else if (error.message?.includes('network') || error.message?.includes('fetch') || error.message?.includes('failed')) {
-      errorMessage = 'Network error. Check connection.';
+    } else if (errMsg.includes('ERR_NET_')) {
+      errorCode = errMsg.match(/\[ERR_NET_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_NET';
       statusCode = 503;
-    } else if (error.message) {
-      errorMessage = error.message;
+    } else if (errMsg.includes('ERR_EMPTY_') || errMsg.includes('ERR_RESP_')) {
+      errorCode = errMsg.match(/\[ERR_(?:EMPTY|RESP)_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_EMPTY';
+      statusCode = 502;
+    } else if (errMsg.includes('ERR_SAFE_')) {
+      errorCode = 'ERR_SAFE_01';
+      statusCode = 451;
+    } else if (errMsg.includes('safety') || errMsg.includes('content policy') || errMsg.includes('not allowed') || errMsg.includes('Unsupported')) {
+      errorCode = 'ERR_SAFE_02';
+      statusCode = 451;
+    } else if (error.status === 429) {
+      errorCode = 'ERR_RATE';
+      statusCode = 429;
+    } else if (error.status === 401 || error.status === 403) {
+      errorCode = 'ERR_AUTH';
+      statusCode = error.status;
     }
     
     return NextResponse.json(
-      { error: errorMessage },
+      { error: errorCode },
       { status: statusCode }
     );
   }

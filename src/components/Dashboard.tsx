@@ -31,6 +31,7 @@ export const Dashboard: React.FC = () => {
   const router = useRouter();
   const { models, wallet, chatSessions, getAvailablePMC, pmcBalance } = useStore();
   const [showGiftModal, setShowGiftModal] = React.useState(false);
+  const [showAllActivity, setShowAllActivity] = React.useState(false);
   const { t } = useTranslation();
   
   // PMC 잔액
@@ -83,16 +84,19 @@ export const Dashboard: React.FC = () => {
   }, [models, wallet]);
   
   // 최근 거래 내역
-  const recentTransactions = useMemo(() => {
+  const allTransactions = useMemo(() => {
     if (!wallet) return [];
     return [...wallet.transactions]
       .sort((a, b) => {
         const timeA = new Date(a.timestamp).getTime();
         const timeB = new Date(b.timestamp).getTime();
         return timeB - timeA;
-      })
-      .slice(0, 5);
+      });
   }, [wallet]);
+
+  const recentTransactions = useMemo(() => {
+    return showAllActivity ? allTransactions : allTransactions.slice(0, 5);
+  }, [allTransactions, showAllActivity]);
   
   const handleRefill = useCallback(() => {
     router.push('/configurator');
@@ -253,7 +257,7 @@ export const Dashboard: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-5">
-                    {creditStats.models.map(stat => (
+                    {creditStats.models.filter(stat => stat.remaining > 0).map(stat => (
                       <div key={stat.model.id} className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
@@ -294,14 +298,24 @@ export const Dashboard: React.FC = () => {
           {/* 최근 거래 내역 */}
           <div>
             <div className="dashboard-activity-card bg-white border border-gray-200 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-5">{t.dashboard.recentActivity}</h2>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-semibold text-gray-900">{t.dashboard.recentActivity}</h2>
+                {allTransactions.length > 5 && (
+                  <button
+                    onClick={() => setShowAllActivity(!showAllActivity)}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {showAllActivity ? '최근만' : '전체보기'}
+                  </button>
+                )}
+              </div>
               <div>
                 {recentTransactions.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-gray-500">{t.dashboard.noActivity}</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className={`space-y-3 ${showAllActivity ? 'max-h-[60vh] overflow-y-auto pr-1' : ''}`}>
                     {recentTransactions.map(transaction => {
                       const model = transaction.modelId 
                         ? models.find(m => m.id === transaction.modelId)

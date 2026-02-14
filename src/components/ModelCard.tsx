@@ -98,8 +98,8 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
               value={quantity}
               onChange={handleQuantityChange}
               className={cn(
-                "w-full px-3 py-2 text-center border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium",
-                isSelected ? "border-blue-300 bg-blue-50" : "border-gray-300"
+                "w-full px-3 py-2 text-center border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium text-gray-900 dark:text-gray-100",
+                isSelected ? "border-blue-300 bg-blue-50 dark:bg-blue-900/20" : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
               )}
               min="0"
               placeholder="0"
