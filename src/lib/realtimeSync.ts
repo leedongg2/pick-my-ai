@@ -81,7 +81,7 @@ export const subscribeToTransactionUpdates = (userId: string) => {
         const currentState = useStore.getState();
         
         if (currentState.wallet) {
-          const existingTransaction = currentState.wallet.transactions.find(
+          const existingTransaction = currentState.wallet.transactions?.find(
             (t) => t.id === newTransaction.id
           );
 
@@ -90,9 +90,10 @@ export const subscribeToTransactionUpdates = (userId: string) => {
               wallet: {
                 ...currentState.wallet,
                 transactions: [
-                  ...currentState.wallet.transactions,
+                  ...(currentState.wallet.transactions || []),
                   {
                     id: newTransaction.id,
+                    userId: newTransaction.user_id || currentState.wallet.userId,
                     type: newTransaction.type,
                     modelId: newTransaction.model_id,
                     amount: newTransaction.amount,
