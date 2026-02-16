@@ -191,7 +191,7 @@ type Attachment = {
                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}} />
                  </div>
                ) : !content ? (
-                 <div className="text-gray-400 italic text-sm">응답을 불러올 수 없습니다.</div>
+                 <div className="text-gray-400 italic text-sm">응답이 중단되었어요. 다시 시도해 주세요.</div>
                ) : isImage ? (
                  <div className="relative group">
                    {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -254,6 +254,7 @@ export const Chat: React.FC = () => {
   const [draftMessageId, setDraftMessageId] = useState<string | null>(null);
   const [draftContent, setDraftContent] = useState('');
   const draftContentRef = useRef('');
+  const [isCancelled, setIsCancelled] = useState(false);
   const lastDraftFlushRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([]);
@@ -317,7 +318,17 @@ export const Chat: React.FC = () => {
     initChatPerfOnce();
   }, []);
 
-  // 스트리밍 중 페이지 이탈 방지
+  // 컴포넌트 마운트 시 상태 초기화
+  useEffect(() => {
+    // 페이지가 다시 로드될 때 이전 상태 정리
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    streamingRef.current = false;
+    setIsLoading(false);
+    setIsCancelled(false);
+  }, []);
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (streamingRef.current || isLoading) {
@@ -327,9 +338,22 @@ export const Chat: React.FC = () => {
       }
     };
 
+    // 페이지 이탈 시 정리 함수 (실제 언로드/언마운트 시에만 실행)
+    const handlePageLeave = () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      streamingRef.current = false;
+      setIsLoading(false);
+      setIsCancelled(false);
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      handlePageLeave(); // 컴포넌트 언마운트 시 정리
     };
   }, [isLoading]);
 
@@ -341,6 +365,15 @@ export const Chat: React.FC = () => {
         if (!confirmLeave) {
           router.push(window.location.pathname);
           throw 'Route change aborted';
+        } else {
+          // 이동을 확인한 경우 상태 정리
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+          }
+          streamingRef.current = false;
+          setIsLoading(false);
+          setIsCancelled(false);
         }
       }
     };
@@ -355,14 +388,46 @@ export const Chat: React.FC = () => {
           if (!confirmLeave) {
             e.preventDefault();
             e.stopPropagation();
+          } else {
+            // 이동을 확인한 경우 상태 정리
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+              abortControllerRef.current = null;
+            }
+            streamingRef.current = false;
+            setIsLoading(false);
+            setIsCancelled(false);
           }
         }
       }
     };
 
+    // 브라우저 뒤로가기/앞으로가기 감지
+    const handlePopState = (e: PopStateEvent) => {
+      if (streamingRef.current || isLoading) {
+        const confirmLeave = window.confirm('AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다. 계속하시겠습니까?');
+        if (!confirmLeave) {
+          e.preventDefault();
+          window.history.pushState(null, '', window.location.pathname);
+        } else {
+          // 이동을 확인한 경우 상태 정리
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+          }
+          streamingRef.current = false;
+          setIsLoading(false);
+          setIsCancelled(false);
+        }
+      }
+    };
+
     document.addEventListener('click', handleLinkClick, true);
+    window.addEventListener('popstate', handlePopState);
+    
     return () => {
       document.removeEventListener('click', handleLinkClick, true);
+      window.removeEventListener('popstate', handlePopState);
     };
   }, [isLoading, router]);
 
@@ -616,6 +681,7 @@ export const Chat: React.FC = () => {
     }
     streamingRef.current = false;
     setIsLoading(false);
+    setIsCancelled(true);
     toast.info('응답 생성이 취소되었습니다.');
   }, []);
 
@@ -639,6 +705,7 @@ export const Chat: React.FC = () => {
     const chatPerfRunId = startChatPerfRun('handleSendMessage', STREAMING_DRAFT_V2);
     
     setIsLoading(true);
+    setIsCancelled(false);
     
     // 현재 선택된 모델 ID를 고정 (출력 중 모델 선택이 바뀌어도 메시지의 모델은 유지)
     const currentModelId = selectedModelId;
@@ -757,6 +824,9 @@ export const Chat: React.FC = () => {
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
+          if (isCancelled) {
+            throw new Error('ERR_CANCELLED');
+          }
           throw new Error('ERR_TIMEOUT');
         }
         throw new Error('ERR_NET_00');
@@ -777,9 +847,20 @@ export const Chat: React.FC = () => {
             console.error('Failed to parse error response:', e);
           }
         }
-        const errorCode = errorData?.error || 'ERR_UNKNOWN';
+
+        // 상태코드 기반 기본 매핑으로 ERR_UNKNOWN 발생 최소화
+        const status = response.status;
+        let errorCode = errorData?.error as string | undefined;
+        if (!errorCode) {
+          if (status === 401 || status === 403) errorCode = 'ERR_AUTH';
+          else if (status === 429) errorCode = 'ERR_RATE';
+          else if (status === 408 || status === 504) errorCode = 'ERR_TIMEOUT';
+          else if (status >= 500) errorCode = 'ERR_NET_00';
+          else errorCode = 'ERR_UNKNOWN';
+        }
+
         if (process.env.NODE_ENV !== 'production') {
-          console.error('API Error:', errorCode, 'Status:', response.status);
+          console.error('API Error:', errorCode, 'Status:', status, 'Body:', errorData);
         }
         throw new Error(errorCode);
       }
@@ -849,6 +930,12 @@ export const Chat: React.FC = () => {
         }
         
         if (!accumulated.trim()) {
+          const fallback = language === 'en'
+            ? 'Response was interrupted. Please try again.'
+            : '응답이 중단되었어요. 다시 시도해 주세요.';
+          if (sessionIdForThisRequest && assistantMessageId) {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
+          }
           throw new Error('ERR_EMPTY_01');
         }
         
@@ -880,8 +967,14 @@ export const Chat: React.FC = () => {
         }
         
         if (!data || !data.content) {
+          const fallback = language === 'en'
+            ? 'Response was interrupted. Please try again.'
+            : '응답이 중단되었어요. 다시 시도해 주세요.';
           if (process.env.NODE_ENV !== 'production') {
             console.error('Empty response from API:', data);
+          }
+          if (sessionIdForThisRequest && assistantMessageId) {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
           }
           throw new Error('ERR_EMPTY_00');
         }
@@ -918,6 +1011,14 @@ export const Chat: React.FC = () => {
       
       // 에러코드 → 사용자 친화적 메시지 매핑
       const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
+        // 응답 중지
+        if (code === 'ERR_CANCELLED') {
+          return {
+            icon: '', title: '',
+            message: '',
+            tips: []
+          };
+        }
         // 타임아웃
         if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
           return {
@@ -979,7 +1080,15 @@ export const Chat: React.FC = () => {
       // 에러 메시지를 채팅에 추가
       const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
       if (sid) {
-        const errContent = `${display.icon} **${display.title}**\n\n${display.message}\n\n**이렇게 해보세요:**\n${display.tips.map(t => '• ' + t).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
+        let errContent;
+        
+        if (errorCode === 'ERR_CANCELLED') {
+          // 응답 중지된 경우 - 연한 회색 흘림체로 간단한 메시지만 표시
+          errContent = '<span style="color: #9ca3af; font-style: italic;">응답 중지됨</span>';
+        } else {
+          // 다른 에러들의 경우 - 기존 방식대로 표시
+          errContent = `${display.icon} **${display.title}**\n\n${display.message}\n\n**이렇게 해보세요:**\n${display.tips.map(t => '• ' + t).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
+        }
         
         if (assistantMessageId) {
           updateMessageContent(sid, assistantMessageId, errContent);
@@ -995,18 +1104,22 @@ export const Chat: React.FC = () => {
         }
       }
       
-      toast.error(display.message);
+      // ERR_CANCELLED 경우에는 toast를 표시하지 않음
+      if (errorCode !== 'ERR_CANCELLED') {
+        toast.error(display.message);
+      }
     } finally {
       setIsLoading(false);
       streamingRef.current = false;
       abortControllerRef.current = null;
+      setIsCancelled(false);
       if (chatPerfRunId) {
         requestAnimationFrame(() => {
           endChatPerfRun(chatPerfRunId);
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, scrollToBottom]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, scrollToBottom, isCancelled, setIsCancelled]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;

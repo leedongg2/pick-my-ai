@@ -518,6 +518,14 @@ export const useStore = create<AppState>()(
           }
         }
 
+        // Realtime 구독 해제
+        try {
+          const { unsubscribeFromRealtimeUpdates } = await import('@/lib/realtimeSync');
+          unsubscribeFromRealtimeUpdates();
+        } catch {
+          // Realtime 구독 해제 실패해도 로그아웃은 진행
+        }
+
         try {
           await fetch('/api/auth/logout', {
             method: 'POST',
@@ -818,6 +826,17 @@ export const useStore = create<AppState>()(
 
   // 현재 세션을 설정하는 액션 추가
   setCurrentSession: (sessionId) => {
+    // 세션 전환 시 기존 세션을 먼저 동기화하여 마지막 메시지 누락 방지
+    const state = get();
+    const prevId = state.currentSessionId;
+    if (prevId && state.isAuthenticated) {
+      const prevSession = state.chatSessions.find((s) => s.id === prevId);
+      if (prevSession) {
+        import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
+          debouncedSyncChatSession(prevSession.id, prevSession.title, prevSession.messages, prevSession.isStarred || false);
+        });
+      }
+    }
     set({ currentSessionId: sessionId });
   },
   
@@ -844,7 +863,7 @@ export const useStore = create<AppState>()(
         }
       },
 
-      updateMessageContent: (sessionId, messageId, content) =>
+      updateMessageContent: (sessionId, messageId, content) => {
         set((state) => ({
           chatSessions: state.chatSessions.map((session) =>
             session.id === sessionId
@@ -857,9 +876,19 @@ export const useStore = create<AppState>()(
                 }
               : session
           ),
-        })),
+        }));
 
-      finalizeMessageContent: (sessionId, messageId, content) =>
+        // 최신 콘텐츠를 서버에도 반영 (디바운스)
+        const state = get();
+        const session = state.chatSessions.find((s) => s.id === sessionId);
+        if (session && state.isAuthenticated) {
+          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
+            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
+          });
+        }
+      },
+
+      finalizeMessageContent: (sessionId, messageId, content) => {
         set((state) => ({
           chatSessions: state.chatSessions.map((session) =>
             session.id === sessionId
@@ -872,7 +901,17 @@ export const useStore = create<AppState>()(
                 }
               : session
           ),
-        })),
+        }));
+
+        // 최종 콘텐츠 동기화
+        const state = get();
+        const session = state.chatSessions.find((s) => s.id === sessionId);
+        if (session && state.isAuthenticated) {
+          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
+            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
+          });
+        }
+      },
 
       addStoredFacts: (facts) => {
         const normalizeStoredFact = (fact: unknown) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
+import { initializeRealtimeSync, unsubscribeFromRealtimeUpdates } from '@/lib/realtimeSync';
 
 /**
  * 앱 전역에서 세션 쿠키를 확인하여 Zustand store의 인증 상태를 자동 복원하는 컴포넌트.
@@ -178,26 +179,48 @@ export function SessionInitializer() {
                 } catch { /* ignore */ }
               }
               
-              // 서버에 세션이 있으면 서버 우선, 없으면 로컬 유지
+              // 서버/로컬 동일 ID 세션 병합: 더 최신(updatedAt) 또는 메시지 많은 쪽 우선
               if (serverSessions.length > 0) {
-                // 서버 세션 ID 목록
+                const merged = serverSessions.map((serverSession: any) => {
+                  const localMatch = localSessions.find((s: any) => s.id === serverSession.id);
+                  if (!localMatch) return serverSession;
+
+                  const serverUpdated = serverSession.updatedAt ? new Date(serverSession.updatedAt).getTime() : 0;
+                  const localUpdated = localMatch.updatedAt ? new Date(localMatch.updatedAt).getTime() : 0;
+                  const serverMsgCount = Array.isArray(serverSession.messages) ? serverSession.messages.length : 0;
+                  const localMsgCount = Array.isArray(localMatch.messages) ? localMatch.messages.length : 0;
+
+                  // 더 최근 updatedAt, 동률이면 메시지 수가 많은 쪽
+                  if (localUpdated > serverUpdated) return localMatch;
+                  if (localUpdated < serverUpdated) return serverSession;
+                  return localMsgCount > serverMsgCount ? localMatch : serverSession;
+                });
+
                 const serverIds = new Set(serverSessions.map((s: any) => s.id));
-                // 로컬에만 있는 세션 보존
                 const localOnly = localSessions.filter((s: any) => !serverIds.has(s.id));
-                const merged = [...serverSessions, ...localOnly];
-                useStore.setState({ chatSessions: merged });
+                useStore.setState({ chatSessions: [...merged, ...localOnly] });
               }
               // 서버가 비어있으면 로컬 세션 유지 (덮어쓰지 않음)
             }
           } catch {
             // 채팅 세션 로드 실패 시 무시 (로컬 데이터 유지)
           }
+
+          // Realtime 구독 초기화
+          initializeRealtimeSync(userId);
         }
       } catch {
         // 세션 확인 실패 시 무시 (비로그인 상태 유지)
       }
     })();
   }, [isAuthenticated]);
+
+  // 컴포넌트 언마운트 시 Realtime 구독 해제
+  useEffect(() => {
+    return () => {
+      unsubscribeFromRealtimeUpdates();
+    };
+  }, []);
 
   return null;
 }
