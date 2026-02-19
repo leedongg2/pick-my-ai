@@ -761,6 +761,88 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   return content;
 }
 
+// OpenAI Sora 영상 생성 API 호출
+async function callSoraVideo(modelId: string, prompt: string, durationSeconds: number): Promise<string> {
+  const apiKey = apiKeyManager.getAvailableKey('openai');
+  if (!apiKey) throw new Error('[ERR_KEY_01] OpenAI API key not configured.');
+
+  const modelMap: Record<string, string> = {
+    'sora2_720p':     'sora-2',
+    'sora2pro_720p':  'sora-2-pro',
+    'sora2pro_1024p': 'sora-2-pro',
+  };
+  const resolution = modelId === 'sora2pro_1024p' ? '1024x576' : '1280x720';
+  const soraModel = modelMap[modelId] || 'sora-2';
+
+  const response = await fetchWithRetry('https://api.openai.com/v1/video/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: soraModel,
+      prompt,
+      n: 1,
+      duration: durationSeconds,
+      resolution,
+    }),
+  }, {
+    timeout: Math.max(DEFAULT_API_TIMEOUT_MS, 120000), // 영상은 최소 2분
+    maxRetries: 0,
+    retryDelay: DEFAULT_RETRY_DELAY_MS,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(`[ERR_SORA_${response.status}] Sora error: ${JSON.stringify(err)}`);
+  }
+
+  const data = await response.json();
+  // Sora API: data.data[0].url 또는 data.data[0].b64_json
+  const url = data?.data?.[0]?.url;
+  const b64 = data?.data?.[0]?.b64_json;
+  if (url) return `__VIDEO__:${url}`;
+  if (b64) return `__VIDEO__:data:video/mp4;base64,${b64}`;
+  throw new Error('[ERR_EMPTY_SORA] Sora empty response');
+}
+
+// xAI Grok 영상 생성 API 호출
+async function callGrokVideo(prompt: string, durationSeconds: number): Promise<string> {
+  const apiKey = apiKeyManager.getAvailableKey('xai');
+  if (!apiKey) throw new Error('[ERR_KEY_05] xAI API key not configured.');
+
+  const response = await fetchWithRetry('https://api.x.ai/v1/video/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'grok-imagine-video',
+      prompt,
+      n: 1,
+      duration: durationSeconds,
+    }),
+  }, {
+    timeout: Math.max(DEFAULT_API_TIMEOUT_MS, 120000),
+    maxRetries: 0,
+    retryDelay: DEFAULT_RETRY_DELAY_MS,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(`[ERR_GROK_VID_${response.status}] Grok video error: ${JSON.stringify(err)}`);
+  }
+
+  const data = await response.json();
+  const url = data?.data?.[0]?.url;
+  const b64 = data?.data?.[0]?.b64_json;
+  if (url) return `__VIDEO__:${url}`;
+  if (b64) return `__VIDEO__:data:video/mp4;base64,${b64}`;
+  throw new Error('[ERR_EMPTY_GROK_VID] Grok video empty response');
+}
+
 // xAI Grok 텍스트 API 호출
 async function callGrok(modelId: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('xai');
@@ -930,7 +1012,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel } = await request.json();
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel, videoSeconds } = await request.json();
 
     const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
     const speechStyle = speechLevel === 'informal'
@@ -1074,7 +1156,23 @@ Example style:
     const CODEX_MODEL_IDS = new Set(['codex']);
     const GROK_TEXT_IDS = new Set(['grok3mini','grok3','grok4fastNR','grok4fastR','grok41fastNR','grok41fastR','grok40709','grokCodeFast1']);
     const GROK_IMAGE_IDS = new Set(['grokImagine','grok2image']);
-    const isGrokModel = GROK_TEXT_IDS.has(modelId) || GROK_IMAGE_IDS.has(modelId);
+    const SORA_VIDEO_IDS = new Set(['sora2_720p','sora2pro_720p','sora2pro_1024p']);
+    const GROK_VIDEO_IDS = new Set(['grokImagineVideo']);
+    const isGrokModel = GROK_TEXT_IDS.has(modelId) || GROK_IMAGE_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId);
+
+    // 영상 모델 먼저 처리
+    if (SORA_VIDEO_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId)) {
+      const userMsg = messages.filter((m: any) => m.role === 'user').pop();
+      const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
+      const duration = Math.max(1, Math.min(50, Number(videoSeconds) || 5));
+      let videoResult: string;
+      if (SORA_VIDEO_IDS.has(modelId)) {
+        videoResult = await callSoraVideo(modelId, prompt, duration);
+      } else {
+        videoResult = await callGrokVideo(prompt, duration);
+      }
+      return NextResponse.json({ content: videoResult });
+    }
 
     const isOpenAIModel = !isGrokModel && (modelId.startsWith('gpt') || modelId.endsWith('codex')
       || IMAGE_MODEL_IDS.has(modelId)

@@ -130,13 +130,15 @@ type Attachment = {
    const model = msg.modelId ? (modelById.get(msg.modelId) ?? null) : null;
 
    const rawContent = (overrideContent ?? (msg.content as unknown as string)) as unknown as string;
-   // ~요약~ 숨기기 적용
-   const content = rawContent ? stripSummaryBlock(rawContent) : rawContent;
-   const isImage = typeof content === 'string' && (
-     content.startsWith('http://') ||
-     content.startsWith('https://') ||
-     content.startsWith('data:image')
-   );
+  // ~요약~ 숨기기 적용
+  const content = rawContent ? stripSummaryBlock(rawContent) : rawContent;
+  const isVideo = typeof content === 'string' && content.startsWith('__VIDEO__:');
+  const videoUrl = isVideo ? content.slice('__VIDEO__:'.length) : null;
+  const isImage = !isVideo && typeof content === 'string' && (
+    content.startsWith('http://') ||
+    content.startsWith('https://') ||
+    content.startsWith('data:image')
+  );
 
    return (
      <div className={cn('group mb-4', msgIndex === 0 ? 'mt-2' : '')}>
@@ -194,7 +196,25 @@ type Attachment = {
                  </div>
                ) : !content ? (
                  <div className="text-gray-400 italic text-sm">응답이 중단되었어요. 다시 시도해 주세요.</div>
-               ) : isImage ? (
+               ) : isVideo && videoUrl ? (
+                <div className="relative group rounded-xl overflow-hidden border border-gray-200 bg-black max-w-xl">
+                  <video
+                    src={videoUrl}
+                    controls
+                    autoPlay={false}
+                    className="w-full max-h-[480px] object-contain"
+                    playsInline
+                  />
+                  <a
+                    href={videoUrl}
+                    download={`ai-video-${Date.now()}.mp4`}
+                    className="absolute top-2 right-2 p-2 bg-white/90 hover:bg-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1"
+                    title="영상 다운로드"
+                  >
+                    <Download className="w-4 h-4 text-gray-700" />
+                  </a>
+                </div>
+              ) : isImage ? (
                  <div className="relative group">
                    {/* eslint-disable-next-line @next/next/no-img-element */}
                    <img
@@ -215,7 +235,7 @@ type Attachment = {
                )}
              </div>
              {/* AI 메시지 복사 버튼 */}
-             {content && !isImage && !isStreaming && (
+             {content && !isImage && !isVideo && !isStreaming && (
                <button
                  onClick={() => handleCopyText(rawContent)}
                  className="mt-1 p-1 rounded hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -860,7 +880,8 @@ export const Chat: React.FC = () => {
       // API 호출
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3분 타임아웃
+      const requestTimeout = isVideoModel ? 300000 : 180000; // 영상: 5분, 일반: 3분
+      const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
       
       let response;
       try {
@@ -884,6 +905,7 @@ export const Chat: React.FC = () => {
               expertise: activePersona.expertise,
               speechPatterns: activePersona.speechPatterns
             } : undefined,
+            videoSeconds: isVideoModel ? videoSeconds : undefined,
             userAttachments: attachments.map(a => ({
               type: a.type,
               name: a.name,
