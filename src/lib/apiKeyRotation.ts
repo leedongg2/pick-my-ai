@@ -33,6 +33,7 @@ interface ApiKeyPool {
   anthropic: ApiKeyStatus[];
   gemini: ApiKeyStatus[];
   perplexity: ApiKeyStatus[];
+  xai: ApiKeyStatus[];
 }
 
 class ApiKeyRotationManager {
@@ -41,6 +42,7 @@ class ApiKeyRotationManager {
     anthropic: [],
     gemini: [],
     perplexity: [],
+    xai: [],
   };
 
   // 설정 값 (서버리스 환경용 - 큐 시스템 제거됨)
@@ -126,12 +128,24 @@ class ApiKeyRotationManager {
         securityLog('info', `Perplexity API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
       }
     }
+
+    // xAI (Grok) 키
+    for (let i = 1; i <= 3; i++) {
+      const key = process.env[`XAI_API_KEY_${i}`] || (i === 1 ? process.env.XAI_API_KEY : '');
+      if (key) {
+        this.keyPools.xai.push({
+          key,
+          isAvailable: true,
+        });
+        securityLog('info', `xAI API 키 ${i} 로드 완료`, { keyMask: maskApiKey(key) });
+      }
+    }
   }
 
   /**
    * 사용 가능한 API 키 가져오기
    */
-  getAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): string | null {
+  getAvailableKey(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai'): string | null {
     const pool = this.keyPools[provider];
     
     if (!pool || pool.length === 0) {
@@ -166,7 +180,7 @@ class ApiKeyRotationManager {
    * Rate Limit 에러 처리
    */
   handleRateLimitError(
-    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity',
+    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai',
     apiKey: string,
     resetTime?: number,
     rateLimitType?: 'minute' | 'day'
@@ -206,7 +220,7 @@ class ApiKeyRotationManager {
   /**
    * 다음 사용 가능 시간 가져오기
    */
-  getNextAvailableTime(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): {
+  getNextAvailableTime(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai'): {
     available: boolean;
     resetTime?: number;
     waitSeconds?: number;
@@ -257,7 +271,7 @@ class ApiKeyRotationManager {
   /**
    * 키 상태 초기화 (테스트용)
    */
-  resetKeyStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity', apiKey: string): void {
+  resetKeyStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai', apiKey: string): void {
     const pool = this.keyPools[provider];
     const keyStatus = pool.find(k => k.key === apiKey);
 
@@ -272,7 +286,7 @@ class ApiKeyRotationManager {
   /**
    * 모든 키 상태 조회 (디버깅용)
    */
-  getKeyPoolStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity'): ApiKeyStatus[] {
+  getKeyPoolStatus(provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai'): ApiKeyStatus[] {
     return this.keyPools[provider].map(k => ({
       key: k.key.substring(0, 10) + '...',
       isAvailable: k.isAvailable,
@@ -286,7 +300,7 @@ class ApiKeyRotationManager {
    * 요청 즉시 실행 (서버리스 환경용)
    */
   async enqueueRequest<T>(
-    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity',
+    provider: 'openai' | 'anthropic' | 'gemini' | 'perplexity' | 'xai',
     execute: () => Promise<T>,
     priority: number = 0
   ): Promise<T> {

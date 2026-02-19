@@ -761,6 +761,137 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
   return content;
 }
 
+// xAI Grok 텍스트 API 호출
+async function callGrok(modelId: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+  const apiKey = apiKeyManager.getAvailableKey('xai');
+  if (!apiKey) {
+    throw new Error('[ERR_KEY_05] xAI API key not configured.');
+  }
+
+  const modelMap: Record<string, string> = {
+    'grok3mini':      'grok-3-mini',
+    'grok3':          'grok-3',
+    'grok4fastNR':    'grok-4-fast-non-reasoning',
+    'grok4fastR':     'grok-4-fast-reasoning',
+    'grok41fastNR':   'grok-4-1-fast-non-reasoning',
+    'grok41fastR':    'grok-4-1-fast-reasoning',
+    'grok40709':      'grok-4-0709',
+    'grokCodeFast1':  'grok-code-fast-1',
+  };
+
+  const xaiModel = modelMap[modelId] || 'grok-3-mini';
+
+  // 첨부파일: 이미지 지원 (grok-3 이상)
+  let finalMessages = messages;
+  if (userAttachments?.length) {
+    finalMessages = messages.map((m: any, idx: number) => {
+      if (m.role !== 'user' || idx !== messages.length - 1) return m;
+      const parts: any[] = [];
+      if (typeof m.content === 'string') parts.push({ type: 'text', text: m.content });
+      for (const att of userAttachments) {
+        if (att.type === 'image' && att.dataUrl) {
+          const parsed = extractBase64(att.dataUrl);
+          if (parsed) {
+            parts.push({ type: 'image_url', image_url: { url: att.dataUrl } });
+          }
+        } else if (att.type === 'text' && att.content) {
+          parts.push({ type: 'text', text: `\n[File: ${att.name}]\n${att.content}` });
+        }
+      }
+      return { ...m, content: parts.length > 0 ? parts : m.content };
+    });
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithRetry('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: xaiModel,
+        messages: finalMessages,
+        max_tokens: 2000,
+        temperature: temperature ?? 0.7,
+        stream: false,
+      }),
+    }, {
+      timeout: DEFAULT_API_TIMEOUT_MS,
+      maxRetries: DEFAULT_API_RETRIES,
+      retryDelay: DEFAULT_RETRY_DELAY_MS,
+    });
+  } catch (error: any) {
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    if (response.status === 429 && retryCount < 3) {
+      const rateLimitInfo = parseRateLimitError({ status: 429, message: JSON.stringify(error) });
+      if (rateLimitInfo.isRateLimit) {
+        apiKeyManager.handleRateLimitError('xai', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
+        const nextKey = apiKeyManager.getAvailableKey('xai');
+        if (nextKey && nextKey !== apiKey) {
+          return callGrok(modelId, messages, userAttachments, retryCount + 1, temperature);
+        }
+      }
+    }
+    throw new Error(`[ERR_XAI_${response.status}] xAI API error: ${JSON.stringify(error)}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content || !content.trim()) {
+    throw new Error('[ERR_EMPTY_05] xAI empty response');
+  }
+  return content;
+}
+
+// xAI Grok 이미지 생성 API 호출
+async function callGrokImage(modelId: string, prompt: string): Promise<string> {
+  const apiKey = apiKeyManager.getAvailableKey('xai');
+  if (!apiKey) {
+    throw new Error('[ERR_KEY_05] xAI API key not configured.');
+  }
+
+  const modelMap: Record<string, string> = {
+    'grokImagine':  'grok-imagine-image',
+    'grok2image':   'grok-2-image-1212',
+  };
+  const xaiModel = modelMap[modelId] || 'grok-imagine-image';
+
+  const response = await fetchWithRetry('https://api.x.ai/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: xaiModel,
+      prompt,
+      n: 1,
+      response_format: 'url',
+    }),
+  }, {
+    timeout: DEFAULT_API_TIMEOUT_MS,
+    maxRetries: DEFAULT_API_RETRIES,
+    retryDelay: DEFAULT_RETRY_DELAY_MS,
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(`[ERR_XAI_IMG_${response.status}] xAI image error: ${JSON.stringify(err)}`);
+  }
+
+  const data = await response.json();
+  const url = data?.data?.[0]?.url;
+  if (!url) throw new Error('[ERR_EMPTY_05] xAI image empty response');
+
+  return `![생성된 이미지](${url})`;
+}
+
 export async function POST(request: NextRequest) {
   if (isStaticExportPhase) {
     return NextResponse.json(
@@ -941,11 +1072,14 @@ Example style:
     const PERPLEXITY_MODEL_IDS = new Set(['sonar', 'sonarPro', 'deepResearch']);
     const IMAGE_MODEL_IDS = new Set(['gptimage1', 'dalle3']);
     const CODEX_MODEL_IDS = new Set(['codex']);
+    const GROK_TEXT_IDS = new Set(['grok3mini','grok3','grok4fastNR','grok4fastR','grok41fastNR','grok41fastR','grok40709','grokCodeFast1']);
+    const GROK_IMAGE_IDS = new Set(['grokImagine','grok2image']);
+    const isGrokModel = GROK_TEXT_IDS.has(modelId) || GROK_IMAGE_IDS.has(modelId);
 
-    const isOpenAIModel = modelId.startsWith('gpt') || modelId.endsWith('codex')
+    const isOpenAIModel = !isGrokModel && (modelId.startsWith('gpt') || modelId.endsWith('codex')
       || IMAGE_MODEL_IDS.has(modelId)
       || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
-      || CODEX_MODEL_IDS.has(modelId);
+      || CODEX_MODEL_IDS.has(modelId));
     
     // GPT 스트리밍 가능 모델 (이미지/Codex 제외)
     const isStreamableGPT = isOpenAIModel
@@ -995,13 +1129,22 @@ Example style:
       });
     }
 
+    // Grok 이미지 생성 모델: JSON 응답
+    if (GROK_IMAGE_IDS.has(modelId)) {
+      const userMsg = messages.filter((m: any) => m.role === 'user').pop();
+      const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
+      const imageContent = await callGrokImage(modelId, prompt);
+      return NextResponse.json({ content: imageContent });
+    }
+
     // 텍스트 AI는 pseudo-streaming SSE로 응답 (체감 속도 극대화)
     const isPseudoStreamable =
       modelId.startsWith('gemini') ||
       modelId.startsWith('claude') ||
       ANTHROPIC_MODEL_IDS.has(modelId) ||
       modelId.startsWith('perplexity') ||
-      PERPLEXITY_MODEL_IDS.has(modelId);
+      PERPLEXITY_MODEL_IDS.has(modelId) ||
+      GROK_TEXT_IDS.has(modelId);
 
     if (isPseudoStreamable) {
       // 1) 먼저 전체 응답 수신
@@ -1010,6 +1153,8 @@ Example style:
         responseContent = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
       } else if (modelId.startsWith('claude') || ANTHROPIC_MODEL_IDS.has(modelId)) {
         responseContent = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      } else if (GROK_TEXT_IDS.has(modelId)) {
+        responseContent = await callGrok(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
       } else {
         responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
       }
