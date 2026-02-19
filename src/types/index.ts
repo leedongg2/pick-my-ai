@@ -16,6 +16,8 @@ export interface AIModel {
   maxCharacters: number; // 최대 입력 글자 수
   tokenBudget?: TokenBudget; // 토큰 예산 (1회 기준)
   pricePerSecond?: number; // 영상 모델: 1초당 가격 (원)
+  isBatch?: boolean; // 48h 지연 응답 모델
+  baseModelId?: string; // 48h 모델의 원본 모델 ID
 }
 
 export interface ModelSelection {

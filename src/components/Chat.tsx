@@ -238,6 +238,7 @@ export const Chat: React.FC = () => {
   const [message, setMessage] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [videoSeconds, setVideoSeconds] = useState<number>(5);
+  const [batchPendingMessageId, setBatchPendingMessageId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRenaming, setIsRenaming] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -467,6 +468,11 @@ export const Chat: React.FC = () => {
   }, [selectedModel]);
 
   const isVideoModel = useMemo(() => selectedModel?.series === 'video', [selectedModel]);
+  const isBatchModel = useMemo(() => !!selectedModel?.isBatch, [selectedModel]);
+  // 이미지 첨부 불가 모델 (dalle3, o3mini)
+  const isImageAttachDisabled = useMemo(() => {
+    return selectedModelId === 'dalle3' || selectedModelId === 'o3mini';
+  }, [selectedModelId]);
 
   // 영상 모델: 남은 크레딧(초) 계산
   const videoMaxSeconds = useMemo(() => {
@@ -522,6 +528,32 @@ export const Chat: React.FC = () => {
       setSelectedModelId(availableModels[0].id);
     }
   }, [availableModels, selectedModelId]);
+
+  // 48h 배치 결과 폴링 (30초마다)
+  useEffect(() => {
+    if (!batchPendingMessageId || !currentSessionId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/batch/status?sessionId=${currentSessionId}&messageId=${batchPendingMessageId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status === 'completed' && data.result) {
+          const extracted = extractMemoryForDisplay(data.result);
+          if (extracted.facts.length) addStoredFacts(extracted.facts);
+          updateMessageContent(currentSessionId, batchPendingMessageId, extracted.displayText);
+          finalizeMessageContent(currentSessionId, batchPendingMessageId, extracted.displayText);
+          setBatchPendingMessageId(null);
+          clearInterval(interval);
+        } else if (data.status === 'failed') {
+          updateMessageContent(currentSessionId, batchPendingMessageId, '⚠️ 답변 생성에 실패했습니다. 다시 시도해 주세요.');
+          finalizeMessageContent(currentSessionId, batchPendingMessageId, '⚠️ 답변 생성에 실패했습니다. 다시 시도해 주세요.');
+          setBatchPendingMessageId(null);
+          clearInterval(interval);
+        }
+      } catch {}
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [batchPendingMessageId, currentSessionId, updateMessageContent, finalizeMessageContent, addStoredFacts]);
 
   // 템플릿에서 "사용하기" 선택 시: 입력창 자동 채움 + 모달 닫기
   useEffect(() => {
@@ -794,6 +826,36 @@ export const Chat: React.FC = () => {
       deductCredit(selectedModelId).catch(err => {
         console.error('[Chat] Credit deduction failed:', err);
       });
+
+      // 48h 배치 모델: 별도 처리
+      if (isBatchModel && sessionIdForThisRequest && assistantMessageId) {
+        try {
+          const batchRes = await fetch('/api/batch/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              modelId: selectedModelId,
+              messages: apiMessages,
+              sessionId: sessionIdForThisRequest,
+              messageId: assistantMessageId,
+              language,
+              speechLevel: useStore.getState().speechLevel,
+            }),
+          });
+          if (batchRes.ok) {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
+            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
+            setBatchPendingMessageId(assistantMessageId);
+          } else {
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+          }
+        } catch {
+          updateMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+        }
+        setIsLoading(false);
+        streamingRef.current = false;
+        return;
+      }
 
       // API 호출
       const controller = new AbortController();
@@ -1750,7 +1812,7 @@ export const Chat: React.FC = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,text/plain,application/json"
+              accept={isImageAttachDisabled ? "text/plain,application/json" : "image/*,text/plain,application/json"}
               multiple
               className="hidden"
               onChange={(e) => {
@@ -1758,6 +1820,22 @@ export const Chat: React.FC = () => {
                 e.target.value = ''; // 같은 파일 재선택 허용
               }}
             />
+
+            {/* 이미지 첨부 불가 안내 */}
+            {isImageAttachDisabled && (
+              <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 flex items-center gap-1.5">
+                <span>⚠️</span>
+                <span>이 모델은 이미지 첨부를 지원하지 않습니다.</span>
+              </div>
+            )}
+
+            {/* 48h 배치 대기 중 잠금 배너 */}
+            {batchPendingMessageId && (
+              <div className="mb-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                <span>답변 준비 중입니다. 최대 24시간 내에 답변이 도착하면 자동으로 표시됩니다.</span>
+              </div>
+            )}
 
             {/* 메인 입력창 */}
             <div className="relative bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-3xl shadow-sm hover:shadow-md transition-shadow chat-input-card">
@@ -1926,10 +2004,10 @@ export const Chat: React.FC = () => {
                 {/* 전송 버튼 */}
                 <button
                   onClick={handleSendMessage}
-                  disabled={!message.trim() || isLoading || streamingRef.current || !selectedModelId}
+                  disabled={!message.trim() || isLoading || streamingRef.current || !selectedModelId || !!batchPendingMessageId}
                   className={cn(
                     "chat-send-button p-2 rounded-full transition-all",
-                    !message.trim() || isLoading || streamingRef.current || !selectedModelId
+                    !message.trim() || isLoading || streamingRef.current || !selectedModelId || !!batchPendingMessageId
                       ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                       : "bg-primary text-primary-foreground hover:opacity-90"
                   )}

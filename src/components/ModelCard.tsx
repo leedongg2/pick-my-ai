@@ -1,10 +1,10 @@
-import React, { useCallback, memo } from 'react';
+import React, { useCallback, useState } from 'react';
 import { AIModel } from '@/types';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { getFixedDisplayPriceOrFallback, formatWon } from '@/utils/pricing';
 import { cn } from '@/utils/cn';
-import { X } from 'lucide-react';
+import { X, Info } from 'lucide-react';
 import { useTranslation } from '@/utils/translations';
 
 interface ModelCardProps {
@@ -22,6 +22,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
 }) => {
   const { t } = useTranslation();
   const isVideoModel = model.series === 'video';
+  const [showBatchInfo, setShowBatchInfo] = useState(false);
   const priceData = getFixedDisplayPriceOrFallback(model.id, model.piWon);
   const displayPrice = isVideoModel ? (model.pricePerSecond ?? model.piWon) : priceData.price;
   
@@ -51,10 +52,40 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
           : 'border-gray-200 hover:border-gray-300'
       )}
     >
+      {/* 48h ℹ️ 아이콘 (우상단) */}
+      {model.isBatch && (
+        <div className="absolute top-3 right-3 z-10">
+          <button
+            type="button"
+            onClick={() => setShowBatchInfo(v => !v)}
+            className="p-1 rounded-full hover:bg-gray-100 transition-colors"
+            aria-label="48h 지연 응답 안내"
+          >
+            <Info className="w-4 h-4 text-blue-500" />
+          </button>
+          {showBatchInfo && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setShowBatchInfo(false)} />
+              <div className="absolute right-0 top-7 z-30 w-72 bg-white border border-blue-200 rounded-2xl shadow-xl p-4 text-sm text-gray-700">
+                <p className="font-semibold text-blue-700 mb-2">⏳ 지연 응답 모델이란?</p>
+                <p className="mb-2">질문을 보내면 <strong>최대 24시간 이내</strong>에 답변이 도착합니다. 실시간 응답 대신 대기하는 방식으로, 동일한 모델을 <strong>훨씬 저렴하게</strong> 이용할 수 있습니다.</p>
+                <p className="mb-2">답변이 완료되면 채팅방에 자동으로 표시됩니다. 대기 중에는 해당 채팅방에서 추가 메시지를 보낼 수 없습니다.</p>
+                <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5">⚠️ 극히 드문 경우 답변 생성에 실패할 수 있습니다. 이 경우 크레딧은 환불됩니다.</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="p-5">
         <div className="flex justify-between items-start mb-3">
-          <div className="flex-1">
-            <h3 className="font-semibold text-base text-gray-900 mb-1">{model.displayName}</h3>
+          <div className="flex-1 pr-6">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-base text-gray-900">{model.displayName}</h3>
+              {model.isBatch && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full shrink-0">48h</span>
+              )}
+            </div>
             {isSelected && (
               <button
                 onClick={handleClear}
