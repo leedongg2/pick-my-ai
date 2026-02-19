@@ -21,8 +21,9 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
   isSelected,
 }) => {
   const { t } = useTranslation();
+  const isVideoModel = model.series === 'video';
   const priceData = getFixedDisplayPriceOrFallback(model.id, model.piWon);
-  const displayPrice = priceData.price;
+  const displayPrice = isVideoModel ? (model.pricePerSecond ?? model.piWon) : priceData.price;
   
   const handleQuantityChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value) || 0;
@@ -64,7 +65,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
             )}
           </div>
           <span className="text-sm font-medium text-gray-700 flex-shrink-0">
-            {formatWon(displayPrice)}/회
+            {formatWon(displayPrice)}/{isVideoModel ? '초' : '회'}
           </span>
         </div>
         
@@ -72,6 +73,12 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
           <p className="text-sm text-gray-600 mb-2">
             {(t.modelDesc as any)[model.id] || model.description}
           </p>
+        )}
+
+        {isVideoModel && (
+          <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 bg-purple-50 border border-purple-200 rounded-lg">
+            <span className="text-xs font-semibold text-purple-700">🎬 최대 50초 영상 생성 가능</span>
+          </div>
         )}
         
         <div className="text-xs text-gray-500 mb-4">
@@ -105,7 +112,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
               placeholder="0"
             />
             <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 pointer-events-none">
-              {t.configurator.perMonth}
+              {isVideoModel ? '초' : t.configurator.perMonth}
             </span>
           </div>
           
@@ -120,7 +127,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
         {quantity > 0 && (
           <div className="mt-4 pt-3 border-t border-gray-200">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">월 예상 금액</span>
+              <span className="text-sm text-gray-600">{isVideoModel ? '예상 금액' : '월 예상 금액'}</span>
               <span className="text-base font-semibold text-gray-900">
                 {formatWon(displayPrice * quantity)}
               </span>

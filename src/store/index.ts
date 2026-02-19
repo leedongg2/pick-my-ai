@@ -258,29 +258,6 @@ interface AppState {
   checkExpiredPolls: () => void;
 }
 
-// 가상 사용자 데이터베이스 (실제로는 서버에서 관리)
-const DEMO_USERS = [
-  { 
-    email: 'demo@pickmyai.com', 
-    password: 'demo12345', // 8자 이상으로 변경
-    name: '데모 사용자',
-    id: 'local_ZGVtb0BwaWNrbXlh' // 고정된 ID
-  },
-  { 
-    email: 'test@pickmyai.com', 
-    password: 'test12345', // 8자 이상으로 변경
-    name: '테스트 사용자',
-    id: 'local_dGVzdEBwaWNrbXlh' // 고정된 ID
-  },
-  { 
-    email: 'wy3345@naver.com', 
-    password: 'jason120510^^',
-    name: 'Jason',
-    id: 'local_d3kzMzQ1QG5hdmVy' // 고정된 ID
-  },
-];
-
-let userDatabase: Array<{ email: string; password: string; name: string; id?: string }> = [...DEMO_USERS];
 
 export const useStore = create<AppState>()(
   persist(
@@ -536,6 +513,16 @@ export const useStore = create<AppState>()(
             console.error('로그아웃 API 호출 실패:', error);
           }
         }
+
+        // 세션 캐시 삭제 (sessionStorage + Service Worker)
+        try {
+          sessionStorage.removeItem('__pma_session');
+        } catch {}
+        try {
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_SESSION_CACHE' });
+          }
+        } catch {}
         
         // 사용자 인증 정보 초기화
         set({ 
@@ -588,31 +575,17 @@ export const useStore = create<AppState>()(
         const state = get();
         
         if (!state.wallet) {
-          console.error('❌ addCredits: 지갑이 없습니다!');
           return;
         }
         
         // 첫 구매 완료 표시
         if (!state.hasFirstPurchase) {
           set({ hasFirstPurchase: true });
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('🎉 첫 구매 완료!');
-          }
-        }
-        
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('💰 addCredits 시작:', { 
-            currentCredits: state.wallet.credits,
-            toAdd: credits 
-          });
         }
         
         const newCredits = { ...state.wallet.credits };
         Object.entries(credits).forEach(([modelId, amount]) => {
           newCredits[modelId] = (newCredits[modelId] || 0) + amount;
-          if (process.env.NODE_ENV !== 'production') {
-            console.log(`  ✅ ${modelId}: ${newCredits[modelId]} (추가: +${amount})`);
-          }
         });
         
         const transaction: Transaction = {
@@ -629,10 +602,6 @@ export const useStore = create<AppState>()(
           credits: newCredits,
           transactions: [...state.wallet.transactions, transaction]
         };
-        
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('💳 업데이트된 지갑:', updatedWallet);
-        }
         
         set({
           wallet: updatedWallet
@@ -852,15 +821,7 @@ export const useStore = create<AppState>()(
               : session
           )
         }));
-        
-        // Supabase 동기화 (debounced)
-        const state = get();
-        const session = state.chatSessions.find(s => s.id === sessionId);
-        if (session && state.isAuthenticated) {
-          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
-            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
-          });
-        }
+        // 동기화는 finalizeMessageContent에서만 수행 (빈 content 저장 방지)
       },
 
       updateMessageContent: (sessionId, messageId, content) => {
@@ -877,15 +838,7 @@ export const useStore = create<AppState>()(
               : session
           ),
         }));
-
-        // 최신 콘텐츠를 서버에도 반영 (디바운스)
-        const state = get();
-        const session = state.chatSessions.find((s) => s.id === sessionId);
-        if (session && state.isAuthenticated) {
-          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
-            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
-          });
-        }
+        // 스트리밍 중 업데이트는 동기화 안 함 - finalizeMessageContent에서만 동기화
       },
 
       finalizeMessageContent: (sessionId, messageId, content) => {
@@ -903,12 +856,22 @@ export const useStore = create<AppState>()(
           ),
         }));
 
-        // 최종 콘텐츠 동기화
+        // 스트리밍 완료 후 즉시 동기화 (debounce 없이 저장 보장)
         const state = get();
         const session = state.chatSessions.find((s) => s.id === sessionId);
         if (session && state.isAuthenticated) {
-          import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
-            debouncedSyncChatSession(session.id, session.title, session.messages, session.isStarred || false);
+          import('@/lib/chatSync').then(({ ChatSyncService }) => {
+            // 최신 메시지 목록으로 다시 읽어서 저장 (set 이후 상태 반영)
+            const latestState = get();
+            const latestSession = latestState.chatSessions.find((s) => s.id === sessionId);
+            if (latestSession) {
+              ChatSyncService.saveChatSession(
+                latestSession.id,
+                latestSession.title,
+                latestSession.messages,
+                latestSession.isStarred || false
+              );
+            }
           });
         }
       },
@@ -1023,12 +986,14 @@ export const useStore = create<AppState>()(
           themeSettings: { ...state.themeSettings, ...settings }
         }));
         
-        // Apply theme to document
-        const { mode } = get().themeSettings;
-        if (mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
+        // Apply theme to document (SSR 안전)
+        if (typeof window !== 'undefined') {
+          const { mode } = get().themeSettings;
+          if (mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
         }
       },
       
@@ -1141,7 +1106,6 @@ export const useStore = create<AppState>()(
         for (const [modelId, amount] of Object.entries(credits)) {
           const available = state.wallet.credits[modelId] || 0;
           if (amount > available) {
-            console.error(`크레딧 부족: ${modelId}, 필요: ${amount}, 보유: ${available}`);
             return false;
           }
         }
@@ -1274,12 +1238,8 @@ export const useStore = create<AppState>()(
         
         // Check monthly limit
         if (state.autoRecharge.monthlyUsage >= state.autoRecharge.maxMonthlyAmount) {
-          console.log('월 자동 충전 한도에 도달했습니다.');
           return false;
         }
-        
-        // Simulate recharge (in real app, would call payment API)
-        console.log(`자동 충전: ${state.autoRecharge.amount}원`);
         
         set((state) => ({
           autoRecharge: {

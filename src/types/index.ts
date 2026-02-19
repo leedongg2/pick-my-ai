@@ -7,7 +7,7 @@ export interface TokenBudget {
 
 export interface AIModel {
   id: string;
-  series: 'gpt' | 'claude' | 'perplexity' | 'coding' | 'image' | 'gemini';
+  series: 'gpt' | 'claude' | 'perplexity' | 'coding' | 'image' | 'gemini' | 'video';
   displayName: string;
   piWon: number; // 원가 (원)
   enabled: boolean;
@@ -15,6 +15,7 @@ export interface AIModel {
   tier: PriceTier; // 가격대 (low/mid/high)
   maxCharacters: number; // 최대 입력 글자 수
   tokenBudget?: TokenBudget; // 토큰 예산 (1회 기준)
+  pricePerSecond?: number; // 영상 모델: 1초당 가격 (원)
 }
 
 export interface ModelSelection {

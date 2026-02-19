@@ -25,22 +25,23 @@ const nextConfig = {
     minimumCacheTTL: 31536000,
   },
 
+  // API body size limit (이미지 base64 전송 허용)
+  serverRuntimeConfig: {
+    bodySizeLimit: '4mb',
+  },
+
   // 실험적 기능
   experimental: {
     optimizePackageImports: [
       'lucide-react',
-      'date-fns',
       'zustand',
       'sonner',
       '@supabase/supabase-js',
     ],
-    turbo: {
-      resolveAlias: {
-        canvas: './empty-module.js',
-      },
-    },
-    serverComponentsExternalPackages: ['@supabase/supabase-js'],
   },
+
+  // 서버 컴포넌트 외부 패키지
+  serverExternalPackages: ['@supabase/supabase-js'],
 
   // 웹팩 최적화
   webpack: (config, { dev, isServer }) => {
@@ -53,10 +54,6 @@ const nextConfig = {
       config.optimization = {
         ...config.optimization,
         moduleIds: 'deterministic',
-        runtimeChunk: 'single',
-        splitChunks: {
-          chunks: 'all',
-        },
       };
     }
 

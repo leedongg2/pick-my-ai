@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+// 로그인 없이 접근 가능
 import { ChevronDown, ChevronUp, MessageSquare, CreditCard, Settings, Palette, Bot, Sparkles, Shield } from 'lucide-react';
 import { useStore } from '@/store';
 
@@ -106,7 +106,49 @@ export default function GuidePage() {
                   <p><strong>Google Gemini</strong> — Gemini 2.5 Pro, Gemini 3.0 Flash 등 멀티모달 AI</p>
                   <p><strong>Perplexity</strong> — 실시간 웹 검색 기반 답변 제공</p>
                   <p><strong>이미지 생성</strong> — DALL-E 3, GPT Image 1</p>
+                  <p><strong>영상 생성</strong> — Sora 2 시리즈 (초당 과금)</p>
                 </div>
+              </>
+            ),
+          },
+          pricing: {
+            title: 'PMI 2026 가격표',
+            body: (
+              <>
+                <p className="mb-3">모든 가격은 1회 사용 기준입니다. 토큰 상한 내에서 무제한 사용 가능합니다.</p>
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold text-green-700 mb-2">🟢 Claude Haiku</h4>
+                    <p className="text-sm">• Haiku 3.5: <strong>5원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Haiku 4.5: <strong>15원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-yellow-700 mb-2">🟡 Claude Sonnet</h4>
+                    <p className="text-sm">• Sonnet 4.5: <strong>45원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Sonnet 4.6: <strong>45원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-blue-700 mb-2">🔵 Claude Opus (중급)</h4>
+                    <p className="text-sm">• Opus 4.5: <strong>79원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Opus 4.6: <strong>79원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-red-700 mb-2">🔴 Claude Opus (프리미엄)</h4>
+                    <p className="text-sm">• Opus 4: <strong>199원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Opus 4.1: <strong>199원/회</strong> (토큰: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">GPT / Gemini / Perplexity</h4>
+                    <p className="text-sm">• GPT-5: 10원/회 (500/500) • GPT-4o: 10원/회 (500/500)</p>
+                    <p className="text-sm">• Gemini 3.0: 8원/회 (500/500) • Perplexity Sonar: 1원/회 (300/300)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-purple-700 mb-2">🎨 이미지 & 영상</h4>
+                    <p className="text-sm">• GPT Image 1: 40원/회</p>
+                    <p className="text-sm">• Sora 2-720p: 190원/초 • Sora 2 Pro-720p: 450원/초 • Sora 2 Pro-1024p: 750원/초</p>
+                  </div>
+                </div>
+                <p className="mt-4 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded">💡 영상 모델은 할인/프로모션 미적용</p>
               </>
             ),
           },
@@ -219,7 +261,49 @@ export default function GuidePage() {
                   <p><strong>Google Gemini</strong> — Gemini 2.5 Pro, Gemini 3.0 Flash (multimodal)</p>
                   <p><strong>Perplexity</strong> — real-time web search answers</p>
                   <p><strong>Image generation</strong> — DALL-E 3, GPT Image 1</p>
+                  <p><strong>Video generation</strong> — Sora 2 series (per-second billing)</p>
                 </div>
+              </>
+            ),
+          },
+          pricing: {
+            title: 'PMI 2026 Pricing',
+            body: (
+              <>
+                <p className="mb-3">All prices are per use. Unlimited usage within token limits.</p>
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold text-green-700 mb-2">🟢 Claude Haiku</h4>
+                    <p className="text-sm">• Haiku 3.5: <strong>₩5/use</strong> (tokens: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Haiku 4.5: <strong>₩15/use</strong> (tokens: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-yellow-700 mb-2">🟡 Claude Sonnet</h4>
+                    <p className="text-sm">• Sonnet 4.5: <strong>₩45/use</strong> (tokens: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Sonnet 4.6: <strong>₩45/use</strong> (tokens: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-blue-700 mb-2">🔵 Claude Opus (Mid)</h4>
+                    <p className="text-sm">• Opus 4.5: <strong>₩79/use</strong> (tokens: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Opus 4.6: <strong>₩79/use</strong> (tokens: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-red-700 mb-2">🔴 Claude Opus (Premium)</h4>
+                    <p className="text-sm">• Opus 4: <strong>₩199/use</strong> (tokens: 1000 in / 1000 out)</p>
+                    <p className="text-sm">• Opus 4.1: <strong>₩199/use</strong> (tokens: 1000 in / 1000 out)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-700 mb-2">GPT / Gemini / Perplexity</h4>
+                    <p className="text-sm">• GPT-5: ₩10/use (500/500) • GPT-4o: ₩10/use (500/500)</p>
+                    <p className="text-sm">• Gemini 3.0: ₩8/use (500/500) • Perplexity Sonar: ₩1/use (300/300)</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-purple-700 mb-2">🎨 Image & Video</h4>
+                    <p className="text-sm">• GPT Image 1: ₩40/use</p>
+                    <p className="text-sm">• Sora 2-720p: ₩190/sec • Sora 2 Pro-720p: ₩450/sec • Sora 2 Pro-1024p: ₩750/sec</p>
+                  </div>
+                </div>
+                <p className="mt-4 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded">💡 No discounts on video models</p>
               </>
             ),
           },
@@ -280,6 +364,12 @@ export default function GuidePage() {
 
   const sections: GuideSection[] = [
     {
+      id: 'pricing',
+      icon: <CreditCard className="w-5 h-5 text-green-600" />,
+      title: tr.sections.pricing.title,
+      content: tr.sections.pricing.body,
+    },
+    {
       id: 'start',
       icon: <Sparkles className="w-5 h-5 text-blue-600" />,
       title: tr.sections.start.title,
@@ -324,26 +414,24 @@ export default function GuidePage() {
   ];
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-white dark:bg-gray-900">
-        <div className="max-w-3xl mx-auto px-6 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-semibold text-gray-900 dark:text-gray-100 mb-2">{tr.title}</h1>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">{tr.subtitle}</p>
-          </div>
+    <div className="min-h-screen bg-white dark:bg-gray-900">
+      <div className="max-w-3xl mx-auto px-6 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-semibold text-gray-900 dark:text-gray-100 mb-2">{tr.title}</h1>
+          <p className="text-gray-600 dark:text-gray-400 text-sm">{tr.subtitle}</p>
+        </div>
 
-          <div className="space-y-3">
-            {sections.map((section) => (
-              <AccordionItem
-                key={section.id}
-                section={section}
-                isOpen={openId === section.id}
-                onToggle={() => setOpenId(openId === section.id ? null : section.id)}
-              />
-            ))}
-          </div>
+        <div className="space-y-3">
+          {sections.map((section) => (
+            <AccordionItem
+              key={section.id}
+              section={section}
+              isOpen={openId === section.id}
+              onToggle={() => setOpenId(openId === section.id ? null : section.id)}
+            />
+          ))}
         </div>
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }

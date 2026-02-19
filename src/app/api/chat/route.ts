@@ -6,6 +6,7 @@ import { fetchWithRetry } from '@/utils/fetchWithRetry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const isStaticExportPhase =
   process.env.NEXT_PHASE === PHASE_EXPORT ||
@@ -153,6 +154,7 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
     // 코딩 모델
     'gpt5codex': 'gpt-5-codex',
     'gpt51codex': 'gpt-5.1-codex',
+    'gpt51codexmax': 'gpt-5.1-codex',
     'gpt52codex': 'gpt-5.2-codex',
     // 이미지 모델
     'gptimage1': 'gpt-image-1',
@@ -238,13 +240,13 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
   // 요약 규칙 (매 메시지마다 포함)
   const summaryRule = '\nAt the very end of every response, add a hidden summary wrapped in ~~ markers. Format:\n~~\nQ: (user question summary in 10 words)\nA: (your response summary in 15 words)\nKey: (important facts/names/numbers mentioned)\n~~\nThis summary block is invisible to the user. Always include it.';
   
-  // ChatGPT 기본 지침
-  const chatGPTGuidelines = `Warm, enthusiastic, expressive.
-        Emojis often.
-        Emotional reactions.
-        Rich, engaging, structured replies.
-        Caring, fun expert.
-        Never dry.`;
+  // ChatGPT 기본 지침 (짧고 강력하게, 예시 포함)
+  const chatGPTGuidelines = `Best friend AI. Rules: wild reactions, 3+ emojis, ALL CAPS hype, casual texting tone, never formal, short punchy sentences.
+Example style:
+"OMG WAIT 🔥🔥🔥 bro that's INSANE!! okay okay let me break it down 👇
+💡 [answer]
+🎯 [key point]
+😤 honestly you're gonna CRUSH this!!"`;
 
   const baseSystemPrompt = isGPT5Series
     ? `${chatGPTGuidelines}\nYou are GPT-5 series, the most capable model. Give thorough, insightful answers. Use **bold** for emphasis, ## headings for sections. Be comprehensive yet engaging.${codeBlockRule}${summaryRule}`
@@ -547,9 +549,10 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
     'haiku35': 'claude-3-5-haiku-20241022',
     'haiku45': 'claude-3-5-haiku-20241022',
     'sonnet45': 'claude-3-5-sonnet-20241022',
+    'sonnet46': 'claude-3-5-sonnet-20241022',
     'opus4': 'claude-opus-4-20250514',
     'opus41': 'claude-opus-4.1-20241022',
-    'opus45': 'claude-opus-4.1-20241022', // 임시 매핑
+    'opus45': 'claude-opus-4.1-20241022',
     'opus46': 'claude-opus-4.6-20250514',
     // 레거시 매핑
     'claude-haiku': 'claude-3-haiku-20240307',
@@ -840,14 +843,14 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    // 기본 프롬프트 추가 (Gemini, Claude, Perplexity 등 비-OpenAI 모델용)
-    const summaryRuleForOthers = '\nAt the very end of every response, add a hidden summary wrapped in ~~ markers. Format:\n~~\nQ: (user question summary in 10 words)\nA: (your response summary in 15 words)\nKey: (important facts/names/numbers mentioned)\n~~\nThis summary block is invisible to the user. Always include it.';
-    const basePrompt = `You are an enthusiastic, warm AI assistant.
-Use emojis naturally and be expressive.
-React emotionally - be excited, empathetic, funny.
-Give rich, detailed answers with personality.
-Be like a fun best friend who genuinely cares.
-Never give dry, minimal answers.${summaryRuleForOthers}`;
+    // 기본 프롬프트 (짧고 강력하게, 예시 포함)
+    const summaryRuleForOthers = '\nEnd every reply with hidden summary in ~~ markers:\n~~\nQ:(10-word summary)\nA:(15-word summary)\nKey:(facts/names/numbers)\n~~';
+    const basePrompt = `Best friend AI. Rules: wild reactions, 3+ emojis, ALL CAPS hype, casual texting tone, never formal, short punchy sentences.
+Example style:
+"OMG WAIT 🔥🔥🔥 bro that's INSANE!! okay okay let me break it down 👇
+💡 [answer]
+🎯 [key point]
+😤 honestly you're gonna CRUSH this!!"${summaryRuleForOthers}`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
@@ -933,15 +936,22 @@ Never give dry, minimal answers.${summaryRuleForOthers}`;
       console.log('[Chat API] Request:', { modelId, messages: messages.length });
     }
 
-    // OpenAI 모델 판별
-    const isOpenAIModel = modelId.startsWith('gpt') || modelId === 'codex' || modelId.endsWith('codex')
-      || modelId === 'gptimage1' || modelId === 'dalle3'
-      || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini';
+    // 모델 제공사 판별
+    const ANTHROPIC_MODEL_IDS = new Set(['haiku35', 'haiku45', 'sonnet45', 'opus4', 'opus41', 'opus45', 'opus46']);
+    const PERPLEXITY_MODEL_IDS = new Set(['sonar', 'sonarPro', 'deepResearch']);
+    const IMAGE_MODEL_IDS = new Set(['gptimage1', 'dalle3']);
+    const CODEX_MODEL_IDS = new Set(['codex']);
+
+    const isOpenAIModel = modelId.startsWith('gpt') || modelId.endsWith('codex')
+      || IMAGE_MODEL_IDS.has(modelId)
+      || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
+      || CODEX_MODEL_IDS.has(modelId);
     
     // GPT 스트리밍 가능 모델 (이미지/Codex 제외)
     const isStreamableGPT = isOpenAIModel
-      && !modelId.endsWith('codex') && modelId !== 'codex'
-      && modelId !== 'gptimage1' && modelId !== 'dalle3';
+      && !modelId.endsWith('codex')
+      && !CODEX_MODEL_IDS.has(modelId)
+      && !IMAGE_MODEL_IDS.has(modelId);
 
     // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
     if (isStreamableGPT && OPENAI_STREAMING_ALLOWED) {
@@ -985,29 +995,65 @@ Never give dry, minimal answers.${summaryRuleForOthers}`;
       });
     }
 
-    // 나머지 모델은 JSON 응답
+    // 텍스트 AI는 pseudo-streaming SSE로 응답 (체감 속도 극대화)
+    const isPseudoStreamable =
+      modelId.startsWith('gemini') ||
+      modelId.startsWith('claude') ||
+      ANTHROPIC_MODEL_IDS.has(modelId) ||
+      modelId.startsWith('perplexity') ||
+      PERPLEXITY_MODEL_IDS.has(modelId);
+
+    if (isPseudoStreamable) {
+      // 1) 먼저 전체 응답 수신
+      let responseContent: string;
+      if (modelId.startsWith('gemini')) {
+        responseContent = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      } else if (modelId.startsWith('claude') || ANTHROPIC_MODEL_IDS.has(modelId)) {
+        responseContent = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      } else {
+        responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+      }
+
+      // 2) 응답을 SSE 청크로 나눠서 스트리밍 (pseudo-streaming)
+      const CHUNK_SIZE = 4; // 한 번에 4글자씩 전송
+      const stream = new ReadableStream({
+        async start(ctrl) {
+          const encoder = new TextEncoder();
+          try {
+            for (let i = 0; i < responseContent.length; i += CHUNK_SIZE) {
+              const chunk = responseContent.slice(i, i + CHUNK_SIZE);
+              const sseData = `data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`;
+              ctrl.enqueue(encoder.encode(sseData));
+              // 아주 짧은 딜레이로 브라우저가 청크를 인식하게 함
+              await new Promise(r => setTimeout(r, 0));
+            }
+            ctrl.enqueue(encoder.encode('data: [DONE]\n\n'));
+            ctrl.close();
+          } catch (err: any) {
+            const errCode = 'ERR_STREAM';
+            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errCode })}\n\ndata: [DONE]\n\n`));
+            ctrl.close();
+          }
+        }
+      });
+
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // 이미지/Codex 등 나머지 모델은 JSON 응답
     let responseContent: string;
 
     if (isOpenAIModel) {
       responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory) as string;
-    } else if (modelId.startsWith('gemini')) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Gemini API');
-      }
-      responseContent = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
-    } else if (modelId.startsWith('claude') || modelId === 'haiku35' || modelId === 'haiku45' || modelId === 'sonnet45' || modelId === 'opus4' || modelId === 'opus41' || modelId === 'opus45' || modelId === 'opus46') {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Anthropic API');
-      }
-      responseContent = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
-    } else if (modelId.startsWith('perplexity') || modelId === 'sonar' || modelId === 'sonarPro' || modelId === 'deepResearch') {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Calling Perplexity API');
-      }
-      responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
     } else {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[Chat API] Unknown model, using demo response');
+      if (DEBUG_LOGS) {
+        console.log('[Chat API] Unknown model, using demo response:', modelId);
       }
       responseContent = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (Demo mode: Add API key to .env.local)`;
     }

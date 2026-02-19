@@ -19,6 +19,7 @@ const categories = [
   { id: 'perplexity', name: 'Perplexity 시리즈' },
   { id: 'coding', name: '코딩' },
   { id: 'image', name: '이미지' },
+  { id: 'video', name: '영상' },
 ];
 
 export const Configurator: React.FC = () => {
@@ -140,6 +141,18 @@ export const Configurator: React.FC = () => {
             
             {/* 시리즈 정보 섹션 제거됨 */}
             
+            {/* 영상 모델 할인 미적용 안내 */}
+            {(activeCategory === 'video' || (activeCategory === 'all' && filteredModels.some(m => m.series === 'video'))) && (
+              <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+                <svg className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  영상 모델은 할인이나 프로모션이 적용되지 않습니다.
+                </p>
+              </div>
+            )}
+
             {/* 모델 카드 그리드 */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredModels.map(model => (

@@ -12,6 +12,8 @@ import { useRouter } from 'next/navigation';
 import { useTranslation } from '@/utils/translations';
 import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
 import { extractSummary, buildConversationContext, ConversationSummary } from '@/utils/summaryExtractor';
+import { renderLatex } from '@/utils/renderLatex';
+const GraphRenderer = dynamic(() => import('@/components/GraphRenderer').then(m => m.GraphRenderer), { ssr: false });
 
 // Constants
 const MAX_ATTACHMENTS = 5;
@@ -235,6 +237,7 @@ export const Chat: React.FC = () => {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [videoSeconds, setVideoSeconds] = useState<number>(5);
   const [isLoading, setIsLoading] = useState(false);
   const [isRenaming, setIsRenaming] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
@@ -260,6 +263,7 @@ export const Chat: React.FC = () => {
   const [conversationSummaries, setConversationSummaries] = useState<ConversationSummary[]>([]);
   const userScrolledUpRef = useRef(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const autoScrollToastIdRef = useRef<string | number | null>(null);
   
   const {
     chatSessions,
@@ -357,27 +361,8 @@ export const Chat: React.FC = () => {
     };
   }, [isLoading]);
 
-  // Next.js 라우터 이동 시 경고
+  // 링크 클릭 / 뒤로가기 시 스트리밍 중 경고
   useEffect(() => {
-    const handleRouteChange = () => {
-      if (streamingRef.current || isLoading) {
-        const confirmLeave = window.confirm('AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다. 계속하시겠습니까?');
-        if (!confirmLeave) {
-          router.push(window.location.pathname);
-          throw 'Route change aborted';
-        } else {
-          // 이동을 확인한 경우 상태 정리
-          if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
-          }
-          streamingRef.current = false;
-          setIsLoading(false);
-          setIsCancelled(false);
-        }
-      }
-    };
-
     // Next.js 라우터 이벤트는 직접 감지할 수 없으므로 링크 클릭 감지
     const handleLinkClick = (e: MouseEvent) => {
       if (streamingRef.current || isLoading) {
@@ -450,14 +435,15 @@ export const Chat: React.FC = () => {
     [chatPerfEnabled, handleReactProfilerRender]
   );
 
-  const temperaturePresets = [
-    { label: '정확 (0.3)', value: 0.3, description: '정확하고 사실적인 답변' },
-    { label: '표준 (0.7)', value: 0.7, description: '균형잡힌 답변' },
-    { label: '창의 (1.2)', value: 1.2, description: '창의적이고 다양한 답변' },
-    { label: '매우 창의 (1.5)', value: 1.5, description: '매우 창의적이고 다양한 답변' },
-  ];
-  
   // 메모이제이션으로 불필요한 재계산 방지
+  const sortedSessions = useMemo(
+    () =>
+      [...chatSessions].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      ),
+    [chatSessions]
+  );
+
   const currentSession = useMemo(() => 
     chatSessions.find(s => s.id === currentSessionId), 
     [chatSessions, currentSessionId]
@@ -479,6 +465,15 @@ export const Chat: React.FC = () => {
   const selectedModelMaxCharacters = useMemo(() => {
     return selectedModel?.maxCharacters || 2500;
   }, [selectedModel]);
+
+  const isVideoModel = useMemo(() => selectedModel?.series === 'video', [selectedModel]);
+
+  // 영상 모델: 남은 크레딧(초) 계산
+  const videoMaxSeconds = useMemo(() => {
+    if (!isVideoModel || !selectedModelId) return 50;
+    const credits = walletCredits?.[selectedModelId] || 0;
+    return Math.min(credits, 50);
+  }, [isVideoModel, selectedModelId, walletCredits]);
 
   const availableModels = useMemo(
     () => models.filter(m => {
@@ -569,13 +564,6 @@ export const Chat: React.FC = () => {
     }
   }, [message]);
 
-  const onPickFiles = useCallback(() => {
-    if (attachments.length >= MAX_ATTACHMENTS) {
-      toast.error(`최대 ${MAX_ATTACHMENTS}개까지 업로드할 수 있어요.`);
-      return;
-    }
-  }, [attachments.length]);
-
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     
@@ -598,10 +586,35 @@ export const Chat: React.FC = () => {
     for (const file of filesArray) {
       try {
         if (file.type.startsWith('image/')) {
+          // canvas로 리사이즈 + 압축 (최대 1024px, 품질 0.75)
           const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
             reader.onerror = reject;
+            reader.onload = (e) => {
+              const img = new Image();
+              img.onerror = reject;
+              img.onload = () => {
+                const MAX = 1024;
+                let { width, height } = img;
+                if (width > MAX || height > MAX) {
+                  if (width > height) {
+                    height = Math.round((height * MAX) / width);
+                    width = MAX;
+                  } else {
+                    width = Math.round((width * MAX) / height);
+                    height = MAX;
+                  }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) { resolve(e.target?.result as string); return; }
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.75));
+              };
+              img.src = e.target?.result as string;
+            };
             reader.readAsDataURL(file);
           });
           
@@ -622,11 +635,9 @@ export const Chat: React.FC = () => {
           });
           
         } else {
-          console.error(`지원하지 않는 파일 형식: ${file.type}`);
           toast.error(`지원하지 않는 파일 형식입니다: ${file.name}`);
         }
-      } catch (error) {
-        console.error('파일 처리 중 오류 발생:', error);
+      } catch {
         toast.error(`파일 처리 중 오류가 발생했습니다: ${file.name}`);
       }
     }
@@ -668,8 +679,7 @@ export const Chat: React.FC = () => {
         window.open(imageUrl, '_blank');
         toast.info('새 탭에서 이미지를 열었습니다. 우클릭하여 저장하세요.');
       }
-    } catch (error) {
-      console.error('이미지 다운로드 실패:', error);
+    } catch {
       toast.error('이미지 다운로드에 실패했습니다.');
     }
   }, []);
@@ -874,8 +884,10 @@ export const Chat: React.FC = () => {
         let accumulated = '';
         let sseBuffer = '';
         let lastUIUpdate = 0;
-        const UI_THROTTLE_MS = 50; // 50ms 간격으로 UI 업데이트 (20fps)
         let pendingUpdate = false;
+        let firstTokenShown = false; // 첫 토큰 즉시 표시 플래그
+        // Adaptive 스로틀: 초반엔 빠르게(16ms=60fps), 긴 응답엔 50ms로 전환
+        const getThrottle = () => accumulated.length < 200 ? 16 : 50;
         
         try {
           while (true) {
@@ -908,9 +920,21 @@ export const Chat: React.FC = () => {
               }
             }
             
-            // 스로틀링: UI_THROTTLE_MS 간격으로만 UI 업데이트
+            // 첫 토큰: 즉시 표시 (체감 응답속도 극대화)
+            if (pendingUpdate && !firstTokenShown) {
+              firstTokenShown = true;
+              if (sessionIdForThisRequest && assistantMessageId) {
+                updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+              }
+              scrollToBottom(false);
+              lastUIUpdate = Date.now();
+              pendingUpdate = false;
+              continue;
+            }
+            
+            // 이후: Adaptive 스로틀링
             const now = Date.now();
-            if (pendingUpdate && (now - lastUIUpdate >= UI_THROTTLE_MS)) {
+            if (pendingUpdate && (now - lastUIUpdate >= getThrottle())) {
               if (sessionIdForThisRequest && assistantMessageId) {
                 updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
               }
@@ -946,6 +970,7 @@ export const Chat: React.FC = () => {
         }
         if (sessionIdForThisRequest && assistantMessageId) {
           updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
         }
         try {
           const { summary } = extractSummary(accumulated);
@@ -985,6 +1010,7 @@ export const Chat: React.FC = () => {
         }
         if (sessionIdForThisRequest && assistantMessageId) {
           updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
           setTimeout(() => scrollToBottom(true), 100);
         }
         try {
@@ -1091,7 +1117,7 @@ export const Chat: React.FC = () => {
         }
         
         if (assistantMessageId) {
-          updateMessageContent(sid, assistantMessageId, errContent);
+          finalizeMessageContent(sid, assistantMessageId, errContent);
         } else {
           addMessage(sid, {
             id: crypto.randomUUID(),
@@ -1113,13 +1139,21 @@ export const Chat: React.FC = () => {
       streamingRef.current = false;
       abortControllerRef.current = null;
       setIsCancelled(false);
+      // 전송 후 첨부파일 완전 초기화
+      setAttachments([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      // 스트리밍 종료 시 자동스크롤 토스트 닫기
+      if (autoScrollToastIdRef.current !== null) {
+        toast.dismiss(autoScrollToastIdRef.current);
+        autoScrollToastIdRef.current = null;
+      }
       if (chatPerfRunId) {
         requestAnimationFrame(() => {
           endChatPerfRun(chatPerfRunId);
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, scrollToBottom, isCancelled, setIsCancelled]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
@@ -1161,12 +1195,12 @@ export const Chat: React.FC = () => {
     toast.success('코드가 복사되었습니다');
   }, []);
 
-  // **텍스트**를 bold 처리하고 ## 제목, /// 코드 블록 처리하는 함수 (메모이제이션)
+  // LaTeX, 코드 블록(```), 그래프(&&&) 처리하는 함수
   const formatMessage = useCallback((text: string) => {
     // 메모리 블록 제거
     let processedText = extractMemoryForDisplay(text).displayText;
     
-    // ~~로 둘러싸인 요약 부분 제거 (사용자에게 보이지 않게)
+    // ~~로 둘러싸인 요약 부분 제거
     const summaryStartIndex = processedText.indexOf('~~');
     if (summaryStartIndex !== -1) {
       const afterStart = processedText.slice(summaryStartIndex + 2);
@@ -1176,65 +1210,135 @@ export const Chat: React.FC = () => {
       }
     }
     
-    const safeText = processedText;
     const elements: JSX.Element[] = [];
     let currentIndex = 0;
     
-    // /// 코드 블록 찾기
-    const codeBlockRegex = /\/\/\/([\s\S]*?)\/\/\//g;
-    let match;
+    // 1) &&& 그래프 블록
+    const graphRegex = /&&&([\s\S]*?)&&&/g;
+    // 2) ``` 코드 블록
+    const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    // 3) $$ LaTeX 블록
+    const latexBlockRegex = /\$\$([\s\S]*?)\$\$/g;
+    // 4) $ LaTeX 인라인
+    const latexInlineRegex = /\$(.+?)\$/g;
+    // 5) /// 레거시 코드 블록
+    const legacyCodeRegex = /\/\/\/([\s\S]*?)\/\/\//g;
     
-    while ((match = codeBlockRegex.exec(safeText)) !== null) {
-      // 코드 블록 이전 텍스트 처리
-      if (match.index > currentIndex) {
-        const beforeText = safeText.slice(currentIndex, match.index);
+    // 모든 매치 수집 후 정렬
+    const allMatches: Array<{start: number, end: number, type: string, match: any}> = [];
+    
+    let m;
+    while ((m = graphRegex.exec(processedText)) !== null) {
+      allMatches.push({start: m.index, end: m.index + m[0].length, type: 'graph', match: m});
+    }
+    while ((m = codeBlockRegex.exec(processedText)) !== null) {
+      allMatches.push({start: m.index, end: m.index + m[0].length, type: 'codeBlock', match: m});
+    }
+    while ((m = latexBlockRegex.exec(processedText)) !== null) {
+      allMatches.push({start: m.index, end: m.index + m[0].length, type: 'latexBlock', match: m});
+    }
+    while ((m = legacyCodeRegex.exec(processedText)) !== null) {
+      allMatches.push({start: m.index, end: m.index + m[0].length, type: 'legacyCode', match: m});
+    }
+    
+    allMatches.sort((a, b) => a.start - b.start);
+    
+    allMatches.forEach(({start, end, type, match}, idx) => {
+      // 이전 텍스트 처리 (LaTeX 인라인 포함)
+      if (start > currentIndex) {
+        const beforeText = processedText.slice(currentIndex, start);
         elements.push(
           <div key={`text-${currentIndex}`}>
-            {formatNormalText(beforeText)}
+            {formatTextWithInlineLatex(beforeText)}
           </div>
         );
       }
       
-      // 코드 블록 처리
-      const code = match[1].trim();
-      elements.push(
-        <div key={`code-${match.index}`} className="relative my-3 group">
-          <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-300 dark:border-gray-600">
-            <code className="text-sm font-mono text-gray-800 dark:text-gray-200">
-              {code}
-            </code>
-          </pre>
-          <button
-            onClick={() => handleCopyCode(code)}
-            className="absolute top-2 right-2 p-2 bg-white dark:bg-gray-700 rounded-md shadow-sm border border-gray-300 dark:border-gray-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-50 dark:hover:bg-gray-600"
-            title="코드 복사"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600 dark:text-gray-300">
-              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
-              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-            </svg>
-          </button>
-        </div>
-      );
+      // 블록 렌더링
+      if (type === 'graph') {
+        elements.push(<GraphRenderer key={`graph-${idx}`} text={match[1]} />);
+      } else if (type === 'codeBlock') {
+        const lang = match[1] || 'text';
+        const code = match[2];
+        elements.push(
+          <div key={`code-${idx}`} className="relative my-3 group">
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-t-lg border-b border-gray-300 dark:border-gray-600">
+              <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">{lang}</span>
+              <button
+                onClick={() => handleCopyCode(code)}
+                className="p-1.5 bg-white dark:bg-gray-600 rounded-md shadow-sm border border-gray-300 dark:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-500 transition-colors"
+                title="코드 복사"
+              >
+                <Copy className="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" />
+              </button>
+            </div>
+            <pre className="bg-gray-100 dark:bg-gray-800 rounded-b-lg p-4 overflow-x-auto border border-t-0 border-gray-300 dark:border-gray-600">
+              <code className="text-sm font-mono text-gray-800 dark:text-gray-200">{code}</code>
+            </pre>
+          </div>
+        );
+      } else if (type === 'latexBlock') {
+        const latex = match[1];
+        elements.push(
+          <div key={`latex-${idx}`} className="my-3 text-center overflow-x-auto" dangerouslySetInnerHTML={{__html: renderLatex(latex)}} />
+        );
+      } else if (type === 'legacyCode') {
+        const code = match[1].trim();
+        elements.push(
+          <div key={`legacy-${idx}`} className="relative my-3 group">
+            <pre className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 overflow-x-auto border border-gray-300 dark:border-gray-600">
+              <code className="text-sm font-mono text-gray-800 dark:text-gray-200">{code}</code>
+            </pre>
+            <button
+              onClick={() => handleCopyCode(code)}
+              className="absolute top-2 right-2 p-2 bg-white dark:bg-gray-700 rounded-md shadow-sm border border-gray-300 dark:border-gray-600 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-50 dark:hover:bg-gray-600"
+              title="코드 복사"
+            >
+              <Copy className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+            </button>
+          </div>
+        );
+      }
       
-      currentIndex = match.index + match[0].length;
-    }
+      currentIndex = end;
+    });
     
-    // 마지막 텍스트 처리
-    if (currentIndex < safeText.length) {
-      const remainingText = safeText.slice(currentIndex);
+    // 마지막 남은 텍스트
+    if (currentIndex < processedText.length) {
+      const remainingText = processedText.slice(currentIndex);
       elements.push(
         <div key={`text-${currentIndex}`}>
-          {formatNormalText(remainingText)}
+          {formatTextWithInlineLatex(remainingText)}
         </div>
       );
     }
     
     return <>{elements}</>;
+    
+    // 인라인 LaTeX 처리 헬퍼
+    function formatTextWithInlineLatex(txt: string) {
+      const parts: any[] = [];
+      let lastIdx = 0;
+      const inlineRegex = /\$(.+?)\$/g;
+      let inlineMatch;
+      while ((inlineMatch = inlineRegex.exec(txt)) !== null) {
+        if (inlineMatch.index > lastIdx) {
+          parts.push(formatNormalText(txt.slice(lastIdx, inlineMatch.index)));
+        }
+        parts.push(
+          <span key={`latex-inline-${inlineMatch.index}`} dangerouslySetInnerHTML={{__html: renderLatex(inlineMatch[1])}} />
+        );
+        lastIdx = inlineMatch.index + inlineMatch[0].length;
+      }
+      if (lastIdx < txt.length) {
+        parts.push(formatNormalText(txt.slice(lastIdx)));
+      }
+      return <>{parts}</>;
+    }
   }, [handleCopyCode]);
   
   // 일반 텍스트 포맷팅 (볼드, 제목, 표)
-  const formatNormalText = (text: string) => {
+  const formatNormalText = useCallback((text: string) => {
     const lines = text.split('\n');
     const elements: JSX.Element[] = [];
     let i = 0;
@@ -1350,7 +1454,7 @@ export const Chat: React.FC = () => {
     }
     
     return <>{elements}</>;
-  };
+  }, []);
   
   return wrapWithProfiler(
     'ChatRoot',
@@ -1377,13 +1481,7 @@ export const Chat: React.FC = () => {
         {/* 대화 목록 */}
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <div className="space-y-1">
-            {[...chatSessions]
-              .sort((a, b) => {
-                // 고정된 대화를 먼저 표시
-                // 업데이트 시간 기준으로 정렬
-                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-              })
-              .map(session => (
+            {sortedSessions.map(session => (
               <div
                 key={session.id}
                 className={cn(
@@ -1500,7 +1598,40 @@ export const Chat: React.FC = () => {
             onScroll={(e) => {
               const container = e.currentTarget;
               const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+              const wasScrolledUp = userScrolledUpRef.current;
               userScrolledUpRef.current = !isAtBottom;
+
+              // 스트리밍 중 위로 스크롤했을 때 자동스크롤 끄기 여부 질문
+              if (!isAtBottom && !wasScrolledUp && (streamingRef.current || isLoading) && autoScrollToastIdRef.current === null) {
+                const toastId = toast('자동 내려가기 기능을 끌까요?', {
+                  duration: Infinity,
+                  action: {
+                    label: '예',
+                    onClick: () => {
+                      userScrolledUpRef.current = true;
+                      autoScrollToastIdRef.current = null;
+                    },
+                  },
+                  cancel: {
+                    label: '아니오',
+                    onClick: () => {
+                      userScrolledUpRef.current = false;
+                      autoScrollToastIdRef.current = null;
+                      scrollToBottom(true);
+                    },
+                  },
+                  onDismiss: () => {
+                    autoScrollToastIdRef.current = null;
+                  },
+                });
+                autoScrollToastIdRef.current = toastId;
+              }
+
+              // 맨 아래로 다시 내려오면 자동스크롤 재활성화 & 토스트 닫기
+              if (isAtBottom && autoScrollToastIdRef.current !== null) {
+                toast.dismiss(autoScrollToastIdRef.current);
+                autoScrollToastIdRef.current = null;
+              }
             }}
           >
           {currentSession?.messages.length === 0 ? (
@@ -1622,7 +1753,10 @@ export const Chat: React.FC = () => {
               accept="image/*,text/plain,application/json"
               multiple
               className="hidden"
-              onChange={(e) => handleFiles(e.target.files)}
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                e.target.value = ''; // 같은 파일 재선택 허용
+              }}
             />
 
             {/* 메인 입력창 */}
@@ -1751,13 +1885,32 @@ export const Chat: React.FC = () => {
                   )}
                 </div>
 
+                {/* 영상 모델: 초 입력 칸 */}
+                {isVideoModel && (
+                  <div className="flex flex-col items-center gap-0.5 shrink-0">
+                    <input
+                      type="number"
+                      min={1}
+                      max={videoMaxSeconds}
+                      value={videoSeconds}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(videoMaxSeconds, Number(e.target.value)));
+                        setVideoSeconds(v);
+                      }}
+                      className="w-12 text-center px-1 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-primary"
+                      disabled={isLoading || streamingRef.current}
+                    />
+                    <span className="text-[10px] text-gray-400 leading-none">초</span>
+                  </div>
+                )}
+
                 {/* 텍스트 입력 */}
                 <textarea
                   ref={textareaRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={streamingRef.current ? "AI가 답변 중입니다..." : t.chat.askAnything}
+                  placeholder={streamingRef.current ? "AI가 답변 중입니다..." : isVideoModel ? `영상 프롬프트를 입력하세요 (최대 ${videoMaxSeconds}초)` : t.chat.askAnything}
                   className={cn(
                     "flex-1 px-2 py-2 bg-transparent focus:outline-none resize-none",
                     streamingRef.current || isLoading

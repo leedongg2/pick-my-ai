@@ -39,6 +39,17 @@ export const Checkout: React.FC = React.memo(() => {
   const [usePMCChecked, setUsePMCChecked] = useState(false);
   const [pmcToUse, setPmcToUse] = useState(0);
   
+  // Toss SDK 프리로드 캐시 (페이지 진입 즉시 백그라운드 로드)  
+  const tossInstanceRef = React.useRef<any>(null);
+  useEffect(() => {
+    const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;
+    if (clientKey && !tossInstanceRef.current) {
+      loadTossPayments(clientKey).then((instance) => {
+        tossInstanceRef.current = instance;
+      }).catch(() => {});
+    }
+  }, []);
+
   // 페이지 진입 시 인증 확인
   useEffect(() => {
     if (!isAuthenticated || !currentUser) {
@@ -121,7 +132,7 @@ export const Checkout: React.FC = React.memo(() => {
       selections.forEach(sel => { if (sel.quantity > 0) credits[sel.modelId] = sel.quantity; });
       localStorage.setItem('pending_purchase', JSON.stringify({ orderId, credits }));
 
-      const tossPayments = await loadTossPayments(clientKey);
+      const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
       await tossPayments.requestPayment(method, {
         amount,
         orderId,
@@ -161,7 +172,7 @@ export const Checkout: React.FC = React.memo(() => {
       selections.forEach(sel => { if (sel.quantity > 0) credits[sel.modelId] = sel.quantity; });
       localStorage.setItem('pending_purchase', JSON.stringify({ orderId, credits }));
 
-      const tossPayments = await loadTossPayments(clientKey);
+      const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
       await tossPayments.requestPayment('EASY_PAY' as any, {
         easyPay: 'KAKAOPAY',
         amount,
@@ -225,38 +236,12 @@ export const Checkout: React.FC = React.memo(() => {
       return;
     }
     
-    // 가상 결제 처리 (1초 대기)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 지갑 초기화 (없는 경우)
+    // 지갑 초기화 (없는 경우) - 동기 처리로 즉시 완료
     if (!wallet) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('⚠️ 지갑이 없음, 초기화 중...');
-      }
       initWallet(stateBeforeClose.currentUser!.id);
-      // 지갑 초기화 후 대기
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 지갑이 업데이트될 때까지 대기
-      let retries = 0;
-      while (retries < 10) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const currentState = useStore.getState();
-        if (currentState.wallet) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('✅ 지갑 초기화 완료:', currentState.wallet);
-          }
-          break;
-        }
-        retries++;
-      }
-      
-      // 최종 확인
+      // Zustand는 동기적으로 상태를 업데이트하므로 즉시 확인
       const stateAfterInit = useStore.getState();
       if (!stateAfterInit.wallet) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('❌ 지갑 초기화 실패! (타임아웃)');
-        }
         toast.error('지갑 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
         setIsProcessing(false);
         return;

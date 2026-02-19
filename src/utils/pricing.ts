@@ -204,10 +204,13 @@ const tokenBudgets: Record<string, TokenBudget> = {
   'o4mini': { input: 500, output: 500 },
   // Claude 계열 (1000 In / 1000 Out - "혜자" 마케팅 포인트)
   'haiku35': { input: 1000, output: 1000 },
+  'haiku45': { input: 1000, output: 1000 },
   'sonnet45': { input: 1000, output: 1000 },
+  'sonnet46': { input: 1000, output: 1000 },
   'opus4': { input: 1000, output: 1000 },
   'opus41': { input: 1000, output: 1000 },
   'opus45': { input: 1000, output: 1000 },
+  'opus46': { input: 1000, output: 1000 },
   // Gemini 계열 (500 In / 500 Out)
   'gemini3': { input: 500, output: 500 },
   'gemini3pro': { input: 500, output: 500 },
@@ -219,6 +222,8 @@ const tokenBudgets: Record<string, TokenBudget> = {
   'codex': { input: 500, output: 500 },
   'gpt5codex': { input: 500, output: 500 },
   'gpt51codex': { input: 500, output: 500 },
+  'gpt51codexmax': { input: 500, output: 500 },
+  'gpt52codex': { input: 500, output: 500 },
   // Image (500 In / 500 Out)
   'gptimage1': { input: 500, output: 500 },
 };
@@ -234,12 +239,15 @@ const modelData: Record<string, ModelData> = {
   'o3': { price: 8, tier: 'low' },
   'o3mini': { price: 5, tier: 'low' },
   'o4mini': { price: 2, tier: 'low' },
-  // Claude 계열 - 고마진 효자 모델
-  'haiku35': { price: 4, tier: 'low' },
-  'sonnet45': { price: 20, tier: 'mid' },    // 18~20원, 마진율 높음 (강추)
-  'opus4': { price: 160, tier: 'high' },
-  'opus41': { price: 80, tier: 'high' },
-  'opus45': { price: 60, tier: 'high' },     // 60원, 1회당 약 37원 남는 황제 마진
+  // Claude 계열 - PMI 2026 안정 가격표
+  'haiku35': { price: 5, tier: 'low' },      // 원가 2.25원 → 5원
+  'haiku45': { price: 15, tier: 'mid' },     // 원가 9원 → 15원
+  'sonnet45': { price: 45, tier: 'mid' },    // 원가 27원 → 45원
+  'sonnet46': { price: 45, tier: 'mid' },    // 원가 27원 → 45원
+  'opus4': { price: 199, tier: 'high' },     // 원가 135원 → 199원
+  'opus41': { price: 199, tier: 'high' },    // 원가 135원 → 199원
+  'opus45': { price: 79, tier: 'high' },     // 원가 45원 → 79원
+  'opus46': { price: 79, tier: 'high' },     // 원가 45원 → 79원
   // Gemini 계열
   'gemini3': { price: 8, tier: 'low' },
   'gemini3pro': { price: 35, tier: 'mid' },
@@ -251,6 +259,8 @@ const modelData: Record<string, ModelData> = {
   'codex': { price: 12, tier: 'low' },
   'gpt5codex': { price: 12, tier: 'low' },
   'gpt51codex': { price: 12, tier: 'low' },
+  'gpt51codexmax': { price: 12, tier: 'low' },
+  'gpt52codex': { price: 15, tier: 'mid' },
   // Image
   'gptimage1': { price: 40, tier: 'mid' },
   // Alias 호환

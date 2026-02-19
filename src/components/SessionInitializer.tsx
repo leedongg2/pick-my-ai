@@ -18,15 +18,35 @@ export function SessionInitializer() {
 
     (async () => {
       try {
-        const res = await fetch('/api/auth/session', {
-          method: 'GET',
-          credentials: 'include',
-          cache: 'no-store',
-        });
+        // 세션 캐시: sessionStorage에서 5분 이내 결과 재사용 (API 재요청 제거)
+        let sessionData: any = null;
+        try {
+          const cached = sessionStorage.getItem('__pma_session');
+          if (cached) {
+            const { data, ts } = JSON.parse(cached);
+            if (Date.now() - ts < 5 * 60 * 1000) {
+              sessionData = data;
+            } else {
+              sessionStorage.removeItem('__pma_session');
+            }
+          }
+        } catch {}
 
-        if (!res.ok) return;
+        if (!sessionData) {
+          const res = await fetch('/api/auth/session', {
+            method: 'GET',
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          if (!res.ok) return;
+          sessionData = await res.json();
+          // 캐시 저장
+          try {
+            sessionStorage.setItem('__pma_session', JSON.stringify({ data: sessionData, ts: Date.now() }));
+          } catch {}
+        }
 
-        const data = await res.json();
+        const data = sessionData;
         if (data.authenticated && data.user) {
           const userId = data.user.id;
 
@@ -100,7 +120,25 @@ export function SessionInitializer() {
                 if (mergedCredits[key] <= 0) delete mergedCredits[key];
               }
               
-              const hasCredits = Object.keys(mergedCredits).length > 0;
+              let hasCredits = Object.keys(mergedCredits).length > 0;
+              
+              // 신규 사용자 무료 크레딧 지급 (gpt5 10회, haiku45 10회, sonar 10회)
+              if (!hasCredits && !savedLocalHasFirstPurchase && !userData.settings?.hasFirstPurchase) {
+                mergedCredits['gpt5'] = 10;
+                mergedCredits['haiku45'] = 10;
+                mergedCredits['sonar'] = 10;
+                hasCredits = true;
+                stateUpdate.hasFirstPurchase = true;
+                
+                // 서버에 무료 크레딧 저장
+                fetch('/api/wallet', {
+                  method: 'PATCH',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ credits: mergedCredits }),
+                }).catch(() => {});
+              }
+              
               stateUpdate.wallet = {
                 userId,
                 credits: mergedCredits,
