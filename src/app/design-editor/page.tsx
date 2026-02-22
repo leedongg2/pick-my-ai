@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { LightweightPreview } from '@/components/design/LightweightPreview';
 import { ColorEditorPanel } from '@/components/design/ColorEditorPanel';
 import { DesignElement, DesignTheme, defaultTheme } from '@/types/design';
-import { ArrowLeft, Save, RotateCcw, Eye, Code } from 'lucide-react';
+import { ArrowLeft, Save, RotateCcw, Eye, Code, Send } from 'lucide-react';
+import { SendButtonCustomizer } from '@/components/design/SendButtonCustomizer';
 import { toast } from 'sonner';
 import { useStore } from '@/store';
 
@@ -18,6 +19,8 @@ export default function DesignEditorPage() {
   const [currentPage, setCurrentPage] = useState<'chat' | 'dashboard' | 'settings'>('chat');
   const [showCode, setShowCode] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [showSendCustomizer, setShowSendCustomizer] = useState(false);
+  const { sendButtonSymbol } = useStore();
 
   const didInitRef = useRef(false);
   const skipFirstSyncRef = useRef(true);
@@ -256,6 +259,7 @@ ${elementColorCss}`;
                   theme={theme}
                   elementColors={elementColors}
                   onElementClick={handleElementClick}
+                  onSendButtonCustomize={() => setShowSendCustomizer(true)}
                 />
               </div>
             )}
@@ -291,6 +295,11 @@ ${elementColorCss}`;
         onApply={handleColorApply}
         onPreview={handleColorPreview}
       />
+
+      {/* 전송버튼 커스터마이저 */}
+      {showSendCustomizer && (
+        <SendButtonCustomizer onClose={() => setShowSendCustomizer(false)} />
+      )}
     </div>
   );
 }

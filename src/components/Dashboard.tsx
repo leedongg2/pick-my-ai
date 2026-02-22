@@ -15,23 +15,21 @@ import {
   Plus,
   BarChart3,
   Sparkles,
-  Gift,
-  X,
-  Coins
+  ArrowRightLeft,
+  Coins,
+  Star
 } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-// 동적 임포트
-const CreditGift = dynamic(() => import('@/components/CreditGift').then(mod => ({ default: mod.CreditGift })), { ssr: false });
 import { formatWon, getFixedDisplayPriceOrFallback } from '@/utils/pricing';
 import { cn } from '@/utils/cn';
 import { useTranslation } from '@/utils/translations';
 
 export const Dashboard: React.FC = () => {
   const router = useRouter();
-  const { models, wallet, chatSessions, getAvailablePMC, pmcBalance } = useStore();
-  const [showGiftModal, setShowGiftModal] = React.useState(false);
+  const { models, wallet, chatSessions, getAvailablePMC, pmcBalance, swapCreditsToPMC, bookmarkedMessages } = useStore();
   const [showAllActivity, setShowAllActivity] = React.useState(false);
+  const [swapModelId, setSwapModelId] = React.useState('');
+  const [swapQty, setSwapQty] = React.useState(1);
+  const [showSwap, setShowSwap] = React.useState(false);
   const { t } = useTranslation();
   
   // PMC 잔액
@@ -118,13 +116,28 @@ export const Dashboard: React.FC = () => {
     return 'bg-green-500';
   }, []);
 
-  const handleShowGiftModal = useCallback(() => {
-    setShowGiftModal(true);
-  }, []);
+  const swapModels = useMemo(() => {
+    if (!wallet) return [];
+    return models.filter(m => m.enabled && (wallet.credits[m.id] || 0) > 0 && m.series !== 'image' && m.series !== 'video');
+  }, [models, wallet]);
 
-  const handleCloseGiftModal = useCallback(() => {
-    setShowGiftModal(false);
-  }, []);
+  const handleSwap = useCallback(() => {
+    if (!swapModelId || swapQty <= 0) return;
+    const model = models.find(m => m.id === swapModelId);
+    if (!model) return;
+    const pricePerCredit = getFixedDisplayPriceOrFallback(model.id, model.piWon).price;
+    const result = swapCreditsToPMC([{ modelId: swapModelId, qty: swapQty, pricePerCredit }]);
+    if (result.success) {
+      import('sonner').then(({ toast }) => {
+        toast.success(`✅ 환전 완료! +${result.totalPMC} PMC (수수료 ${result.totalFee}원)`);
+      });
+      setSwapQty(1);
+    } else {
+      import('sonner').then(({ toast }) => {
+        toast.error('환전에 실패했습니다. 크레딧이 충분한지 확인해주세요.');
+      });
+    }
+  }, [swapModelId, swapQty, models, swapCreditsToPMC]);
   
   if (!wallet) {
     return (
@@ -242,6 +255,96 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
         
+        {/* PMC 스왑 + 북마크 요약 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          {/* 크레딧 → PMC 환전 */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ArrowRightLeft className="w-5 h-5 text-blue-600" />
+              <h3 className="text-sm font-bold text-blue-800">크레딧 → PMC 환전</h3>
+              <span className="text-xs text-blue-500">(수수료 1원/개)</span>
+            </div>
+            {!showSwap ? (
+              <button
+                onClick={() => setShowSwap(true)}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                환전하기
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <select
+                  value={swapModelId}
+                  onChange={e => { setSwapModelId(e.target.value); setSwapQty(1); }}
+                  className="w-full text-sm px-3 py-2 border border-blue-300 rounded-lg bg-white focus:outline-none"
+                >
+                  <option value="">모델 선택...</option>
+                  {swapModels.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.displayName} (잔여 {wallet?.credits[m.id] || 0}회, 개당 {getFixedDisplayPriceOrFallback(m.id, m.piWon).price}원)
+                    </option>
+                  ))}
+                </select>
+                {swapModelId && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={wallet?.credits[swapModelId] || 0}
+                        value={swapQty}
+                        onChange={e => setSwapQty(Number(e.target.value))}
+                        className="w-20 text-sm px-3 py-2 border border-blue-300 rounded-lg focus:outline-none"
+                      />
+                      <span className="text-xs text-gray-500">개 = +{swapQty * getFixedDisplayPriceOrFallback(swapModelId, models.find(m => m.id === swapModelId)?.piWon || 0).price - swapQty} PMC</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSwap}
+                        className="flex-1 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        환전
+                      </button>
+                      <button
+                        onClick={() => setShowSwap(false)}
+                        className="px-3 py-1.5 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 transition-colors"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 북마크 요약 */}
+          <div className="bg-gradient-to-br from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Star className="w-5 h-5 text-yellow-500 fill-yellow-400" />
+              <h3 className="text-sm font-bold text-yellow-800">저장된 답변</h3>
+            </div>
+            {bookmarkedMessages.length === 0 ? (
+              <p className="text-sm text-yellow-600">저장된 답변이 없습니다. 채팅에서 ⭐를 눌러 저장하세요.</p>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-yellow-700 mb-1">{bookmarkedMessages.length}개</p>
+                <div className="space-y-1 max-h-[80px] overflow-hidden">
+                  {bookmarkedMessages.slice(0, 2).map(bm => (
+                    <p key={bm.id} className="text-xs text-yellow-700 truncate">⭐ {bm.content.slice(0, 60)}...</p>
+                  ))}
+                </div>
+                <button
+                  onClick={() => router.push('/chat')}
+                  className="mt-2 text-xs text-yellow-700 underline"
+                >
+                  채팅에서 보기
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* 모델별 크레딧 현황 */}
           <div className="lg:col-span-2">
@@ -380,22 +483,6 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 크레딧 선물 모달 */}
-      {showGiftModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowGiftModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">크레딧 선물</h2>
-              <button onClick={handleCloseGiftModal} className="p-2 hover:bg-gray-100 rounded-full">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-              <CreditGift />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useStore } from '@/store';
 import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
-import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square } from 'lucide-react';
+import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square, Star, Volume2, RefreshCw, Search, FileText, Link2, Swords } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
@@ -18,7 +18,7 @@ const GraphRenderer = dynamic(() => import('@/components/GraphRenderer').then(m 
 // Constants
 const MAX_ATTACHMENTS = 5;
 const STREAMING_DRAFT_V2 = process.env.NEXT_PUBLIC_STREAMING_DRAFT_V2 === 'true';
-const STREAMING_DRAFT_UI_THROTTLE_MS = 50;
+const STREAMING_DRAFT_UI_THROTTLE_MS = 0;
 
 // 메모이제이션된 서브 컴포넌트들
 const MessageItem = React.memo(({ message, formatMessage }: any) => (
@@ -123,11 +123,28 @@ type Attachment = {
    formatMessage: (text: string) => React.ReactNode;
    onDownloadImage: (imageUrl: string, filename?: string) => void;
    isStreaming?: boolean;
+   isLastAssistant?: boolean;
+   isBookmarked?: boolean;
+   onBookmark?: (msgId: string) => void;
+   onTTS?: (content: string) => void;
+   onRegenerate?: () => void;
+   availableModels?: any[];
+   onRegenerateWithModel?: (modelId: string) => void;
  };
 
- const ChatMessageRow = React.memo((props: ChatMessageRowProps) => {
-   const { msg, msgIndex, overrideContent, modelById, formatMessage, onDownloadImage, isStreaming } = props;
+ const _chatMsgAreEqual = (prev: ChatMessageRowProps, next: ChatMessageRowProps) =>
+  prev.overrideContent === next.overrideContent &&
+  prev.isStreaming === next.isStreaming &&
+  prev.isLastAssistant === next.isLastAssistant &&
+  prev.isBookmarked === next.isBookmarked &&
+  prev.msg.content === next.msg.content &&
+  prev.msg.id === next.msg.id;
+
+ const ChatMessageRow = React.memo(function ChatMessageRowInner(props: ChatMessageRowProps) {
+   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   const { msg, msgIndex, overrideContent, modelById, formatMessage, onDownloadImage, isStreaming, isLastAssistant, isBookmarked, onBookmark, onTTS, onRegenerate, availableModels, onRegenerateWithModel } = props;
    const model = msg.modelId ? (modelById.get(msg.modelId) ?? null) : null;
+   const [showRegenMenu, setShowRegenMenu] = React.useState(false);
 
    const rawContent = (overrideContent ?? (msg.content as unknown as string)) as unknown as string;
   // ~요약~ 숨기기 적용
@@ -234,22 +251,62 @@ type Attachment = {
                  <div className="whitespace-pre-wrap">{formatMessage(content)}</div>
                )}
              </div>
-             {/* AI 메시지 복사 버튼 */}
+             {/* AI 메시지 액션 버튼들 */}
              {content && !isImage && !isVideo && !isStreaming && (
-               <button
-                 onClick={() => handleCopyText(rawContent)}
-                 className="mt-1 p-1 rounded hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
-                 title="복사"
-               >
-                 <Copy className="w-3.5 h-3.5 text-gray-400" />
-               </button>
+               <div className="mt-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                 <button onClick={() => handleCopyText(rawContent)} className="p-1 rounded hover:bg-gray-100" title="복사">
+                   <Copy className="w-3.5 h-3.5 text-gray-400" />
+                 </button>
+                 {onBookmark && (
+                   <button onClick={() => onBookmark(msg.id)} className="p-1 rounded hover:bg-gray-100" title={isBookmarked ? '북마크 해제' : '북마크'}>
+                     <Star className={`w-3.5 h-3.5 ${isBookmarked ? 'text-yellow-400 fill-yellow-400' : 'text-gray-400'}`} />
+                   </button>
+                 )}
+                 {onTTS && content && (
+                   <button onClick={() => onTTS(content)} className="p-1 rounded hover:bg-gray-100" title="소리로 읽기">
+                     <Volume2 className="w-3.5 h-3.5 text-gray-400" />
+                   </button>
+                 )}
+                 {isLastAssistant && onRegenerate && (
+                   <div className="relative">
+                     <button
+                       onClick={() => setShowRegenMenu(v => !v)}
+                       className="p-1 rounded hover:bg-gray-100 flex items-center gap-0.5"
+                       title="다시 생성"
+                     >
+                       <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
+                     </button>
+                     {showRegenMenu && (
+                       <div className="absolute bottom-full left-0 mb-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-xl z-50 min-w-[180px] overflow-hidden">
+                         <button
+                           onClick={() => { onRegenerate(); setShowRegenMenu(false); }}
+                           className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                         >
+                           <RefreshCw className="w-3.5 h-3.5" />
+                           같은 모델로 재생성
+                         </button>
+                         {availableModels && availableModels.filter(m => m.id !== msg.modelId).map((m: any) => (
+                           <button
+                             key={m.id}
+                             onClick={() => { onRegenerateWithModel?.(m.id); setShowRegenMenu(false); }}
+                             className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                           >
+                             <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
+                             {m.displayName}으로 재생성
+                           </button>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+                 )}
+               </div>
              )}
            </div>
          </div>
        )}
      </div>
    );
- });
+ }, _chatMsgAreEqual);
 
  ChatMessageRow.displayName = 'ChatMessageRow';
 
@@ -270,6 +327,12 @@ export const Chat: React.FC = () => {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showPersona, setShowPersona] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
+  const [showChainMode, setShowChainMode] = useState(false);
+  const [showDebateMode, setShowDebateMode] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const ttsRef = useRef<SpeechSynthesisUtterance | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
@@ -298,6 +361,8 @@ export const Chat: React.FC = () => {
     storedFacts,
     addStoredFacts,
     deductCredit,
+    refundCredit,
+    addCredits,
     setCurrentSession,
     models,
     walletCredits,
@@ -308,6 +373,12 @@ export const Chat: React.FC = () => {
     streaming,
     showDeleteConfirmation,
     currentUser,
+    bookmarkedMessages,
+    addBookmark,
+    removeBookmark,
+    speechLevel,
+    sendButtonSymbol,
+    sendButtonSound,
   } = useStore(
     (state) => ({
       chatSessions: state.chatSessions,
@@ -321,6 +392,8 @@ export const Chat: React.FC = () => {
       storedFacts: state.storedFacts,
       addStoredFacts: state.addStoredFacts,
       deductCredit: state.deductCredit,
+      refundCredit: state.refundCredit,
+      addCredits: state.addCredits,
       setCurrentSession: state.setCurrentSession,
       models: state.models,
       walletCredits: state.wallet?.credits ?? null,
@@ -331,9 +404,24 @@ export const Chat: React.FC = () => {
       streaming: state.streaming,
       showDeleteConfirmation: state.settings.showDeleteConfirmation,
       currentUser: state.currentUser,
+      bookmarkedMessages: state.bookmarkedMessages,
+      addBookmark: state.addBookmark,
+      removeBookmark: state.removeBookmark,
+      speechLevel: state.speechLevel,
+      sendButtonSymbol: state.sendButtonSymbol,
+      sendButtonSound: state.sendButtonSound,
     }),
     shallow
   );
+
+  // 스트리밍 content Map: 버전 카운터만 구독 (Map 복사 없이 O(1) 리렌더 트리거)
+  useStore((state) => state._streamingVersion);
+  const streamingContent = useStore.getState()._streamingContent;
+
+  const selectedModelPiWon = useMemo(() => {
+    const m = models.find(m => m.id === selectedModelId);
+    return m?.piWon ?? 1;
+  }, [models, selectedModelId]);
 
   const { t } = useTranslation();
 
@@ -584,13 +672,16 @@ export const Chat: React.FC = () => {
     clearActiveTemplate();
   }, [activeTemplate, clearActiveTemplate]);
 
+  const scrollRafRef = useRef<number | null>(null);
   const scrollToBottom = useCallback((force: boolean = false) => {
-    // 사용자가 위로 스크롤했으면 자동 스크롤 중단
-    if (!force && userScrolledUpRef.current) {
-      return;
-    }
-    const behavior = force || (streaming?.smoothScrolling && !streamingRef.current) ? 'smooth' : 'auto';
-    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+    if (!force && userScrolledUpRef.current) return;
+    // rAF으로 배치 처리 - 같은 프레임 내 중복 스크롤 제거
+    if (scrollRafRef.current !== null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const behavior = force || (streaming?.smoothScrolling && !streamingRef.current) ? 'smooth' : 'auto';
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+    });
   }, [streaming?.smoothScrolling]);
 
   // Scroll to bottom when messages change
@@ -747,6 +838,121 @@ export const Chat: React.FC = () => {
     toast.info('응답 생성이 취소되었습니다.');
   }, []);
 
+  const handleBookmark = useCallback((msgId: string) => {
+    if (!currentSessionId) return;
+    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
+    const msg = session?.messages.find(m => m.id === msgId);
+    if (!msg) return;
+    const isAlreadyBookmarked = bookmarkedMessages.some(b => b.id === msgId);
+    if (isAlreadyBookmarked) {
+      removeBookmark(msgId);
+      toast.success('북마크가 해제되었습니다.');
+    } else {
+      addBookmark({
+        id: msgId,
+        sessionId: currentSessionId,
+        content: msg.content as string,
+        modelId: msg.modelId,
+        timestamp: typeof msg.timestamp === 'string' ? msg.timestamp : new Date(msg.timestamp).toISOString(),
+        sessionTitle: session?.title,
+      });
+      toast.success('북마크에 저장했습니다! ⭐');
+    }
+  }, [currentSessionId, bookmarkedMessages, addBookmark, removeBookmark]);
+
+  const handleTTS = useCallback((content: string) => {
+    if (!window.speechSynthesis) { toast.error('이 브라우저는 TTS를 지원하지 않습니다.'); return; }
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      toast.info('읽기가 중지되었습니다.');
+      return;
+    }
+    const stripped = stripSummaryBlock(content).replace(/[#*`]/g, '').trim();
+    const utter = new SpeechSynthesisUtterance(stripped);
+    utter.lang = language === 'en' ? 'en-US' : language === 'ja' ? 'ja-JP' : 'ko-KR';
+    utter.rate = 1.0;
+    ttsRef.current = utter;
+    window.speechSynthesis.speak(utter);
+    toast.info('읽기 시작 — 다시 클릭하면 중지됩니다.');
+  }, [language]);
+
+  const handleExportChat = useCallback((format: 'markdown' | 'txt') => {
+    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
+    if (!session || session.messages.length === 0) { toast.error('내보낼 대화가 없습니다.'); return; }
+    const lines: string[] = [];
+    if (format === 'markdown') {
+      lines.push(`# ${session.title}\n`);
+      session.messages.forEach(m => {
+        const role = m.role === 'user' ? '**나**' : `**${modelById.get(m.modelId || '') ?.displayName || 'AI'}**`;
+        const content = stripSummaryBlock(m.content as string);
+        if (content.startsWith('__VIDEO__:')) {
+          lines.push(`${role}: [생성된 영상]\n`);
+        } else if (content.startsWith('http') || content.startsWith('data:image')) {
+          lines.push(`${role}: ![생성된 이미지](${content})\n`);
+        } else {
+          lines.push(`${role}:\n${content}\n`);
+        }
+      });
+    } else {
+      lines.push(`${session.title}\n${'='.repeat(40)}\n`);
+      session.messages.forEach(m => {
+        const role = m.role === 'user' ? '나' : (modelById.get(m.modelId || '')?.displayName || 'AI');
+        const content = stripSummaryBlock(m.content as string);
+        lines.push(`[${role}]\n${content}\n`);
+      });
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session.title}.${format === 'markdown' ? 'md' : 'txt'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`${format === 'markdown' ? 'Markdown' : 'TXT'}으로 내보냈습니다!`);
+  }, [currentSessionId, modelById]);
+
+  const handleRegenerate = useCallback(async (withModelId?: string) => {
+    if (!currentSessionId) return;
+    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
+    if (!session) return;
+    const messages = session.messages;
+    const lastAssistantIdx = [...messages].reverse().findIndex(m => m.role === 'assistant');
+    if (lastAssistantIdx === -1) return;
+    const realIdx = messages.length - 1 - lastAssistantIdx;
+    const lastAssistant = messages[realIdx];
+    const lastUserMsg = messages.slice(0, realIdx).reverse().find(m => m.role === 'user');
+    if (!lastUserMsg) return;
+    const targetModelId = withModelId || lastAssistant.modelId || selectedModelId;
+    const credits = walletCredits?.[targetModelId] || 0;
+    if (credits <= 0) { toast.error(`${modelById.get(targetModelId)?.displayName} 크레딧이 부족합니다.`); return; }
+    setIsLoading(true);
+    setIsCancelled(false);
+    updateMessageContent(currentSessionId, lastAssistant.id, '');
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    try {
+      const apiMessages = messages.slice(0, realIdx).map(m => ({ role: m.role, content: m.content }));
+      deductCredit(targetModelId).catch(() => {});
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages, modelId: targetModelId, temperature, language, speechLevel }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error('재생성 실패');
+      const data = await res.json();
+      const newContent = data.content || '';
+      finalizeMessageContent(currentSessionId, lastAssistant.id, newContent);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') toast.error('재생성에 실패했습니다.');
+    } finally {
+      setIsLoading(false);
+      streamingRef.current = false;
+    }
+  }, [currentSessionId, selectedModelId, walletCredits, modelById, updateMessageContent, finalizeMessageContent, deductCredit, temperature, language, speechLevel]);
+
   const handleSendMessage = useCallback(async () => {
     if (!message.trim() || !selectedModelId || !selectedModel) {
       return;
@@ -779,6 +985,7 @@ export const Chat: React.FC = () => {
     }
 
     const assistantMessageId = sessionIdForThisRequest ? crypto.randomUUID() : null;
+    let capturedRefundToken: string | false = false;
 
     try {
       const msg = message;
@@ -842,10 +1049,12 @@ export const Chat: React.FC = () => {
       // UI 업데이트 후 스크롤 (한 번만)
       scrollToBottom(true);
       
-      // 크레딧 차감은 백그라운드로 (UI 블로킹 없이)
-      deductCredit(selectedModelId).catch(err => {
+      // 크레딧 차감 후 환불 토큰 저장 (에러 시 환불에 사용)
+      try {
+        capturedRefundToken = await deductCredit(selectedModelId);
+      } catch (err) {
         console.error('[Chat] Credit deduction failed:', err);
-      });
+      }
 
       // 48h 배치 모델: 별도 처리
       if (isBatchModel && sessionIdForThisRequest && assistantMessageId) {
@@ -877,44 +1086,54 @@ export const Chat: React.FC = () => {
         return;
       }
 
-      // API 호출
+      // API 호출 (500/503 에러 시 1.5초 후 1회 자동 재시도)
       const controller = new AbortController();
       abortControllerRef.current = controller;
       const requestTimeout = isVideoModel ? 300000 : 180000; // 영상: 5분, 일반: 3분
       const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
-      
+
+      const buildRequestBody = () => JSON.stringify({
+        messages: apiMessages,
+        modelId: selectedModelId,
+        temperature: temperature,
+        maxTokens: 4096,
+        language,
+        speechLevel: useStore.getState().speechLevel,
+        storedFacts,
+        conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
+        persona: activePersona ? {
+          name: activePersona.name,
+          personality: activePersona.personality,
+          expertise: activePersona.expertise,
+          speechPatterns: activePersona.speechPatterns
+        } : undefined,
+        videoSeconds: isVideoModel ? videoSeconds : undefined,
+        userAttachments: attachments.map(a => ({
+          type: a.type,
+          name: a.name,
+          dataUrl: a.dataUrl,
+          content: a.content
+        }))
+      });
+
       let response;
       try {
         response = await fetch('/api/chat', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messages: apiMessages,
-            modelId: selectedModelId,
-            temperature: temperature,
-            maxTokens: 4096,
-            language,
-            speechLevel: useStore.getState().speechLevel,
-            storedFacts,
-            conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
-            persona: activePersona ? {
-              name: activePersona.name,
-              personality: activePersona.personality,
-              expertise: activePersona.expertise,
-              speechPatterns: activePersona.speechPatterns
-            } : undefined,
-            videoSeconds: isVideoModel ? videoSeconds : undefined,
-            userAttachments: attachments.map(a => ({
-              type: a.type,
-              name: a.name,
-              dataUrl: a.dataUrl,
-              content: a.content
-            }))
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: buildRequestBody(),
           signal: controller.signal
         });
+        // 500/503 서버 에러 시 1.5초 후 1회 자동 재시도
+        if ((response.status === 500 || response.status === 503) && !isCancelled) {
+          await new Promise(r => setTimeout(r, 1500));
+          response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: buildRequestBody(),
+            signal: controller.signal
+          });
+        }
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
@@ -963,15 +1182,31 @@ export const Chat: React.FC = () => {
       
       if (contentType.includes('text/event-stream')) {
         // GPT 스트리밍 SSE 응답 처리
+        // 혁신적 최적화: 네트워크 읽기와 UI 업데이트를 완전히 분리
+        // - 읽기 루프: 최대 속도로 텍스트 누적 (블로킹 없음)
+        // - RAF 루프: 브라우저 렌더 타이밍에 맞춰 한 프레임에 한 번만 DOM 업데이트
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let accumulated = '';
         let sseBuffer = '';
-        let lastUIUpdate = 0;
-        let pendingUpdate = false;
-        let firstTokenShown = false; // 첫 토큰 즉시 표시 플래그
-        // Adaptive 스로틀: 초반엔 빠르게(16ms=60fps), 긴 응답엔 50ms로 전환
-        const getThrottle = () => accumulated.length < 200 ? 16 : 50;
+        let rafPending = false;
+        let streamDone = false;
+        let streamError: Error | null = null;
+        let lastRenderedContent = '';
+
+        // RAF 기반 UI 업데이트 루프 (브라우저 vsync에 정확히 동기화)
+        const rafUpdate = () => {
+          if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
+            lastRenderedContent = accumulated;
+            updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+            scrollToBottom(false);
+          }
+          rafPending = false;
+          if (!streamDone) {
+            rafPending = true;
+            requestAnimationFrame(rafUpdate);
+          }
+        };
         
         try {
           while (true) {
@@ -989,50 +1224,33 @@ export const Chat: React.FC = () => {
               if (jsonStr === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(jsonStr);
-                if (parsed.error) {
-                  throw new Error(parsed.error);
-                }
+                if (parsed.error) throw new Error(parsed.error);
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   accumulated += delta;
-                  pendingUpdate = true;
+                  // 첫 토큰: RAF 루프 시작 (이후는 자동으로 vsync에 맞춰 업데이트)
+                  if (!rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(rafUpdate);
+                  }
                 }
               } catch (parseErr: any) {
                 if (parseErr.message && !parseErr.message.includes('JSON')) {
-                  throw parseErr;
+                  streamError = parseErr;
+                  break;
                 }
               }
             }
-            
-            // 첫 토큰: 즉시 표시 (체감 응답속도 극대화)
-            if (pendingUpdate && !firstTokenShown) {
-              firstTokenShown = true;
-              if (sessionIdForThisRequest && assistantMessageId) {
-                updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
-              }
-              scrollToBottom(false);
-              lastUIUpdate = Date.now();
-              pendingUpdate = false;
-              continue;
-            }
-            
-            // 이후: Adaptive 스로틀링
-            const now = Date.now();
-            if (pendingUpdate && (now - lastUIUpdate >= getThrottle())) {
-              if (sessionIdForThisRequest && assistantMessageId) {
-                updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
-              }
-              scrollToBottom(false);
-              lastUIUpdate = now;
-              pendingUpdate = false;
-            }
+            if (streamError) break;
           }
           
-          // 마지막 남은 업데이트 반영
-          if (pendingUpdate && sessionIdForThisRequest && assistantMessageId) {
+          // 스트림 완료: RAF 루프 종료 후 최종 내용 반영
+          streamDone = true;
+          if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
             updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
             scrollToBottom(false);
           }
+          if (streamError) throw streamError;
         } finally {
           reader.releaseLock();
         }
@@ -1118,105 +1336,119 @@ export const Chat: React.FC = () => {
       }
       
       const errorCode = error.message || 'ERR_UNKNOWN';
+
+      const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
+
+      // 429 에러: 대기/나가기 선택 흐름
+      if (errorCode.startsWith('ERR_RATE')) {
+        const waitContent = `현재 AI 요청이 많아 응답이 지연되고 있어요.\n\n이대로 기다리시면 1분 30초 안에 답변이 올 수 있어요. 계속 기다리시겠어요?`;
+        if (sid) {
+          if (assistantMessageId) {
+            finalizeMessageContent(sid, assistantMessageId, waitContent);
+          } else {
+            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: waitContent, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+          }
+        }
+
+        const userChoice = await new Promise<'wait' | 'leave'>((resolve) => {
+          let resolved = false;
+          const rateToastId = `rate-limit-${Date.now()}`;
+          toast.custom(
+            () => (
+              <div className="flex flex-col gap-2 bg-white dark:bg-gray-800 shadow-lg rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">현재 AI 요청이 많아 지연 중</span>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={() => { if (!resolved) { resolved = true; toast.dismiss(rateToastId); resolve('wait'); } }}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium"
+                  >기다리기</button>
+                  <button
+                    onClick={() => { if (!resolved) { resolved = true; toast.dismiss(rateToastId); resolve('leave'); } }}
+                    className="px-3 py-1.5 bg-gray-200 text-gray-800 rounded text-xs font-medium"
+                  >나가기 (크레딧 1회 보상)</button>
+                </div>
+              </div>
+            ),
+            { duration: 90000, id: rateToastId }
+          );
+        });
+
+        if (userChoice === 'leave') {
+          if (currentModelId) await addCredits({ [currentModelId]: 1 });
+          if (sid) {
+            const modelName = selectedModel?.displayName || currentModelId || 'AI';
+            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `응답을 중단했어요. 불편을 드려 죄송해요. ${modelName} 크레딧 1회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+          }
+        } else {
+          // 90초 대기 후 재시도
+          await new Promise(r => setTimeout(r, 90000));
+          try {
+            const liveMessages = useStore.getState().chatSessions.find(s => s.id === sid)?.messages || [];
+            const retryBody = JSON.stringify({ modelId: currentModelId, messages: liveMessages.filter((m: any) => m.role !== 'assistant' || m.content).map((m: any) => ({ role: m.role, content: m.content })) });
+            const retryResp = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: retryBody });
+            if (!retryResp.ok && retryResp.status === 429) {
+              // 재시도에도 429: 3크레딧 보상
+              if (currentModelId) await addCredits({ [currentModelId]: 3 });
+              const modelName = selectedModel?.displayName || currentModelId || 'AI';
+              if (sid) addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `현재 대기 중인 사용자가 너무 많아 응답이 어려워요. 진심으로 죄송합니다. ${modelName} 크레딧 3회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+            } else if (retryResp.ok) {
+              const retryData = await retryResp.json().catch(() => null);
+              if (retryData?.content && sid) {
+                addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: retryData.content, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+              }
+            }
+          } catch { /* 재시도 실패 시 조용히 처리 */ }
+        }
+        return;
+      }
+
+      // ERR_CANCELLED가 아닌 실제 에러 시 크레딧 환불
+      if (errorCode !== 'ERR_CANCELLED' && currentModelId && capturedRefundToken) {
+        refundCredit(currentModelId, selectedModelPiWon, capturedRefundToken);
+      }
       
       // 에러코드 → 사용자 친화적 메시지 매핑
       const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
-        // 응답 중지
-        if (code === 'ERR_CANCELLED') {
-          return {
-            icon: '', title: '',
-            message: '',
-            tips: []
-          };
-        }
-        // 타임아웃
+        if (code === 'ERR_CANCELLED') return { icon: '', title: '', message: '', tips: [] };
         if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
-          return {
-            icon: '⏱️', title: '응답 시간 초과',
-            message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.',
-            tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요']
-          };
+          return { icon: '⏱️', title: '응답 시간 초과', message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.', tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요'] };
         }
-        // 요청 한도 초과
-        if (code.startsWith('ERR_RATE')) {
-          return {
-            icon: '🕐', title: '잠시만 기다려주세요',
-            message: '요청이 너무 많아 잠시 쉬어가고 있어요.',
-            tips: ['1~2분 후에 다시 시도해주세요', '다른 AI 모델을 사용해보세요']
-          };
-        }
-        // 서비스 인증 문제 (사용자가 해결 불가)
         if (code.startsWith('ERR_KEY') || code === 'ERR_AUTH') {
-          return {
-            icon: '🔧', title: '서비스 점검 중',
-            message: '현재 이 AI 모델의 서비스를 일시적으로 이용할 수 없어요.',
-            tips: ['다른 AI 모델을 선택해보세요', '잠시 후 다시 시도해주세요']
-          };
+          return { icon: '🔧', title: '서비스 점검 중', message: '현재 이 AI 모델의 서비스를 일시적으로 이용할 수 없어요.', tips: ['다른 AI 모델을 선택해보세요', '잠시 후 다시 시도해주세요'] };
         }
-        // 네트워크 에러
         if (code.startsWith('ERR_NET')) {
-          return {
-            icon: '🌐', title: '연결 오류',
-            message: 'AI 서버와 연결하는 데 문제가 발생했어요.',
-            tips: ['인터넷 연결을 확인해주세요', '잠시 후 다시 시도해주세요']
-          };
+          return { icon: '🌐', title: '연결 오류', message: 'AI 서버와 연결하는 데 문제가 발생했어요.', tips: ['인터넷 연결을 확인해주세요', '잠시 후 다시 시도해주세요'] };
         }
-        // 빈 응답
         if (code.startsWith('ERR_EMPTY') || code.startsWith('ERR_RESP')) {
-          return {
-            icon: '💬', title: 'AI가 응답하지 못했어요',
-            message: 'AI가 적절한 답변을 생성하지 못했어요.',
-            tips: ['질문을 다시 한번 보내보세요', '다른 방식으로 질문해보세요']
-          };
+          return { icon: '💬', title: 'AI가 응답하지 못했어요', message: 'AI가 적절한 답변을 생성하지 못했어요.', tips: ['질문을 다시 한번 보내보세요', '다른 방식으로 질문해보세요'] };
         }
-        // 안전 정책
         if (code.startsWith('ERR_SAFE')) {
-          return {
-            icon: '🛡️', title: '요청을 처리할 수 없어요',
-            message: '입력하신 내용이 AI 이용 정책에 맞지 않아 처리할 수 없었어요.',
-            tips: ['표현을 바꿔서 다시 시도해보세요', '민감한 내용은 피해주세요']
-          };
+          return { icon: '🛡️', title: '요청을 처리할 수 없어요', message: '입력하신 내용이 AI 이용 정책에 맞지 않아 처리할 수 없었어요.', tips: ['표현을 바꿔서 다시 시도해보세요', '민감한 내용은 피해주세요'] };
         }
-        // 기타 알 수 없는 에러
-        return {
-          icon: '⚠️', title: '일시적인 오류가 발생했어요',
-          message: '요청을 처리하는 중 문제가 발생했어요.',
-          tips: ['잠시 후 다시 시도해주세요', '문제가 계속되면 다른 모델을 이용해보세요']
-        };
+        return { icon: '⚠️', title: '일시적인 오류가 발생했어요', message: '요청을 처리하는 중 문제가 발생했어요.', tips: ['잠시 후 다시 시도해주세요', '문제가 계속되면 다른 모델을 이용해보세요'] };
       };
 
       const display = getErrorDisplay(errorCode);
       
-      // 에러 메시지를 채팅에 추가
-      const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
       if (sid) {
         let errContent;
-        
         if (errorCode === 'ERR_CANCELLED') {
-          // 응답 중지된 경우 - 연한 회색 흘림체로 간단한 메시지만 표시
           errContent = '<span style="color: #9ca3af; font-style: italic;">응답 중지됨</span>';
         } else {
-          // 다른 에러들의 경우 - 기존 방식대로 표시
           errContent = `${display.icon} **${display.title}**\n\n${display.message}\n\n**이렇게 해보세요:**\n${display.tips.map(t => '• ' + t).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
         }
-        
         if (assistantMessageId) {
           finalizeMessageContent(sid, assistantMessageId, errContent);
         } else {
-          addMessage(sid, {
-            id: crypto.randomUUID(),
-            role: 'assistant' as const,
-            content: errContent,
-            modelId: currentModelId,
-            timestamp: new Date().toISOString(),
-            creditUsed: 1
-          });
+          addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: errContent, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 1 });
         }
       }
       
-      // ERR_CANCELLED 경우에는 toast를 표시하지 않음
       if (errorCode !== 'ERR_CANCELLED') {
-        toast.error(display.message);
+        const refundNote = useStore.getState().insurancePurchased
+          ? ' (보험 적용 크레딧 환불 완료)'
+          : ' (크레딧 1회 환불 완료)';
+        toast.error(display.message + refundNote);
       }
     } finally {
       setIsLoading(false);
@@ -1237,7 +1469,7 @@ export const Chat: React.FC = () => {
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, refundCredit, selectedModelPiWon, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
@@ -1248,15 +1480,20 @@ export const Chat: React.FC = () => {
     // 1.3초 후에 쿨다운 종료
     setTimeout(() => setIsOnCooldown(false), 1300);
     
+    // 현재 입력창 내용 캡처 (전송 전 상태)
+    const pendingMessage = message;
+    const pendingAttachments = attachments;
+    
     // 새 대화 생성 시도
     const sessionId = createChatSession('새 대화 ' + (chatSessions.length + 1));
     
     if (sessionId) {
       setCurrentSession(sessionId);
-      setAttachments([]);
-      setMessage('');
+      // 기존 입력 내용을 새 채팅으로 이전
+      setMessage(pendingMessage);
+      setAttachments(pendingAttachments);
     }
-  }, [isOnCooldown, chatSessions.length, createChatSession, setCurrentSession]);
+  }, [isOnCooldown, chatSessions.length, createChatSession, setCurrentSession, message, attachments]);
   
   const handleKeyPress = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1505,13 +1742,24 @@ export const Chat: React.FC = () => {
         }
       }
       
-      // ## 제목 처리
+      // ## 제목 처리 (heading 안의 ** bold 마크다운은 무시하고 plain text로 렌더링)
       if (line.trim().startsWith('##')) {
-        const titleText = line.trim().slice(2).trim();
+        const titleText = line.trim().slice(2).trim().replace(/\*\*(.*?)\*\*/g, '$1');
         elements.push(
           <h2 key={i} className="text-xl font-bold mt-4 mb-2">
             {titleText}
           </h2>
+        );
+        i++;
+        continue;
+      }
+      // # 제목 처리
+      if (line.trim().startsWith('#') && !line.trim().startsWith('##')) {
+        const titleText = line.trim().slice(1).trim().replace(/\*\*(.*?)\*\*/g, '$1');
+        elements.push(
+          <h1 key={i} className="text-2xl font-bold mt-4 mb-2">
+            {titleText}
+          </h1>
         );
         i++;
         continue;
@@ -1548,7 +1796,7 @@ export const Chat: React.FC = () => {
         'ChatSidebar',
         <div className="w-64 flex-shrink-0 bg-[#f9f9f9] dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col chat-list-card">
         {/* 새 채팅 버튼 */}
-        <div className="p-2">
+        <div className="p-2 space-y-1">
           <button
             onClick={handleNewChat}
             disabled={isOnCooldown}
@@ -1560,12 +1808,46 @@ export const Chat: React.FC = () => {
             <span className="text-sm font-normal">{isOnCooldown ? t.chat.pleaseWait : t.chat.newChat}</span>
             <Plus className="w-4 h-4" />
           </button>
+          {/* 검색 + 북마크 + 내보내기 버튼 */}
+          <div className="flex gap-1">
+            <button
+              onClick={() => setShowSearch(v => !v)}
+              className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="대화 검색"
+            >
+              <Search className="w-3.5 h-3.5" />
+              검색
+            </button>
+            <button
+              onClick={() => setShowBookmarks(true)}
+              className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="저장된 답변"
+            >
+              <Star className="w-3.5 h-3.5" />
+              북마크
+            </button>
+          </div>
+          {showSearch && (
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="대화 검색..."
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400"
+              autoFocus
+            />
+          )}
         </div>
         
         {/* 대화 목록 */}
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <div className="space-y-1">
-            {sortedSessions.map(session => (
+            {sortedSessions.filter(session => {
+              if (!searchQuery.trim()) return true;
+              const q = searchQuery.toLowerCase();
+              if (session.title.toLowerCase().includes(q)) return true;
+              return session.messages.some(m => (m.content as string)?.toLowerCase().includes(q));
+            }).map(session => (
               <div
                 key={session.id}
                 className={cn(
@@ -1732,18 +2014,32 @@ export const Chat: React.FC = () => {
                   : -1;
                 const hasDraftInMessages = shouldUseDraftSplit && draftIndex >= 0;
 
-                const renderMessage = (msg: any, msgIndex: number, overrideContent?: string) => (
+                const lastAssistantMsgId = [...messages].reverse().find(m => m.role === 'assistant')?.id;
+                const renderMessage = (msg: any, msgIndex: number, overrideContent?: string) => {
+                  // _streamingContent Map에서 스트리밍 중인 content 우선 사용
+                  const streamKey = currentSessionId ? `${currentSessionId}:${msg.id}` : null;
+                  const liveContent = streamKey ? streamingContent.get(streamKey) : undefined;
+                  const resolvedContent = overrideContent ?? liveContent ?? undefined;
+                  return (
                   <ChatMessageRow
                     key={msg.id}
                     msg={msg}
                     msgIndex={msgIndex}
-                    overrideContent={overrideContent}
+                    overrideContent={resolvedContent}
                     modelById={modelById}
                     formatMessage={formatMessage}
                     onDownloadImage={handleDownloadImage}
                     isStreaming={isLoading && msg.role === 'assistant' && !msg.content && msgIndex === messages.length - 1}
+                    isLastAssistant={msg.role === 'assistant' && msg.id === lastAssistantMsgId && !isLoading}
+                    isBookmarked={bookmarkedMessages.some(b => b.id === msg.id)}
+                    onBookmark={msg.role === 'assistant' ? handleBookmark : undefined}
+                    onTTS={msg.role === 'assistant' ? handleTTS : undefined}
+                    onRegenerate={msg.role === 'assistant' && msg.id === lastAssistantMsgId && !isLoading ? () => handleRegenerate() : undefined}
+                    availableModels={availableModels}
+                    onRegenerateWithModel={(modelId) => handleRegenerate(modelId)}
                   />
-                );
+                  );
+                };
 
                 if (!hasDraftInMessages) {
                   return <>{messages.map((msg, msgIndex) => renderMessage(msg, msgIndex))}</>;
@@ -1790,7 +2086,7 @@ export const Chat: React.FC = () => {
           <div className="p-4">
           <div className="max-w-3xl mx-auto">
             {/* 모델 선택 */}
-            <div className="mb-3">
+            <div className="mb-3 flex items-center gap-2 flex-wrap">
               <select
                 value={selectedModelId}
                 onChange={(e) => setSelectedModelId(e.target.value)}
@@ -1807,6 +2103,18 @@ export const Chat: React.FC = () => {
                 })}
               </select>
             </div>
+            {/* 스마트 라우터 */}
+            {message.trim().length > 0 && availableModels.length > 0 && (
+              <div className="mb-3">
+                <SmartRouterContent
+                  question={message}
+                  models={availableModels}
+                  speechLevel={speechLevel}
+                  language={language}
+                  compact
+                />
+              </div>
+            )}
 
 
             {/* 첨부 미리보기 */}
@@ -1895,7 +2203,7 @@ export const Chat: React.FC = () => {
                             </div>
                           </button>
 
-                          {/* 모델 비교 */}
+                          {/* 실시간 동시 비교 */}
                           <button
                             onClick={() => {
                               setShowComparison(true);
@@ -1907,10 +2215,65 @@ export const Chat: React.FC = () => {
                               <GitCompare className="w-5 h-5 text-purple-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">모델 비교</div>
-                              <div className="text-xs text-gray-500">여러 모델 동시 비교</div>
+                              <div className="text-sm font-semibold text-gray-900">동시 비교</div>
+                              <div className="text-xs text-gray-500">여러 AI에 동시 질문</div>
                             </div>
                           </button>
+
+                          {/* AI 체인 */}
+                          <button
+                            onClick={() => {
+                              setShowChainMode(true);
+                              setShowPlusMenu(false);
+                            }}
+                            className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                          >
+                            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                              <Link2 className="w-5 h-5 text-orange-700" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">AI 체인</div>
+                              <div className="text-xs text-gray-500">여러 AI가 순서대로 협업</div>
+                            </div>
+                          </button>
+
+                          {/* AI 토론 */}
+                          <button
+                            onClick={() => {
+                              setShowDebateMode(true);
+                              setShowPlusMenu(false);
+                            }}
+                            className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                          >
+                            <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                              <Swords className="w-5 h-5 text-red-700" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">AI 토론</div>
+                              <div className="text-xs text-gray-500">두 AI가 주제로 끝장 토론</div>
+                            </div>
+                          </button>
+
+                          {/* 내보내기 */}
+                          <div className="px-4 py-2 border-t border-gray-100 mt-1">
+                            <div className="text-xs text-gray-500 mb-1.5">대화 내보내기</div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => { handleExportChat('markdown'); setShowPlusMenu(false); }}
+                                className="flex-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                Markdown
+                              </button>
+                              <button
+                                onClick={() => { handleExportChat('txt'); setShowPlusMenu(false); }}
+                                className="flex-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                TXT
+                              </button>
+                            </div>
+                          </div>
 
                           {/* 페르소나 */}
                           <button
@@ -2025,7 +2388,16 @@ export const Chat: React.FC = () => {
 
                 {/* 전송 버튼 */}
                 <button
-                  onClick={handleSendMessage}
+                  onClick={() => {
+                    // 커스텀 소리 재생 (디자인하기에서 설정한 경우만)
+                    if (sendButtonSound && message.trim() && !isLoading && !streamingRef.current) {
+                      try {
+                        const audio = new Audio(sendButtonSound);
+                        audio.play().catch(() => {});
+                      } catch {}
+                    }
+                    handleSendMessage();
+                  }}
                   disabled={!message.trim() || isLoading || streamingRef.current || !selectedModelId || !!batchPendingMessageId}
                   className={cn(
                     "chat-send-button p-2 rounded-full transition-all",
@@ -2037,6 +2409,8 @@ export const Chat: React.FC = () => {
                 >
                   {isLoading || streamingRef.current ? (
                     <div className="w-5 h-5 border-2 border-t-gray-400 border-r-gray-400 border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                  ) : sendButtonSymbol ? (
+                    <span className="w-5 h-5 flex items-center justify-center text-base leading-none">{sendButtonSymbol}</span>
                   ) : (
                     <ChevronRight className="w-5 h-5" />
                   )}
@@ -2132,7 +2506,7 @@ export const Chat: React.FC = () => {
               </button>
             </div>
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-              <ModelComparisonContent />
+              <ModelComparisonContent availableModels={availableModels} walletCredits={walletCredits || {}} modelById={modelById} onClose={() => setShowComparison(false)} language={language} speechLevel={speechLevel} />
             </div>
           </div>
         </div>
@@ -2154,11 +2528,111 @@ export const Chat: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 북마크 모달 */}
+      {showBookmarks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowBookmarks(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Star className="w-5 h-5 text-yellow-400 fill-yellow-400" />
+                저장된 답변
+              </h2>
+              <button onClick={() => setShowBookmarks(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(80vh-80px)] p-4 space-y-3">
+              {bookmarkedMessages.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Star className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p>저장된 답변이 없습니다.</p>
+                  <p className="text-sm mt-1">AI 답변 아래 ⭐ 버튼을 클릭하면 여기에 저장됩니다.</p>
+                </div>
+              ) : bookmarkedMessages.map(bm => (
+                <div key={bm.id} className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 group">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="text-xs text-gray-500">
+                      {bm.sessionTitle && <span className="font-medium text-gray-700 dark:text-gray-300">{bm.sessionTitle} · </span>}
+                      {modelById.get(bm.modelId || '')?.displayName || 'AI'} · {new Date(bm.timestamp).toLocaleDateString()}
+                    </div>
+                    <button
+                      onClick={() => removeBookmark(bm.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-opacity"
+                      title="북마크 해제"
+                    >
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    </button>
+                  </div>
+                  <div className="text-sm text-gray-800 dark:text-gray-200 line-clamp-5 whitespace-pre-wrap">
+                    {stripSummaryBlock(bm.content).slice(0, 500)}{bm.content.length > 500 ? '...' : ''}
+                  </div>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(stripSummaryBlock(bm.content)); toast.success('복사했습니다!'); }}
+                    className="mt-2 text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />복사
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 체인 모달 */}
+      {showChainMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowChainMode(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Link2 className="w-5 h-5 text-orange-500" />
+                AI 체인 — 여러 AI가 순서대로 협업
+              </h2>
+              <button onClick={() => setShowChainMode(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <AiChainContent availableModels={availableModels} walletCredits={walletCredits || {}} modelById={modelById} onClose={() => setShowChainMode(false)} language={language} speechLevel={speechLevel} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 토론 모달 */}
+      {showDebateMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowDebateMode(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Swords className="w-5 h-5 text-red-500" />
+                AI 토론 — 두 AI가 끝장 토론
+              </h2>
+              <button onClick={() => setShowDebateMode(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <AiDebateContent availableModels={availableModels} walletCredits={walletCredits || {}} modelById={modelById} onClose={() => setShowDebateMode(false)} language={language} speechLevel={speechLevel} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // 템플릿 컴포넌트 임포트를 위한 래퍼
 const ChatTemplatesContent = dynamic(() => import('@/components/ChatTemplates').then(mod => ({ default: mod.ChatTemplates })), { ssr: false });
-const ModelComparisonContent = dynamic(() => import('@/components/ModelComparison').then(mod => ({ default: mod.ModelComparison })), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore – SideBySide is a dynamic component without static type declarations
+const ModelComparisonContent = dynamic(() => import('@/components/SideBySide').then((mod: any) => ({ default: mod.SideBySide })), { ssr: false }) as React.ComponentType<AiFeatureProps>;
 const PersonaSettingsContent = dynamic(() => import('@/components/PersonaSettings').then(mod => ({ default: mod.PersonaSettings })), { ssr: false });
+type AiFeatureProps = { availableModels: any[]; walletCredits: { [modelId: string]: number }; modelById: Map<string, any>; onClose?: () => void; language?: string; speechLevel?: string; };
+type SmartRouterProps = { question: string; models: any[]; speechLevel?: string; language?: string; compact?: boolean; };
+// @ts-ignore – AiChain is a dynamic component without static type declarations
+const AiChainContent = dynamic(() => import('@/components/AiChain').then((mod: any) => ({ default: mod.AiChain })), { ssr: false }) as React.ComponentType<AiFeatureProps>;
+// @ts-ignore – AiDebate is a dynamic component without static type declarations
+const AiDebateContent = dynamic(() => import('@/components/AiDebate').then((mod: any) => ({ default: mod.AiDebate })), { ssr: false }) as React.ComponentType<AiFeatureProps>;
+const SmartRouterContent = dynamic(() => import('@/components/SmartRouter').then(mod => ({ default: mod.SmartRouter })), { ssr: false }) as React.ComponentType<SmartRouterProps>;

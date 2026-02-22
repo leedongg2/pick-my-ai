@@ -480,6 +480,70 @@ export default function DocsPage() {
           </CardContent>
         </Card>
 
+        {/* AI 에러 보험 보장 배수 표 */}
+        <Card variant="elevated" className="mb-6 border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Shield className="w-6 h-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">AI 에러 보험 — 모델별 보장 배수</h2>
+            </div>
+            <p className="text-sm text-gray-600 mt-1">
+              에러 보험(500원) 구매 시 AI 응답 오류 발생 때 아래 배수만큼 크레딧을 환불해드립니다.
+              보험 미구매 시에도 에러 발생 시 <strong>기본 1크레딧은 무조건 환불</strong>됩니다.
+            </p>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="bg-blue-100">
+                    <th className="text-left p-3 font-semibold text-gray-800 border border-blue-200 rounded-tl-lg">모델</th>
+                    <th className="text-center p-3 font-semibold text-gray-800 border border-blue-200">단가 (원/크레딧)</th>
+                    <th className="text-center p-3 font-semibold text-gray-800 border border-blue-200">보험 보장 배수</th>
+                    <th className="text-center p-3 font-semibold text-gray-800 border border-blue-200 rounded-tr-lg">보험 없을 때</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { name: 'Perplexity Sonar', piWon: 1, multiplier: 500, special: true },
+                    { name: 'GPT-5', piWon: 7, multiplier: Math.floor(500/7)+1 },
+                    { name: 'GPT-4.1', piWon: 8, multiplier: Math.floor(500/8)+1 },
+                    { name: 'GPT-4o', piWon: 10, multiplier: Math.floor(500/10)+1 },
+                    { name: 'Claude Haiku 3.5', piWon: 5, multiplier: Math.floor(500/5)+1 },
+                    { name: 'Claude Haiku 4.5', piWon: 15, multiplier: Math.floor(500/15)+1 },
+                    { name: 'Perplexity Sonar Pro', piWon: 15, multiplier: Math.floor(500/15)+1 },
+                    { name: 'Claude Sonnet 4.5/4.6', piWon: 45, multiplier: Math.floor(500/45)+1 },
+                    { name: 'Claude Opus 4.5/4.6', piWon: 79, multiplier: Math.floor(500/79)+1 },
+                    { name: 'Claude Opus 4/4.1', piWon: 199, multiplier: Math.floor(500/199)+1 },
+                    { name: 'Gemini 3.0 Pro', piWon: 250, multiplier: Math.floor(500/250)+1 },
+                    { name: 'Grok 3', piWon: 39, multiplier: Math.floor(500/39)+1 },
+                    { name: 'o3', piWon: 48, multiplier: Math.floor(500/48)+1 },
+                  ].map((row, i) => (
+                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-blue-50/40'}>
+                      <td className="p-3 border border-blue-100 font-medium text-gray-800">
+                        {row.special && <span className="inline-block mr-1 text-yellow-500">⭐</span>}
+                        {row.name}
+                      </td>
+                      <td className="p-3 border border-blue-100 text-center text-gray-700">{row.piWon}원</td>
+                      <td className="p-3 border border-blue-100 text-center">
+                        <span className={`font-bold ${row.special ? 'text-yellow-600 text-base' : 'text-blue-700'}`}>
+                          {row.multiplier}배
+                        </span>
+                        {row.special && <span className="ml-1 text-xs text-yellow-500">(최대)</span>}
+                      </td>
+                      <td className="p-3 border border-blue-100 text-center text-gray-500">1크레딧</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              <strong>📌 계산 공식:</strong> 보장 배수 = floor(500 ÷ 단가) + 1배 &nbsp;|&nbsp;
+              Perplexity Sonar는 예외적으로 <strong>500배 고정</strong> 보장
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 하단 CTA */}
         <div className="mt-8 text-center space-y-4">
           <Button

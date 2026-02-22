@@ -141,24 +141,25 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
 async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
 
   const modelMap: { [key: string]: string } = {
-    // GPT 시리즈
-    'gpt5': 'gpt-5',
-    'gpt51': 'gpt-5.1',
-    'gpt52': 'gpt-5.2',
-    'gpt4o': 'gpt-4o',
-    'gpt41': 'gpt-4.1',
+    // GPT-4 시리즈 (실제 출시)
+    'gpt4o':     'gpt-4o',
+    'gpt41':     'gpt-4.1',
+    'gpt41mini': 'gpt-4.1-mini',
+    'gpt41nano': 'gpt-4.1-nano',
+    // GPT-5 시리즈 (실제 출시)
+    'gpt5':     'gpt-5',
+    'gpt51':    'gpt-5.1',
+    'gpt51chat':'gpt-5.1-chat-latest',
+    'gpt52':    'gpt-5.2',
+    'gpt52chat':'gpt-5.2-chat-latest',
+    'gpt52pro': 'gpt-5.2-pro',
     // OpenAI o 시리즈
-    'o3': 'o3',
+    'o3':     'o3',
     'o3mini': 'o3-mini',
     'o4mini': 'o4-mini',
-    // 코딩 모델
-    'gpt5codex': 'gpt-5-codex',
-    'gpt51codex': 'gpt-5.1-codex',
-    'gpt51codexmax': 'gpt-5.1-codex',
-    'gpt52codex': 'gpt-5.2-codex',
     // 이미지 모델
     'gptimage1': 'gpt-image-1',
-    'dalle3': 'dall-e-3',
+    'dalle3':    'dall-e-3',
   };
 
   // If there are image attachments, convert the LAST user message content to a multimodal array
@@ -546,18 +547,22 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   }
 
   const modelMap: { [key: string]: string } = {
-    'haiku35': 'claude-3-5-haiku-20241022',
-    'haiku45': 'claude-3-5-haiku-20241022',
-    'sonnet45': 'claude-3-5-sonnet-20241022',
-    'sonnet46': 'claude-3-5-sonnet-20241022',
-    'opus4': 'claude-opus-4-20250514',
-    'opus41': 'claude-opus-4.1-20241022',
-    'opus45': 'claude-opus-4.1-20241022',
-    'opus46': 'claude-opus-4.6-20250514',
+    // Claude 3.5 시리즈 (실제 출시)
+    'haiku35':  'claude-3-5-haiku-20241022',
+    'sonnet35': 'claude-3-5-sonnet-20241022',
+    // Claude 4.5 시리즈 (실제 출시)
+    'haiku45':  'claude-haiku-4-5',
+    'sonnet45': 'claude-sonnet-4-5',
+    'opus45':   'claude-opus-4-5',
+    // Claude 4.6 시리즈 (실제 출시)
+    'sonnet46': 'claude-sonnet-4-6',
+    'opus46':   'claude-opus-4-6',
+    // Claude Opus 4 (실제 출시)
+    'opus4':    'claude-opus-4-20250514',
     // 레거시 매핑
-    'claude-haiku': 'claude-3-haiku-20240307',
+    'claude-haiku':  'claude-3-haiku-20240307',
     'claude-sonnet': 'claude-3-5-sonnet-20241022',
-    'claude-opus': 'claude-3-opus-20240229',
+    'claude-opus':   'claude-3-opus-20240229',
   };
 
   // Anthropic 형식으로 변환 (system 메시지 분리)
@@ -1115,13 +1120,33 @@ Example style:
       );
     }
 
-    // 각 메시지 내용 길이 제한
+    // 각 메시지 내용 길이 제한 + 비정상 role 차단
     for (const msg of messages) {
+      if (!msg || !['user', 'assistant', 'system'].includes(msg.role)) {
+        return NextResponse.json({ error: 'Invalid message role.' }, { status: 400 });
+      }
       if (typeof msg.content === 'string' && msg.content.length > 50000) {
         return NextResponse.json(
           { error: 'Message too long.' },
           { status: 400 }
         );
+      }
+    }
+
+    // 마지막 사용자 메시지 검증 (고의 에러 방지)
+    const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+    if (lastUserMsg) {
+      const content = typeof lastUserMsg.content === 'string' ? lastUserMsg.content.trim() : '';
+      // 빈 메시지 차단
+      if (!content && !Array.isArray(lastUserMsg.content)) {
+        return NextResponse.json({ error: 'Empty message.' }, { status: 400 });
+      }
+      // 반복 문자 스팸 차단 (같은 문자가 200자 이상 반복)
+      if (content.length > 200) {
+        const uniqueChars = new Set(content.replace(/\s/g, '')).size;
+        if (uniqueChars <= 2) {
+          return NextResponse.json({ error: 'Spam message detected.' }, { status: 400 });
+        }
       }
     }
 
@@ -1150,7 +1175,7 @@ Example style:
     }
 
     // 모델 제공사 판별
-    const ANTHROPIC_MODEL_IDS = new Set(['haiku35', 'haiku45', 'sonnet45', 'opus4', 'opus41', 'opus45', 'opus46']);
+    const ANTHROPIC_MODEL_IDS = new Set(['haiku35', 'sonnet35', 'haiku45', 'sonnet45', 'opus45', 'sonnet46', 'opus46', 'opus4']);
     const PERPLEXITY_MODEL_IDS = new Set(['sonar', 'sonarPro', 'deepResearch']);
     const IMAGE_MODEL_IDS = new Set(['gptimage1', 'dalle3']);
     const CODEX_MODEL_IDS = new Set(['codex']);
@@ -1174,16 +1199,14 @@ Example style:
       return NextResponse.json({ content: videoResult });
     }
 
-    const isOpenAIModel = !isGrokModel && (modelId.startsWith('gpt') || modelId.endsWith('codex')
+    const isOpenAIModel = !isGrokModel && (
+      modelId.startsWith('gpt')
       || IMAGE_MODEL_IDS.has(modelId)
       || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
-      || CODEX_MODEL_IDS.has(modelId));
+    );
     
-    // GPT 스트리밍 가능 모델 (이미지/Codex 제외)
-    const isStreamableGPT = isOpenAIModel
-      && !modelId.endsWith('codex')
-      && !CODEX_MODEL_IDS.has(modelId)
-      && !IMAGE_MODEL_IDS.has(modelId);
+    // GPT 스트리밍 가능 모델 (이미지 제외)
+    const isStreamableGPT = isOpenAIModel && !IMAGE_MODEL_IDS.has(modelId);
 
     // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
     if (isStreamableGPT && OPENAI_STREAMING_ALLOWED) {
@@ -1221,8 +1244,10 @@ Example style:
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-store',
           'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+          'X-Content-Type-Options': 'nosniff',
         },
       });
     }
@@ -1257,24 +1282,27 @@ Example style:
         responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
       }
 
-      // 2) 응답을 SSE 청크로 나눠서 스트리밍 (pseudo-streaming)
-      const CHUNK_SIZE = 4; // 한 번에 4글자씩 전송
+      // 2) pseudo-streaming: 가변 청크 크기로 타이핑 효과 극대화
+      // - 초반(0~200자): 작은 청크(4자) → 빠른 첫 글자 체감
+      // - 중반(200~1000자): 중간 청크(12자)
+      // - 후반(1000자~): 큰 청크(40자) → 빠른 완료
+      const encoder = new TextEncoder();
+      const sseChunks: Uint8Array[] = [];
+      for (let i = 0; i < responseContent.length; ) {
+        const chunkSize = i < 200 ? 4 : i < 1000 ? 12 : 40;
+        const chunk = responseContent.slice(i, i + chunkSize);
+        sseChunks.push(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`));
+        i += chunkSize;
+      }
+      sseChunks.push(encoder.encode('data: [DONE]\n\n'));
+
       const stream = new ReadableStream({
-        async start(ctrl) {
-          const encoder = new TextEncoder();
+        start(ctrl) {
           try {
-            for (let i = 0; i < responseContent.length; i += CHUNK_SIZE) {
-              const chunk = responseContent.slice(i, i + CHUNK_SIZE);
-              const sseData = `data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`;
-              ctrl.enqueue(encoder.encode(sseData));
-              // 아주 짧은 딜레이로 브라우저가 청크를 인식하게 함
-              await new Promise(r => setTimeout(r, 0));
-            }
-            ctrl.enqueue(encoder.encode('data: [DONE]\n\n'));
+            for (const chunk of sseChunks) ctrl.enqueue(chunk);
             ctrl.close();
           } catch (err: any) {
-            const errCode = 'ERR_STREAM';
-            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errCode })}\n\ndata: [DONE]\n\n`));
+            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'ERR_STREAM' })}\n\ndata: [DONE]\n\n`));
             ctrl.close();
           }
         }
@@ -1283,8 +1311,11 @@ Example style:
       return new Response(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-store',
           'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+          'X-Content-Type-Options': 'nosniff',
+          'Transfer-Encoding': 'chunked',
         },
       });
     }

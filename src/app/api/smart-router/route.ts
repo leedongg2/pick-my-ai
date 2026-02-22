@@ -1,0 +1,64 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const { question, models, speechLevel, language, premium } = await req.json();
+
+    if (!question?.trim()) {
+      return NextResponse.json({ error: '질문이 없습니다.' }, { status: 400 });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: 'API 키가 없습니다.' }, { status: 500 });
+    }
+
+    const modelList = (models || []).map((m: any) => `- ${m.id}: ${m.displayName} (${m.description || ''})`).join('\n');
+    const tone = speechLevel === 'informal' ? '반말로 짧게' : '존댓말로 짧게';
+
+    let systemPrompt: string;
+    let userPrompt: string;
+
+    if (premium) {
+      // 프리미엄: 5위까지 순위와 이유
+      systemPrompt = `당신은 AI 모델 추천 전문가입니다. 사용자의 질문을 분석해서 가장 적합한 AI 모델을 순위별로 추천해주세요.`;
+      userPrompt = `사용 가능한 AI 모델 목록:\n${modelList}\n\n사용자 질문: "${question}"\n\n위 질문에 가장 적합한 모델을 1위부터 5위까지 ${tone} 추천해주세요. 각 모델마다 모델명과 한 줄 이유를 포함하세요. 없는 모델은 제외하세요.`;
+    } else {
+      // 일반: 1줄 추천
+      systemPrompt = `당신은 AI 모델 추천 전문가입니다. 사용자의 질문에 가장 적합한 AI 모델을 1줄로 추천해주세요.`;
+      userPrompt = `사용 가능한 AI 모델 목록:\n${modelList}\n\n사용자 질문: "${question}"\n\n${tone} 어떤 모델이 가장 좋을지 1줄로만 말해주세요. 반드시 실제 모델명을 포함하세요.`;
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-nano',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: premium ? 400 : 80,
+        temperature: 0.3,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      return NextResponse.json({ error: `OpenAI 오류: ${err}` }, { status: 500 });
+    }
+
+    const data = await response.json();
+    const recommendation = data.choices?.[0]?.message?.content?.trim() || '추천을 가져올 수 없습니다.';
+
+    return NextResponse.json({ recommendation });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || '오류가 발생했습니다.' }, { status: 500 });
+  }
+}

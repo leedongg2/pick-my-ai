@@ -37,8 +37,13 @@ const nextConfig = {
       'zustand',
       'sonner',
       '@supabase/supabase-js',
+      'react-markdown',
+      'date-fns',
     ],
   },
+
+  // HTTP/2 서버 푸시 힌트
+  poweredByHeader: false,
 
   // 서버 컴포넌트 외부 패키지
   serverExternalPackages: ['@supabase/supabase-js'],
@@ -64,6 +69,33 @@ const nextConfig = {
 
   async headers() {
     return [
+      {
+        // 정적 자산 장기 캐시 (JS/CSS/이미지)
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        // 폰트 캐시
+        source: '/fonts/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        // API 응답 캐시 방지 (항상 최신)
+        source: '/api/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
+        ],
+      },
       {
         source: '/:path*',
         headers: [

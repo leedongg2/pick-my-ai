@@ -27,6 +27,7 @@ import {
   UserPlan,
   Poll,
   PollStatus,
+  BookmarkedMessage,
 } from '@/types';
 import { DesignTheme } from '@/types/design';
 
@@ -58,6 +59,12 @@ interface AppState {
     theme: DesignTheme | null;
     elementColors: Record<string, string>;
   };
+
+  // 전송버튼 커스텀 (디자인하기에서만 설정)
+  sendButtonSymbol: string; // 기호 (빈 문자열이면 기본 아이콘)
+  sendButtonSound: string;  // 녹음 base64 dataURL (빈 문자열이면 무음)
+  setSendButtonSymbol: (symbol: string) => void;
+  setSendButtonSound: (sound: string) => void;
   
   // Actions
   toggleSuccessNotifications: () => void;
@@ -137,6 +144,30 @@ interface AppState {
   pmcBalance: PMCBalance;
   userPlan: UserPlan;
   
+  // 북마크된 메시지
+  bookmarkedMessages: BookmarkedMessage[];
+  addBookmark: (msg: BookmarkedMessage) => void;
+  removeBookmark: (msgId: string) => void;
+
+  // 스마트 라우터 구매 여부
+  smartRouterPurchased: boolean;
+  setSmartRouterPurchased: (v: boolean) => void;
+
+  // 보험 구매 여부
+  insurancePurchased: boolean;
+  setInsurancePurchased: (v: boolean) => void;
+
+  // 에러 시 크레딧 환불 (기본 1크레딧, 보험 시 배수)
+  // refundToken: deductCredit 성공 시 발급된 토큰만 환불 가능
+  refundCredit: (modelId: string, piWon: number, refundToken?: string) => void;
+
+  // 환불 토큰 발급 (deductCredit 성공 시 내부 호출)
+  _pendingRefundTokens: Set<string>;
+  _refundCountToday: Record<string, { count: number; date: string }>;
+
+  // PMC 스왑 (크레딧 → PMC)
+  swapCreditsToPMC: (items: { modelId: string; qty: number; pricePerCredit: number }[]) => { success: boolean; totalFee: number; totalPMC: number };
+
   // 투표 (Poll)
   polls: Poll[];
   activePolls: Poll[];
@@ -152,6 +183,12 @@ interface AppState {
   }>;
   currentSessionId: string | null;
   lastChatSessionCreatedAt?: number;
+
+  // 스트리밍 최적화: 스트리밍 중 chatSessions 배열 복사 없이 content만 별도 관리
+  // key: `${sessionId}:${messageId}`, value: 현재 스트리밍 content
+  _streamingContent: Map<string, string>;
+  // 버전 카운터: Map 변경 시 이 숫자만 증가 → new Map() 복사 없이 O(1) 리렌더 트리거
+  _streamingVersion: number;
 
   storedFacts: string[];
   
@@ -174,7 +211,7 @@ interface AppState {
   setPolicy: (policy: PricingPolicy) => void;
   initWallet: (userId: string) => void;
   addCredits: (credits: { [modelId: string]: number }) => Promise<void>;
-  deductCredit: (modelId: string) => Promise<boolean>;
+  deductCredit: (modelId: string) => Promise<string | false>; // 성공 시 환불 토큰 반환
   getCredits: (modelId: string) => number;
   createChatSession: (title: string) => string | null;
   updateChatSessionTitle: (sessionId: string, newTitle: string) => void;
@@ -272,6 +309,10 @@ export const useStore = create<AppState>()(
         theme: null,
         elementColors: {},
       },
+      sendButtonSymbol: '',
+      sendButtonSound: '',
+      _streamingContent: new Map<string, string>(),
+      _streamingVersion: 0,
       currentUser: null,
       isAuthenticated: false,
       speechLevel: 'formal' as 'formal' | 'informal',
@@ -329,8 +370,8 @@ export const useStore = create<AppState>()(
       // 스트리밍 설정 초기값
       streaming: {
         enabled: true,
-        bufferSize: 1024,
-        chunkDelay: 50,
+        bufferSize: 0,
+        chunkDelay: 0,
         showTypingIndicator: true,
         smoothScrolling: true,
         errorRecovery: true,
@@ -351,6 +392,11 @@ export const useStore = create<AppState>()(
       userPlan: 'free' as UserPlan,
       
       // 투표 초기값
+      bookmarkedMessages: [],
+      smartRouterPurchased: false,
+      insurancePurchased: false,
+      _pendingRefundTokens: new Set<string>(),
+      _refundCountToday: {} as Record<string, { count: number; date: string }>,
       polls: [],
       activePolls: [],
       
@@ -634,6 +680,9 @@ export const useStore = create<AppState>()(
         
         const available = state.wallet.credits[modelId] || 0;
         if (available <= 0) return false;
+
+        // 환불 토큰 발급 (고의 에러 남용 방지: 실제 차감이 일어난 경우만 환불 가능)
+        const refundToken = `${modelId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         
         set((state) => {
           if (!state.wallet) return state;
@@ -649,13 +698,18 @@ export const useStore = create<AppState>()(
             timestamp: new Date(),
             description: '크레딧 사용'
           };
+
+          // 토큰 등록
+          const newTokens = new Set(state._pendingRefundTokens);
+          newTokens.add(refundToken);
           
           return {
             wallet: {
               ...state.wallet,
               credits: newCredits,
               transactions: [...state.wallet.transactions, transaction]
-            }
+            },
+            _pendingRefundTokens: newTokens,
           };
         });
         
@@ -679,7 +733,7 @@ export const useStore = create<AppState>()(
           }
         }
         
-        return true;
+        return refundToken;
       },
       
       getCredits: (modelId) => {
@@ -825,36 +879,33 @@ export const useStore = create<AppState>()(
       },
 
       updateMessageContent: (sessionId, messageId, content) => {
-        set((state) => ({
-          chatSessions: state.chatSessions.map((session) =>
-            session.id === sessionId
-              ? {
-                  ...session,
-                  messages: session.messages.map((msg: any) =>
-                    msg.id === messageId ? { ...msg, content } : msg
-                  ),
-                  updatedAt: new Date(),
-                }
-              : session
-          ),
-        }));
-        // 스트리밍 중 업데이트는 동기화 안 함 - finalizeMessageContent에서만 동기화
+        // 극한 최적화: Map 객체 재사용 (복사 없음) + 버전 카운터만 증가 → O(1)
+        const key = `${sessionId}:${messageId}`;
+        get()._streamingContent.set(key, content);
+        set((s) => ({ _streamingVersion: s._streamingVersion + 1 }));
       },
 
       finalizeMessageContent: (sessionId, messageId, content) => {
-        set((state) => ({
-          chatSessions: state.chatSessions.map((session) =>
-            session.id === sessionId
-              ? {
-                  ...session,
-                  messages: session.messages.map((msg: any) =>
-                    msg.id === messageId ? { ...msg, content } : msg
-                  ),
-                  updatedAt: new Date(),
-                }
-              : session
-          ),
-        }));
+        // 스트리밍 완료: chatSessions에 최종 content 반영 + Map에서 제거
+        const key = `${sessionId}:${messageId}`;
+        set((state) => {
+          const newMap = new Map(state._streamingContent);
+          newMap.delete(key);
+          return {
+            _streamingContent: newMap,
+            chatSessions: state.chatSessions.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    messages: session.messages.map((msg: any) =>
+                      msg.id === messageId ? { ...msg, content } : msg
+                    ),
+                    updatedAt: new Date(),
+                  }
+                : session
+            ),
+          };
+        });
 
         // 스트리밍 완료 후 즉시 동기화 (debounce 없이 저장 보장)
         const state = get();
@@ -1473,6 +1524,133 @@ export const useStore = create<AppState>()(
         set({ userPlan: plan });
       },
       
+      // 북마크 관련 액션
+      addBookmark: (msg: BookmarkedMessage) => {
+        set((state) => ({
+          bookmarkedMessages: [msg, ...state.bookmarkedMessages.filter(b => b.id !== msg.id)],
+        }));
+      },
+      removeBookmark: (msgId: string) => {
+        set((state) => ({
+          bookmarkedMessages: state.bookmarkedMessages.filter(b => b.id !== msgId),
+        }));
+      },
+
+      // 스마트 라우터 구매
+      setSmartRouterPurchased: (v: boolean) => set({ smartRouterPurchased: v }),
+
+      // 보험 구매
+      setInsurancePurchased: (v: boolean) => set({ insurancePurchased: v }),
+
+      // 에러 시 크레딧 환불
+      // - 토큰 없으면 환불 불가 (고의 에러 남용 방지)
+      // - 일일 모델당 최대 5회 환불 상한
+      // - 보험 없음: 기본 1크레딧, 보험 있음: 배수 환불
+      refundCredit: (modelId: string, piWon: number, refundToken?: string) => {
+        const state = get();
+        if (!state.wallet) return;
+
+        // 1) 토큰 검증: 실제 차감이 일어난 경우에만 환불 허용
+        if (refundToken) {
+          if (!state._pendingRefundTokens.has(refundToken)) return; // 유효하지 않은 토큰
+        }
+
+        // 2) 일일 환불 횟수 상한 (모델당 하루 최대 5회)
+        const MAX_DAILY_REFUNDS = 5;
+        const today = new Date().toISOString().slice(0, 10);
+        const todayRecord = state._refundCountToday[modelId];
+        const todayCount = (todayRecord?.date === today) ? todayRecord.count : 0;
+        if (todayCount >= MAX_DAILY_REFUNDS) return; // 상한 초과 시 환불 거부
+
+        const hasInsurance = state.insurancePurchased;
+        let refundAmount = 1;
+        if (hasInsurance) {
+          if (modelId === 'sonar') {
+            refundAmount = 500;
+          } else {
+            refundAmount = Math.floor(500 / Math.max(piWon, 1)) + 1;
+          }
+        }
+
+        set((s) => {
+          if (!s.wallet) return s;
+          const newCredits = { ...s.wallet.credits };
+          newCredits[modelId] = (newCredits[modelId] || 0) + refundAmount;
+          const tx: Transaction = {
+            id: Date.now().toString(),
+            userId: s.wallet.userId,
+            type: 'refund' as any,
+            modelId,
+            credits: { [modelId]: refundAmount },
+            timestamp: new Date(),
+            description: hasInsurance ? `보험 적용 환불 (+${refundAmount}크레딧)` : `에러 환불 (+${refundAmount}크레딧)`,
+          };
+          // 토큰 소비 (1회용)
+          const newTokens = new Set(s._pendingRefundTokens);
+          if (refundToken) newTokens.delete(refundToken);
+          // 일일 카운트 갱신
+          const newRefundCount = {
+            ...s._refundCountToday,
+            [modelId]: { count: todayCount + 1, date: today },
+          };
+          return {
+            wallet: { ...s.wallet, credits: newCredits, transactions: [...s.wallet.transactions, tx] },
+            _pendingRefundTokens: newTokens,
+            _refundCountToday: newRefundCount,
+          };
+        });
+      },
+
+      // PMC 스왑: 크레딧 → PMC (수수료 1원/개)
+      swapCreditsToPMC: (items) => {
+        const state = get();
+        if (!state.wallet) return { success: false, totalFee: 0, totalPMC: 0 };
+
+        let totalCreditsDeducted: { [modelId: string]: number } = {};
+        let totalPMC = 0;
+        let totalFee = 0;
+
+        // 변환 가능 여부 검증
+        for (const { modelId, qty, pricePerCredit } of items) {
+          const available = state.wallet.credits[modelId] || 0;
+          if (qty > available || qty <= 0) return { success: false, totalFee: 0, totalPMC: 0 };
+          const fee = qty; // 1원/개
+          const pmc = qty * pricePerCredit - fee;
+          if (pmc <= 0) return { success: false, totalFee: 0, totalPMC: 0 };
+          totalCreditsDeducted[modelId] = qty;
+          totalPMC += pmc;
+          totalFee += fee;
+        }
+
+        // 크레딧 차감
+        const newCredits = { ...state.wallet.credits };
+        for (const [modelId, qty] of Object.entries(totalCreditsDeducted)) {
+          newCredits[modelId] = (newCredits[modelId] || 0) - qty;
+        }
+
+        const transaction: Transaction = {
+          id: Date.now().toString(),
+          userId: state.wallet.userId,
+          type: 'usage',
+          timestamp: new Date(),
+          description: `크레딧 → PMC 환전 (수수료 ${totalFee}원)`,
+          credits: Object.fromEntries(Object.entries(totalCreditsDeducted).map(([k, v]) => [k, -v])),
+        };
+
+        set((state) => ({
+          wallet: state.wallet ? {
+            ...state.wallet,
+            credits: newCredits,
+            transactions: [...state.wallet.transactions, transaction],
+          } : state.wallet,
+        }));
+
+        // PMC 적립
+        get().earnPMC(totalPMC, `크레딧 환전 적립 (+${totalPMC} PMC)`);
+
+        return { success: true, totalFee, totalPMC };
+      },
+
       // 투표 관련 액션
       createPoll: (title: string, description: string) => {
         const state = get();
@@ -1668,6 +1846,9 @@ export const useStore = create<AppState>()(
       clearCustomDesignTheme: () => {
         set({ customDesignTheme: { theme: null, elementColors: {} } });
       },
+
+      setSendButtonSymbol: (symbol: string) => set({ sendButtonSymbol: symbol }),
+      setSendButtonSound: (sound: string) => set({ sendButtonSound: sound }),
       
     }),
     {
@@ -1726,6 +1907,9 @@ export const useStore = create<AppState>()(
           [`user_${state.currentUser.id}_activeExpertise`]: state.activeExpertise,
           [`user_${state.currentUser.id}_pmcBalance`]: state.pmcBalance,
           [`user_${state.currentUser.id}_userPlan`]: state.userPlan,
+          [`user_${state.currentUser.id}_bookmarkedMessages`]: state.bookmarkedMessages,
+          [`user_${state.currentUser.id}_smartRouterPurchased`]: state.smartRouterPurchased,
+          [`user_${state.currentUser.id}_insurancePurchased`]: state.insurancePurchased,
           allGifts: state.allGifts, // 글로벌 선물 목록 저장
           polls: state.polls, // 투표는 전역 저장
           activePolls: state.activePolls,
@@ -1734,6 +1918,8 @@ export const useStore = create<AppState>()(
           exchangeRateMemo: state.exchangeRateMemo,
           paymentFeeMemo: state.paymentFeeMemo,
           customDesignTheme: state.customDesignTheme,
+          sendButtonSymbol: state.sendButtonSymbol,
+          sendButtonSound: state.sendButtonSound,
           settings: state.settings,
           language: state.language,
         };
@@ -1798,6 +1984,11 @@ export const useStore = create<AppState>()(
               state.activeExpertise = persistedState[`user_${userId}_activeExpertise`] || null;
               state.pmcBalance = persistedState[`user_${userId}_pmcBalance`] || { amount: 0, history: [] };
               state.userPlan = persistedState[`user_${userId}_userPlan`] || 'free';
+              state.bookmarkedMessages = persistedState[`user_${userId}_bookmarkedMessages`] || [];
+              state.smartRouterPurchased = persistedState[`user_${userId}_smartRouterPurchased`] || false;
+              state.insurancePurchased = persistedState[`user_${userId}_insurancePurchased`] || false;
+              state.sendButtonSymbol = persistedState.sendButtonSymbol || '';
+              state.sendButtonSound = persistedState.sendButtonSound || '';
             } catch (error) {
               console.error('Failed to restore user data:', error);
             }

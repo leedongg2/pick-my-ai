@@ -3,12 +3,14 @@
 import React, { memo } from 'react';
 import { DesignElement, DesignTheme } from '@/types/design';
 import { MessageSquare, Home, LayoutDashboard, Settings, Send, Plus, CreditCard, Zap, BarChart3, Clock } from 'lucide-react';
+import { useStore } from '@/store';
 
 interface LightweightPreviewProps {
   currentPage: 'chat' | 'dashboard' | 'settings';
   theme: DesignTheme;
   elementColors: Record<string, string>;
   onElementClick: (element: DesignElement) => void;
+  onSendButtonCustomize?: () => void;
 }
 
 const PreviewHeader = memo(({ 
@@ -73,12 +75,15 @@ PreviewHeader.displayName = 'PreviewHeader';
 const ChatPreview = memo(({ 
   theme, 
   elementColors, 
-  onElementClick 
+  onElementClick,
+  onSendButtonCustomize,
 }: { 
   theme: DesignTheme; 
   elementColors: Record<string, string>; 
   onElementClick: (element: DesignElement) => void;
+  onSendButtonCustomize?: () => void;
 }) => {
+  const { sendButtonSymbol } = useStore();
   const sidebarBg = elementColors['chat-list-card'] || theme.cardColor || '#f9fafb';
   const messageBg = elementColors['chat-message-card'] || theme.cardColor || '#ffffff';
   const inputCardBg = elementColors['chat-input-card'] || theme.cardColor || '#ffffff';
@@ -190,21 +195,38 @@ const ChatPreview = memo(({
               readOnly
             />
             <button 
-              className="p-2 rounded-full text-white cursor-pointer"
+              className="p-2 rounded-full text-white cursor-pointer relative group"
               style={{ backgroundColor: sendButtonBg }}
               onClick={(e) => {
                 e.stopPropagation();
-                onElementClick({
-                  id: 'chat-send-button',
-                  type: 'button',
-                  label: '전송 버튼',
-                  selector: '.chat-send-button',
-                  currentColor: sendButtonBg,
-                  scope: 'element',
-                });
+                if (onSendButtonCustomize) {
+                  onSendButtonCustomize();
+                } else {
+                  onElementClick({
+                    id: 'chat-send-button',
+                    type: 'button',
+                    label: '전송 버튼',
+                    selector: '.chat-send-button',
+                    currentColor: sendButtonBg,
+                    scope: 'element',
+                  });
+                }
+              }}
+              title="클릭: 색상 변경 | 우클릭: 기호·소리 설정"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (onSendButtonCustomize) onSendButtonCustomize();
               }}
             >
-              <Send className="w-4 h-4" />
+              {sendButtonSymbol ? (
+                <span className="text-sm leading-none">{sendButtonSymbol}</span>
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                기호·소리 설정
+              </span>
             </button>
           </div>
         </div>
@@ -434,6 +456,7 @@ export const LightweightPreview: React.FC<LightweightPreviewProps> = memo(({
   theme,
   elementColors,
   onElementClick,
+  onSendButtonCustomize,
 }) => {
   const bgColor = elementColors['background'] || theme.backgroundColor || '#ffffff';
 
@@ -456,8 +479,9 @@ export const LightweightPreview: React.FC<LightweightPreviewProps> = memo(({
     >
       <PreviewHeader theme={theme} elementColors={elementColors} onElementClick={onElementClick} />
       
+      
       {currentPage === 'chat' && (
-        <ChatPreview theme={theme} elementColors={elementColors} onElementClick={onElementClick} />
+        <ChatPreview theme={theme} elementColors={elementColors} onElementClick={onElementClick} onSendButtonCustomize={onSendButtonCustomize} />
       )}
       {currentPage === 'dashboard' && (
         <DashboardPreview theme={theme} elementColors={elementColors} onElementClick={onElementClick} />

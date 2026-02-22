@@ -342,6 +342,16 @@ export interface PMCCalculation {
   maxUsable: number; // 사용 가능한 최대 PMC (결제금액의 30%)
 }
 
+// 북마크 메시지 타입
+export interface BookmarkedMessage {
+  id: string;
+  sessionId: string;
+  content: string;
+  modelId?: string;
+  timestamp: string;
+  sessionTitle?: string;
+}
+
 // Poll (투표) 관련 타입
 export type PollStatus = 'active' | 'closed' | 'expired';
 
