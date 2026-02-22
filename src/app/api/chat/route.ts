@@ -21,8 +21,8 @@ const DEBUG_LOGS = process.env.DEBUG_API_LOGS === 'true';
 // Netlify 무료 플랜: 함수 타임아웃 10초 → API 호출은 8초 이내 완료 필요
 // Netlify Pro 플랜: 함수 타임아웃 26초 → API 호출은 24초 이내
 const NETLIFY_FUNCTION_TIMEOUT = Number(process.env.NETLIFY_FUNCTION_TIMEOUT_MS) || 10000;
-const DEFAULT_API_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 2000, 5000) : 60000);
-const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 3000, 4000) : 30000);
+const DEFAULT_API_TIMEOUT_MS = Number(process.env.AI_API_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 2000, 5000) : 120000);
+const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_MS) || (isNetlify ? Math.max(NETLIFY_FUNCTION_TIMEOUT - 3000, 4000) : 60000);
 // Netlify에서는 재시도 시간이 부족하므로 0회, 로컬에서는 2회
 const DEFAULT_API_RETRIES = process.env.AI_API_MAX_RETRIES != null ? Number(process.env.AI_API_MAX_RETRIES) : (isNetlify ? 0 : 2);
 const DEFAULT_RETRY_DELAY_MS = Number(process.env.AI_API_RETRY_DELAY_MS) || 800;

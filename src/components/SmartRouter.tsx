@@ -14,7 +14,7 @@ type Props = {
 };
 
 export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, language, compact }) => {
-  const { smartRouterPurchased } = useStore();
+  const { smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed } = useStore();
   const [recommendation, setRecommendation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
@@ -23,6 +23,12 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
     if (!question.trim()) return;
     setLoading(true);
     setIsPremium(premium);
+    
+    // 프리미엄 최초 1회 무료 사용 처리
+    if (premium && !smartRouterPurchased && !smartRouterFreeUsed) {
+      setSmartRouterFreeUsed(true);
+    }
+    
     try {
       const res = await fetch('/api/smart-router', {
         method: 'POST',
@@ -62,7 +68,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
           질문 분석하기
         </button>
 
-        {smartRouterPurchased ? (
+        {smartRouterPurchased || !smartRouterFreeUsed ? (
           <button
             onClick={() => handleAnalyze(true)}
             disabled={loading}
@@ -72,7 +78,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
             )}
           >
             {loading && isPremium ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-            5위 상세 분석
+            5위 상세 분석{!smartRouterPurchased && !smartRouterFreeUsed ? ' (최초 1회 무료)' : ''}
           </button>
         ) : (
           <span className="flex items-center gap-1 text-xs text-gray-500">

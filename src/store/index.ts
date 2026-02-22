@@ -151,10 +151,13 @@ interface AppState {
 
   // 스마트 라우터 구매 여부
   smartRouterPurchased: boolean;
+  smartRouterFreeUsed: boolean;
   setSmartRouterPurchased: (v: boolean) => void;
+  setSmartRouterFreeUsed: (v: boolean) => void;
 
   // 보험 구매 여부
   insurancePurchased: boolean;
+  insurancePurchaseDate: string | null;
   setInsurancePurchased: (v: boolean) => void;
 
   // 에러 시 크레딧 환불 (기본 1크레딧, 보험 시 배수)
@@ -394,7 +397,9 @@ export const useStore = create<AppState>()(
       // 투표 초기값
       bookmarkedMessages: [],
       smartRouterPurchased: false,
+      smartRouterFreeUsed: false,
       insurancePurchased: false,
+      insurancePurchaseDate: null,
       _pendingRefundTokens: new Set<string>(),
       _refundCountToday: {} as Record<string, { count: number; date: string }>,
       polls: [],
@@ -1538,9 +1543,13 @@ export const useStore = create<AppState>()(
 
       // 스마트 라우터 구매
       setSmartRouterPurchased: (v: boolean) => set({ smartRouterPurchased: v }),
+      setSmartRouterFreeUsed: (v: boolean) => set({ smartRouterFreeUsed: v }),
 
       // 보험 구매
-      setInsurancePurchased: (v: boolean) => set({ insurancePurchased: v }),
+      setInsurancePurchased: (v: boolean) => set((state) => ({
+        insurancePurchased: v,
+        insurancePurchaseDate: v ? new Date().toISOString() : state.insurancePurchaseDate,
+      })),
 
       // 에러 시 크레딧 환불
       // - 토큰 없으면 환불 불가 (고의 에러 남용 방지)
@@ -1562,7 +1571,16 @@ export const useStore = create<AppState>()(
         const todayCount = (todayRecord?.date === today) ? todayRecord.count : 0;
         if (todayCount >= MAX_DAILY_REFUNDS) return; // 상한 초과 시 환불 거부
 
-        const hasInsurance = state.insurancePurchased;
+        // 보험 유효기간 확인 (90일)
+        let hasInsurance = state.insurancePurchased;
+        if (hasInsurance && state.insurancePurchaseDate) {
+          const purchaseDate = new Date(state.insurancePurchaseDate);
+          const now = new Date();
+          const daysDiff = Math.floor((now.getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (daysDiff > 90) {
+            hasInsurance = false;
+          }
+        }
         let refundAmount = 1;
         if (hasInsurance) {
           if (modelId === 'sonar') {

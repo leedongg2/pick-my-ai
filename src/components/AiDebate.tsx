@@ -3,8 +3,9 @@
 import React, { useState, useCallback } from 'react';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
-import { Play, Copy, RotateCcw } from 'lucide-react';
+import { Play, Copy, RotateCcw, Sparkles } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { SmartRouter } from './SmartRouter';
 
 type Props = {
   availableModels: any[];
@@ -32,6 +33,7 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
   const [messages, setMessages] = useState<DebateMessage[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [conclusion, setConclusion] = useState('');
+  const [lastAnalyzedTopic, setLastAnalyzedTopic] = useState('');
 
   const textModels = availableModels.filter(m =>
     m.series !== 'image' && m.series !== 'video' && !m.isBatch
@@ -60,6 +62,7 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
     if (!topic.trim()) { toast.error('토론 주제를 입력해주세요.'); return; }
     if (!modelA || !modelB) { toast.error('두 AI를 모두 선택해주세요.'); return; }
     if (modelA === modelB) { toast.error('서로 다른 AI를 선택해주세요.'); return; }
+    if (lastAnalyzedTopic === topic.trim()) { toast.error('이미 분석한 질문입니다. 다른 주제로 변경해주세요.'); return; }
 
     const creditsA = walletCredits[modelA] || 0;
     const creditsB = walletCredits[modelB] || 0;
@@ -135,6 +138,7 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
       ]);
 
       setConclusion(conclusionContent);
+      setLastAnalyzedTopic(topic.trim());
       toast.success('토론이 완료되었습니다! 🏆');
     } catch (e: any) {
       toast.error('토론 중 오류가 발생했습니다.');
@@ -209,6 +213,24 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
           rows={2}
         />
       </div>
+
+      {/* 질문 분석 */}
+      {topic.trim() && (
+        <div className="mb-4">
+          <SmartRouter
+            question={topic}
+            models={availableModels}
+            speechLevel={speechLevel}
+            language={language}
+            compact={true}
+          />
+          {lastAnalyzedTopic === topic.trim() && (
+            <div className="mt-2 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
+              ⚠️ 이미 분석한 질문입니다. 다른 주제로 변경해주세요.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-2 mb-5">
         <button

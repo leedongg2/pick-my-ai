@@ -870,7 +870,21 @@ export const Chat: React.FC = () => {
     const stripped = stripSummaryBlock(content).replace(/[#*`]/g, '').trim();
     const utter = new SpeechSynthesisUtterance(stripped);
     utter.lang = language === 'en' ? 'en-US' : language === 'ja' ? 'ja-JP' : 'ko-KR';
-    utter.rate = 1.0;
+    utter.rate = 1.1;
+    utter.pitch = 1.0;
+    utter.volume = 1.0;
+    
+    // 더 좋은 음성 선택 (사용 가능한 경우)
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const preferredVoice = voices.find(v => 
+        (language === 'ko' && (v.name.includes('Google') || v.name.includes('Yuna') || v.name.includes('Sora'))) ||
+        (language === 'en' && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen'))) ||
+        (language === 'ja' && (v.name.includes('Google') || v.name.includes('Kyoko')))
+      );
+      if (preferredVoice) utter.voice = preferredVoice;
+    }
+    
     ttsRef.current = utter;
     window.speechSynthesis.speak(utter);
     toast.info('읽기 시작 — 다시 클릭하면 중지됩니다.');
@@ -1089,7 +1103,7 @@ export const Chat: React.FC = () => {
       // API 호출 (500/503 에러 시 1.5초 후 1회 자동 재시도)
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const requestTimeout = isVideoModel ? 300000 : 180000; // 영상: 5분, 일반: 3분
+      const requestTimeout = isVideoModel ? 300000 : 300000; // 영상: 5분, 일반: 5분
       const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
       const buildRequestBody = () => JSON.stringify({
@@ -1255,7 +1269,8 @@ export const Chat: React.FC = () => {
           reader.releaseLock();
         }
         
-        if (!accumulated.trim()) {
+        // 스트리밍 완료 후 빈 응답 체크 (에러가 없을 때만)
+        if (!streamError && !accumulated.trim()) {
           const fallback = language === 'en'
             ? 'Response was interrupted. Please try again.'
             : '응답이 중단되었어요. 다시 시도해 주세요.';
@@ -2567,12 +2582,6 @@ export const Chat: React.FC = () => {
                   <div className="text-sm text-gray-800 dark:text-gray-200 line-clamp-5 whitespace-pre-wrap">
                     {stripSummaryBlock(bm.content).slice(0, 500)}{bm.content.length > 500 ? '...' : ''}
                   </div>
-                  <button
-                    onClick={() => { navigator.clipboard.writeText(stripSummaryBlock(bm.content)); toast.success('복사했습니다!'); }}
-                    className="mt-2 text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />복사
-                  </button>
                 </div>
               ))}
             </div>

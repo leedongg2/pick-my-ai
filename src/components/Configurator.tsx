@@ -45,7 +45,7 @@ const OTHER_ITEMS = [
   {
     id: 'error-insurance',
     name: 'AI 에러 보험',
-    description: 'AI 응답 에러 발생 시 최대 500배 크레딧을 보장합니다. 사용할 때까지 유효기간 무제한.',
+    description: 'AI 응답 에러 발생 시 최대 500배 크레딧을 보장합니다. 구매일로부터 90일간 유효.',
     price: 500,
     icon: '🛡️',
     features: [
@@ -53,7 +53,7 @@ const OTHER_ITEMS = [
       'Perplexity Sonar: 500배 보장',
       '그 외 모델: floor(500÷단가)+1배 보장',
       '보험 없어도 기본 1크레딧은 무조건 환불',
-      '유효기간 무제한 (사용할 때까지)',
+      '유효기간 90일 (구매일로부터)',
     ],
     storeKey: 'insurancePurchased' as const,
     pmc100: true,
