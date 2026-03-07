@@ -111,9 +111,8 @@ function buildPseudoStream(responseContent: string) {
 type UserAttachment = {
   type: 'image' | 'text';
   name: string;
-  mimeType?: string;
-  dataUrl?: string; // for images
-  content?: string; // for text files
+  dataUrl?: string;
+  content?: string;
 };
 
 function normalizeMaxOutputTokens(value: unknown): number | undefined {
@@ -123,6 +122,25 @@ function normalizeMaxOutputTokens(value: unknown): number | undefined {
   return Math.min(normalized, 8192);
 }
 
+function normalizeTemperature(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.min(2, Math.max(0, value));
+}
+
+function hasMeaningfulMessageContent(content: unknown): boolean {
+  if (typeof content === 'string') return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+
+  return content.some((part: any) => {
+    if (part?.type === 'text' && typeof part.text === 'string') {
+      return part.text.trim().length > 0;
+    }
+    if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+      return part.image_url.url.trim().length > 0;
+    }
+    return false;
+  });
+}
 
 function extractBase64(dataUrl: string): { mime: string; base64: string } | null {
   try {
@@ -605,7 +623,6 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
   return content;
 }
-
 
 // Anthropic API 호출 (비스트리밍 JSON - Netlify 호환)
 async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number, maxOutputTokens?: number): Promise<string> {
@@ -1090,8 +1107,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel, videoSeconds, chainMaxOutputTokens } = await request.json();
+    let requestBody: any;
+    try {
+      requestBody = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'ERR_REQ_00', reason: 'Invalid request body.' },
+        { status: 400 }
+      );
+    }
+
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel, videoSeconds, chainMaxOutputTokens } = requestBody ?? {};
     const normalizedChainMaxOutputTokens = normalizeMaxOutputTokens(chainMaxOutputTokens);
+    const normalizedTemperature = normalizeTemperature(temperature);
 
     const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
     const speechStyle = speechLevel === 'informal'
@@ -1179,9 +1207,9 @@ Example style:
     };
 
     // 입력 검증
-    if (!modelId || !messages || !Array.isArray(messages)) {
+    if (typeof modelId !== 'string' || !modelId.trim() || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
-        { error: 'Invalid request.' },
+        { error: 'ERR_REQ_00', reason: 'Invalid request.' },
         { status: 400 }
       );
     }
@@ -1197,29 +1225,49 @@ Example style:
     // 각 메시지 내용 길이 제한 + 비정상 role 차단
     for (const msg of messages) {
       if (!msg || !['user', 'assistant', 'system'].includes(msg.role)) {
-        return NextResponse.json({ error: 'Invalid message role.' }, { status: 400 });
+        return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid message role.' }, { status: 400 });
       }
-      if (typeof msg.content === 'string' && msg.content.length > 50000) {
-        return NextResponse.json(
-          { error: 'Message too long.' },
-          { status: 400 }
-        );
+      if (typeof msg.content === 'string') {
+        if (msg.content.length > 50000) {
+          return NextResponse.json(
+            { error: 'ERR_REQ_00', reason: 'Message too long.' },
+            { status: 400 }
+          );
+        }
+      } else if (Array.isArray(msg.content)) {
+        if (msg.content.length > 24) {
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Message content is too complex.' }, { status: 400 });
+        }
+        const isValidContentArray = msg.content.every((part: any) => {
+          if (!part || typeof part !== 'object') return false;
+          if (part.type === 'text') return typeof part.text === 'string' && part.text.length <= 50000;
+          if (part.type === 'image_url') return typeof part.image_url?.url === 'string' && part.image_url.url.length <= 10 * 1024 * 1024;
+          return false;
+        });
+        if (!isValidContentArray) {
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid message content format.' }, { status: 400 });
+        }
+      } else {
+        return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid message content type.' }, { status: 400 });
       }
     }
 
     // 마지막 사용자 메시지 검증 (고의 에러 방지)
     const lastUserMsg = findLastMessageByRole(messages, 'user');
+    if (!lastUserMsg) {
+      return NextResponse.json({ error: 'ERR_REQ_00', reason: 'No user message found.' }, { status: 400 });
+    }
     if (lastUserMsg) {
       const content = typeof lastUserMsg.content === 'string' ? lastUserMsg.content.trim() : '';
       // 빈 메시지 차단
-      if (!content && !Array.isArray(lastUserMsg.content)) {
-        return NextResponse.json({ error: 'Empty message.' }, { status: 400 });
+      if (!hasMeaningfulMessageContent(lastUserMsg.content)) {
+        return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Empty message.' }, { status: 400 });
       }
       // 반복 문자 스팸 차단 (같은 문자가 200자 이상 반복)
       if (content.length > 200) {
         const uniqueChars = new Set(content.replace(/\s/g, '')).size;
         if (uniqueChars <= 2) {
-          return NextResponse.json({ error: 'Spam message detected.' }, { status: 400 });
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Spam message detected.' }, { status: 400 });
         }
       }
     }
@@ -1228,15 +1276,24 @@ Example style:
     if (userAttachments && Array.isArray(userAttachments)) {
       if (userAttachments.length > 10) {
         return NextResponse.json(
-          { error: 'Too many attachments.' },
+          { error: 'ERR_REQ_00', reason: 'Too many attachments.' },
           { status: 400 }
         );
       }
       
       for (const attachment of userAttachments) {
+        if (!attachment || !['image', 'text'].includes(attachment.type) || typeof attachment.name !== 'string' || !attachment.name.trim()) {
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid attachment.' }, { status: 400 });
+        }
+        if (attachment.type === 'image' && typeof attachment.dataUrl !== 'string') {
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid image attachment.' }, { status: 400 });
+        }
+        if (attachment.type === 'text' && typeof attachment.content !== 'string') {
+          return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid text attachment.' }, { status: 400 });
+        }
         if (attachment.dataUrl && attachment.dataUrl.length > 10 * 1024 * 1024) {
           return NextResponse.json(
-            { error: 'Attachment too large (max 10MB).' },
+            { error: 'ERR_REQ_00', reason: 'Attachment too large (max 10MB).' },
             { status: 400 }
           );
         }
@@ -1270,7 +1327,7 @@ Example style:
       || IMAGE_MODEL_IDS.has(modelId)
       || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
     );
-    
+
     // GPT 스트리밍 가능 모델 (이미지 제외)
     const isStreamableGPT = isOpenAIModel && !IMAGE_MODEL_IDS.has(modelId);
 
@@ -1305,16 +1362,15 @@ Example style:
     const instructedMessages = isPseudoStreamable ? applyLanguageInstruction(messages) : messages;
 
     if (isPseudoStreamable) {
-      // 1) 먼저 전체 응답 수신
       let responseContent: string;
       if (modelId.startsWith('gemini')) {
-        responseContent = await callGemini(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
+        responseContent = await callGemini(modelId, instructedMessages, userAttachments, 0, normalizedTemperature, normalizedChainMaxOutputTokens);
       } else if (modelId.startsWith('claude') || ANTHROPIC_MODEL_IDS.has(modelId)) {
-        responseContent = await callAnthropic(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
+        responseContent = await callAnthropic(modelId, instructedMessages, userAttachments, 0, normalizedTemperature, normalizedChainMaxOutputTokens);
       } else if (GROK_TEXT_IDS.has(modelId)) {
-        responseContent = await callGrok(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
+        responseContent = await callGrok(modelId, instructedMessages, userAttachments, 0, normalizedTemperature, normalizedChainMaxOutputTokens);
       } else {
-        responseContent = await callPerplexity(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
+        responseContent = await callPerplexity(modelId, instructedMessages, userAttachments, 0, normalizedTemperature, normalizedChainMaxOutputTokens);
       }
 
       return new Response(buildPseudoStream(responseContent), {
@@ -1344,7 +1400,7 @@ Example style:
       stack: error.stack?.split('\n').slice(0, 3).join('\n'), // 스택 일부만
       timestamp: new Date().toISOString()
     });
-    
+
     // API 키가 없는 경우 데모 응답
     if (error.message?.includes('key not configured')) {
       return NextResponse.json({ 
@@ -1359,45 +1415,104 @@ Example style:
       });
     }
 
-    // 에러코드 기반 응답 - 사용자에게 원인을 직접 노출하지 않음
-    const errMsg = error.message || '';
-    let errorCode = 'ERR_UNKNOWN';
-    let statusCode = 500;
+    const { code, reason, status } = normalizeRouteError(error);
 
-    if (errMsg === 'MODEL_RESPONSE_TIMEOUT' || error.name === 'AbortError') {
+    if (code === 'ERR_TIMEOUT') {
       console.error('[Chat API] Timeout error');
-      errorCode = 'ERR_TIMEOUT';
-      statusCode = 504;
-    } else if (errMsg.includes('ERR_KEY_')) {
-      errorCode = errMsg.match(/\[ERR_KEY_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_KEY';
-      statusCode = 401;
-    } else if (errMsg.includes('ERR_RATE_')) {
-      errorCode = errMsg.match(/\[ERR_RATE_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_RATE';
-      statusCode = 429;
-    } else if (errMsg.includes('ERR_NET_')) {
-      errorCode = errMsg.match(/\[ERR_NET_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_NET';
-      statusCode = 503;
-    } else if (errMsg.includes('ERR_EMPTY_') || errMsg.includes('ERR_RESP_')) {
-      errorCode = errMsg.match(/\[ERR_(?:EMPTY|RESP)_\d+\]/)?.[0]?.slice(1, -1) || 'ERR_EMPTY';
-      statusCode = 502;
-    } else if (errMsg.includes('ERR_SAFE_')) {
-      errorCode = 'ERR_SAFE_01';
-      statusCode = 451;
-    } else if (errMsg.includes('safety') || errMsg.includes('content policy') || errMsg.includes('not allowed') || errMsg.includes('Unsupported')) {
-      errorCode = 'ERR_SAFE_02';
-      statusCode = 451;
-    } else if (error.status === 429) {
-      errorCode = 'ERR_RATE';
-      statusCode = 429;
-    } else if (error.status === 401 || error.status === 403) {
-      errorCode = 'ERR_AUTH';
-      statusCode = error.status;
     }
-    
+
     return NextResponse.json(
-      { error: errorCode },
-      { status: statusCode }
+      { error: code, reason },
+      { status }
     );
   }
 }
 
+function extractErrorCodeFromMessage(message: string): string | undefined {
+  return message.match(/\[(ERR_[A-Z0-9_]+)\]/)?.[1] || message.match(/\b(ERR_[A-Z0-9_]+)\b/)?.[1];
+}
+
+function normalizeRouteErrorCode(rawCode: string | undefined, message: string, status?: number): string {
+  if (message === 'MODEL_RESPONSE_TIMEOUT') {
+    return 'ERR_TIMEOUT';
+  }
+
+  if (rawCode) {
+    const providerStatusMatch = rawCode.match(/^ERR_(?:SORA|GROK_VID|XAI(?:_IMG)?)_(\d{3})$/);
+    if (providerStatusMatch) {
+      const providerStatus = Number(providerStatusMatch[1]);
+      if (providerStatus === 401 || providerStatus === 403) return 'ERR_AUTH';
+      if (providerStatus === 429) return 'ERR_RATE_05';
+      if (providerStatus >= 500) return 'ERR_NET_05';
+      return 'ERR_RESP_05';
+    }
+
+    if (rawCode === 'ERR_EMPTY_SORA' || rawCode === 'ERR_EMPTY_GROK_VID') {
+      return 'ERR_EMPTY_05';
+    }
+
+    if (rawCode === 'ERR_STREAM') {
+      return 'ERR_RESP_00';
+    }
+
+    return rawCode;
+  }
+
+  if (message.includes('safety') || message.includes('content policy') || message.includes('not allowed') || message.includes('Unsupported')) {
+    return 'ERR_SAFE_02';
+  }
+
+  if (message.includes('mapping not configured') || message.includes('not configured') || message.includes('Check .env.local')) {
+    return 'ERR_CONFIG_01';
+  }
+
+  if (status === 429 || message.includes('rate limit')) {
+    return 'ERR_RATE';
+  }
+
+  if (status === 401 || status === 403) {
+    return 'ERR_AUTH';
+  }
+
+  if (message.toLowerCase().includes('timeout')) {
+    return 'ERR_TIMEOUT';
+  }
+
+  return 'ERR_UNKNOWN';
+}
+
+function getStatusCodeFromErrorCode(code: string, fallbackStatus?: number): number {
+  if (code === 'ERR_TIMEOUT') return 504;
+  if (code.startsWith('ERR_KEY') || code === 'ERR_AUTH') return fallbackStatus === 403 ? 403 : 401;
+  if (code.startsWith('ERR_RATE')) return 429;
+  if (code.startsWith('ERR_NET')) return 503;
+  if (code.startsWith('ERR_EMPTY') || code.startsWith('ERR_RESP')) return 502;
+  if (code.startsWith('ERR_SAFE')) return 451;
+  if (code.startsWith('ERR_CONFIG')) return 500;
+  if (fallbackStatus && fallbackStatus >= 400 && fallbackStatus < 600) return fallbackStatus;
+  return 500;
+}
+
+function getClientSafeErrorReason(message: string, normalizedCode: string): string | undefined {
+  const cleaned = message
+    .replace(/\[(ERR_[A-Z0-9_]+)\]\s*/g, '')
+    .replace(/\bERR_[A-Z0-9_]+\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned === normalizedCode || cleaned === 'MODEL_RESPONSE_TIMEOUT') {
+    return undefined;
+  }
+
+  return cleaned.slice(0, 280);
+}
+
+function normalizeRouteError(error: any): { code: string; reason: string | undefined; status: number } {
+  const errMsg = error.message || '';
+  const extractedCode = extractErrorCodeFromMessage(errMsg);
+  const errorCode = normalizeRouteErrorCode(extractedCode, errMsg, error.status);
+  const statusCode = getStatusCodeFromErrorCode(errorCode, error.status);
+  const reason = getClientSafeErrorReason(errMsg, errorCode);
+
+  return { code: errorCode, reason, status: statusCode };
+}

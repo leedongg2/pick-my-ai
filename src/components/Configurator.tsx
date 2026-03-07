@@ -60,6 +60,8 @@ const OTHER_ITEMS = [
   },
 ];
 
+const VISIBLE_OTHER_ITEMS = OTHER_ITEMS.filter((item) => item.id !== 'error-insurance');
+
 export const Configurator: React.FC = () => {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('all');
@@ -194,7 +196,7 @@ export const Configurator: React.FC = () => {
             {/* 기타 탭 */}
             {activeCategory === 'other' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {OTHER_ITEMS.map(item => {
+                {VISIBLE_OTHER_ITEMS.map(item => {
                   const isPurchased =
                     (item.storeKey === 'smartRouterPurchased' && smartRouterPurchased) ||
                     (item.storeKey === 'insurancePurchased' && insurancePurchased);

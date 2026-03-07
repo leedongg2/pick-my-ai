@@ -233,6 +233,7 @@ interface AppState {
   // 에러 시 크레딧 환불 (기본 1크레딧, 보험 시 배수)
   // refundToken: deductCredit 성공 시 발급된 토큰만 환불 가능
   refundCredit: (modelId: string, piWon: number, refundToken?: string) => void;
+  releasePendingRefundToken: (refundToken?: string) => void;
 
   // 환불 토큰 발급 (deductCredit 성공 시 내부 호출)
   _pendingRefundTokens: Set<string>;
@@ -1684,6 +1685,17 @@ export const useStore = create<AppState>()(
             wallet: { ...s.wallet, credits: newCredits, transactions: [...s.wallet.transactions, tx] },
             _pendingRefundTokens: newTokens,
             _refundCountToday: newRefundCount,
+          };
+        });
+      },
+      releasePendingRefundToken: (refundToken?: string) => {
+        if (!refundToken) return;
+        set((state) => {
+          if (!state._pendingRefundTokens.has(refundToken)) return state;
+          const newTokens = new Set(state._pendingRefundTokens);
+          newTokens.delete(refundToken);
+          return {
+            _pendingRefundTokens: newTokens,
           };
         });
       },
