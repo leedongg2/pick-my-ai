@@ -79,7 +79,7 @@ export const ModelCard: React.FC<ModelCardProps> = React.memo(({
 
       <div className="p-5">
         <div className="flex justify-between items-start mb-3">
-          <div className="flex-1 pr-6">
+          <div className={cn("flex-1", model.isBatch ? "pr-12" : "pr-6")}>
             <div className="flex items-center gap-2 mb-1">
               <h3 className="font-semibold text-base text-gray-900">{model.displayName}</h3>
               {model.isBatch && (

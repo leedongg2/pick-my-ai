@@ -71,6 +71,22 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
 
   const totalCost = steps.filter(s => s.modelId).length;
 
+  const getStepOutputTokenLimit = useCallback((stepIndex: number): number | undefined => {
+    if (stepIndex >= steps.length - 1) return undefined;
+
+    const nextStep = steps[stepIndex + 1];
+    const nextModel = modelById.get(nextStep.modelId);
+    if (!nextModel) return undefined;
+
+    const maxInput =
+      typeof nextModel.tokenBudget?.input === 'number'
+        ? nextModel.tokenBudget.input
+        : nextModel.maxCharacters;
+
+    if (!Number.isFinite(maxInput) || maxInput <= 0) return undefined;
+    return Math.floor(maxInput);
+  }, [steps, modelById]);
+
   const handleRun = useCallback(async () => {
     if (!prompt.trim()) { toast.error('질문을 입력해주세요.'); return; }
     const incomplete = steps.find(s => !s.modelId);
@@ -94,6 +110,7 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      const chainMaxOutputTokens = getStepOutputTokenLimit(i);
       setResults(prev => prev.map(r => r.stepId === step.id ? { ...r, loading: true } : r));
       setExpandedStep(step.id);
 
@@ -118,6 +135,7 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
             language: language || 'ko',
             speechLevel: speechLevel || 'formal',
             temperature: 0.7,
+            chainMaxOutputTokens,
           }),
         });
 
@@ -141,7 +159,7 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
 
     setIsRunning(false);
     toast.success('AI 체인이 완료되었습니다! 🎉');
-  }, [prompt, steps, walletCredits, modelById, deductCredit, language, speechLevel]);
+  }, [prompt, steps, walletCredits, modelById, deductCredit, language, speechLevel, getStepOutputTokenLimit]);
 
   const finalResult = results.find(r => r.stepId === steps[steps.length - 1]?.id);
 

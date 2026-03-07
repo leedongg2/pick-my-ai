@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function AuthCallbackPage() {
   const processed = useRef(false);
@@ -37,8 +38,8 @@ export default function AuthCallbackPage() {
 /**
  * OAuth 콜백 처리
  * 
- * Implicit flow: Supabase가 #access_token=xxx&refresh_token=yyy 형태로 hash fragment에 토큰 전달
- * hash fragment를 직접 파싱하여 access_token을 추출하고 서버 API로 전달하여 세션 쿠키 설정
+ * PKCE flow 우선: code를 Supabase SDK(exchangeCodeForSession)로 교환
+ * hash fragment access_token(레거시/호환 경로)이 있으면 fallback으로 처리
  */
 async function handleCallback() {
   try {
@@ -83,17 +84,39 @@ async function handleCallback() {
       }
     }
 
-    // 3) Query string에서 code 확인 (PKCE fallback - Supabase 설정에 따라)
+    // 3) Query string에서 code 확인 (PKCE)
     const code = urlParams.get('code');
     if (code) {
-      console.log('[auth/callback] code found, sending to server for exchange...');
+      console.log('[auth/callback] code found, exchanging via Supabase client...');
+
+      // PKCE 표준 경로: Supabase SDK가 저장한 code_verifier를 사용해 세션 교환
+      const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (!exchangeError) {
+        const accessToken = exchangeData.session?.access_token;
+        if (accessToken) {
+          const ok = await callSocialSessionAPI(accessToken);
+          if (ok) {
+            console.log('[auth/callback] PKCE exchange successful, redirecting to /chat');
+            window.location.replace('/chat');
+            return;
+          }
+          console.error('[auth/callback] Session cookie setup failed after PKCE exchange');
+          window.location.replace('/login?error=cookie_failed');
+          return;
+        }
+      }
+
+      // 일부 환경 fallback: 서버 code 교환 경로 시도
+      console.warn('[auth/callback] PKCE exchange failed, trying server fallback...', exchangeError?.message);
       const ok = await callCodeExchangeAPI(code);
       if (ok) {
-        console.log('[auth/callback] Code exchange successful, redirecting to /chat');
+        console.log('[auth/callback] Server fallback exchange successful, redirecting to /chat');
         window.location.replace('/chat');
         return;
       }
-      console.error('[auth/callback] Code exchange failed');
+
+      console.error('[auth/callback] Code exchange failed in both client/server paths');
       window.location.replace('/login?error=exchange_failed');
       return;
     }

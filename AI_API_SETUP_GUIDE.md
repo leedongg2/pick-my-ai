@@ -6,23 +6,6 @@
 
 ## 📋 지원하는 AI 모델
 
-### OpenAI (GPT 시리즈)
-- **GPT-5** → `gpt-4-turbo-preview`
-- **GPT-4o** → `gpt-4o`
-- **GPT-4.1** → `gpt-4-turbo`
-
-### Anthropic (Claude 시리즈)
-- **Claude Haiku** → `claude-3-haiku-20240307`
-- **Claude Sonnet** → `claude-3-5-sonnet-20241022`
-- **Claude Opus** → `claude-3-opus-20240229`
-
-### Perplexity
-- **Perplexity Sonar** → `sonar`
-- **Perplexity Sonar Pro** → `sonar-pro`
-- **Perplexity Deep Research** → `sonar-reasoning`
-
-## 🚀 설정 방법
-
 ### 1단계: API 키 발급
 
 #### OpenAI API 키
@@ -68,19 +51,7 @@ ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
 # Perplexity API
 PERPLEXITY_API_KEY=pplx-xxxxxxxxxxxxx
 
-# 모델 이름 설정 (선택사항, 기본값 사용 가능)
-GPT5_MODEL=gpt-4-turbo-preview
-GPT4O_MODEL=gpt-4o
-GPT41_MODEL=gpt-4-turbo
-
-CLAUDE_HAIKU_MODEL=claude-3-haiku-20240307
-CLAUDE_SONNET_MODEL=claude-3-5-sonnet-20241022
-CLAUDE_OPUS_MODEL=claude-3-opus-20240229
-
-PERPLEXITY_SONAR_MODEL=sonar
-PERPLEXITY_SONAR_PRO_MODEL=sonar-pro
-PERPLEXITY_DEEP_RESEARCH_MODEL=sonar-reasoning
-```
+# 모델 
 
 ### 4단계: 개발 서버 재시작
 
@@ -204,15 +175,6 @@ addMessage(sessionId, {
 ```
 
 ## 💰 비용 안내
-
-### OpenAI 가격 (2024년 기준)
-- GPT-4 Turbo: $0.01/1K tokens (input), $0.03/1K tokens (output)
-- GPT-4o: $0.005/1K tokens (input), $0.015/1K tokens (output)
-
-### Anthropic 가격
-- Claude 3 Haiku: $0.25/1M tokens (input), $1.25/1M tokens (output)
-- Claude 3.5 Sonnet: $3/1M tokens (input), $15/1M tokens (output)
-- Claude 3 Opus: $15/1M tokens (input), $75/1M tokens (output)
 
 ### Perplexity 가격
 - API 사용 시 과금 방식 확인 필요

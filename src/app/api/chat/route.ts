@@ -27,6 +27,87 @@ const STREAM_CONNECT_TIMEOUT_MS = Number(process.env.AI_STREAM_CONNECT_TIMEOUT_M
 const DEFAULT_API_RETRIES = process.env.AI_API_MAX_RETRIES != null ? Number(process.env.AI_API_MAX_RETRIES) : (isNetlify ? 0 : 2);
 const DEFAULT_RETRY_DELAY_MS = Number(process.env.AI_API_RETRY_DELAY_MS) || 800;
 
+const OPENAI_STREAM_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache, no-store',
+  'Connection': 'keep-alive',
+  'X-Accel-Buffering': 'no',
+  'X-Content-Type-Options': 'nosniff',
+};
+
+const PSEUDO_STREAM_HEADERS = {
+  ...OPENAI_STREAM_HEADERS,
+  'Transfer-Encoding': 'chunked',
+};
+
+const STREAM_TEXT_ENCODER = new TextEncoder();
+const ANTHROPIC_MODEL_IDS = new Set(['haiku35', 'sonnet35', 'haiku45', 'sonnet45', 'opus45', 'sonnet46', 'opus46', 'opus4']);
+const PERPLEXITY_MODEL_IDS = new Set(['sonar', 'sonarPro', 'deepResearch']);
+const IMAGE_MODEL_IDS = new Set(['gptimage1', 'dalle3']);
+const GROK_TEXT_IDS = new Set(['grok3mini', 'grok3', 'grok4fastNR', 'grok4fastR', 'grok41fastNR', 'grok41fastR', 'grok40709', 'grokCodeFast1']);
+const GROK_IMAGE_IDS = new Set(['grokImagine', 'grok2image']);
+const SORA_VIDEO_IDS = new Set(['sora2_720p', 'sora2pro_720p', 'sora2pro_1024p']);
+const GROK_VIDEO_IDS = new Set(['grokImagineVideo']);
+
+const OPENAI_MODEL_MAP: { [key: string]: string } = {
+  'gpt4o': 'gpt-4o',
+  'gpt41': 'gpt-4.1',
+  'gpt41mini': 'gpt-4.1-mini',
+  'gpt41nano': 'gpt-4.1-nano',
+  'gpt5': 'gpt-5',
+  'gpt51': 'gpt-5.1',
+  'gpt51chat': 'gpt-5.1-chat-latest',
+  'gpt52': 'gpt-5.2',
+  'gpt52chat': 'gpt-5.2-chat-latest',
+  'gpt52pro': 'gpt-5.2-pro',
+  'o3': 'o3',
+  'o3mini': 'o3-mini',
+  'o4mini': 'o4-mini',
+  'gptimage1': 'gpt-image-1',
+  'dalle3': 'dall-e-3',
+};
+
+function findLastMessageByRole(messages: any[], role: string) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === role) {
+      return messages[i];
+    }
+  }
+
+  return null;
+}
+
+function findLastMessageIndexByRole(messages: any[], role: string) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === role) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function buildPseudoStream(responseContent: string) {
+  return new ReadableStream({
+    start(ctrl) {
+      try {
+        for (let i = 0; i < responseContent.length; ) {
+          const chunkSize = i < 200 ? 4 : i < 1000 ? 12 : 40;
+          const chunk = responseContent.slice(i, i + chunkSize);
+          ctrl.enqueue(STREAM_TEXT_ENCODER.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`));
+          i += chunkSize;
+        }
+
+        ctrl.enqueue(STREAM_TEXT_ENCODER.encode('data: [DONE]\n\n'));
+        ctrl.close();
+      } catch {
+        ctrl.enqueue(STREAM_TEXT_ENCODER.encode(`data: ${JSON.stringify({ error: 'ERR_STREAM' })}\n\ndata: [DONE]\n\n`));
+        ctrl.close();
+      }
+    }
+  });
+}
+
 type UserAttachment = {
   type: 'image' | 'text';
   name: string;
@@ -34,6 +115,13 @@ type UserAttachment = {
   dataUrl?: string; // for images
   content?: string; // for text files
 };
+
+function normalizeMaxOutputTokens(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const normalized = Math.floor(value);
+  if (normalized <= 0) return undefined;
+  return Math.min(normalized, 8192);
+}
 
 
 function extractBase64(dataUrl: string): { mime: string; base64: string } | null {
@@ -105,10 +193,10 @@ async function callImageGeneration(prompt: string, model: string): Promise<strin
 }
 
 // OpenAI API 호출 (키 로테이션 및 큐 시스템 지원)
-async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
+async function callOpenAI(model: string, messages: any[], userAttachments?: UserAttachment[], persona?: any, languageInstruction?: string, streaming?: boolean, maxOutputTokens?: number): Promise<string | Response> {
   // 이미지 생성 모델인 경우 이미지 생성 API 사용
   if (model === 'gptimage1' || model === 'dalle3') {
-    const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+    const lastUserMessage = findLastMessageByRole(messages, 'user');
     const prompt = typeof lastUserMessage?.content === 'string' 
       ? lastUserMessage.content 
       : lastUserMessage?.content?.[0]?.text || 'Beautiful landscape';
@@ -133,42 +221,20 @@ async function callOpenAI(model: string, messages: any[], userAttachments?: User
     persona,
     0,
     languageInstruction,
-    shouldStream
+    shouldStream,
+    maxOutputTokens
   );
 }
 
 // OpenAI 실제 요청 실행 - 스트리밍 시 Response, 아니면 문자열 반환
-async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string, streaming?: boolean): Promise<string | Response> {
-
-  const modelMap: { [key: string]: string } = {
-    // GPT-4 시리즈 (실제 출시)
-    'gpt4o':     'gpt-4o',
-    'gpt41':     'gpt-4.1',
-    'gpt41mini': 'gpt-4.1-mini',
-    'gpt41nano': 'gpt-4.1-nano',
-    // GPT-5 시리즈 (실제 출시)
-    'gpt5':     'gpt-5',
-    'gpt51':    'gpt-5.1',
-    'gpt51chat':'gpt-5.1-chat-latest',
-    'gpt52':    'gpt-5.2',
-    'gpt52chat':'gpt-5.2-chat-latest',
-    'gpt52pro': 'gpt-5.2-pro',
-    // OpenAI o 시리즈
-    'o3':     'o3',
-    'o3mini': 'o3-mini',
-    'o4mini': 'o4-mini',
-    // 이미지 모델
-    'gptimage1': 'gpt-image-1',
-    'dalle3':    'dall-e-3',
-  };
+async function executeOpenAIRequest(model: string, messages: any[], apiKey: string, userAttachments?: UserAttachment[], persona?: any, retryCount: number = 0, languageInstruction?: string, streaming?: boolean, maxOutputTokens?: number): Promise<string | Response> {
 
   // If there are image attachments, convert the LAST user message content to a multimodal array
   const transformedMessages = (() => {
     if (!userAttachments?.length) return messages;
-    const lastIdx = [...messages].reverse().findIndex((m: any) => m.role === 'user');
+    const lastIdx = findLastMessageIndexByRole(messages, 'user');
     if (lastIdx === -1) return messages;
-    const idx = messages.length - 1 - lastIdx;
-    const last = messages[idx];
+    const last = messages[lastIdx];
     const parts: any[] = [];
     if (typeof last.content === 'string') {
       parts.push({ type: 'text', text: last.content });
@@ -183,11 +249,11 @@ async function executeOpenAIRequest(model: string, messages: any[], apiKey: stri
       }
     });
     const newMsgs = [...messages];
-    newMsgs[idx] = { role: 'user', content: parts };
+    newMsgs[lastIdx] = { role: 'user', content: parts };
     return newMsgs;
   })();
 
-  const selectedModel = modelMap[model];
+  const selectedModel = OPENAI_MODEL_MAP[model];
   if (!selectedModel) {
     throw new Error('Model mapping not configured. Check .env.local');
   }
@@ -282,6 +348,9 @@ Example style:
   if (model === 'gpt4o' || model === 'gpt41') {
     maxTokens = 800; // GPT-4.1 / GPT-4o
   }
+  if (typeof maxOutputTokens === 'number') {
+    maxTokens = Math.min(maxTokens, maxOutputTokens);
+  }
   
   const requestBody: any = {
     model: selectedModel,
@@ -360,7 +429,7 @@ Example style:
         
         const nextKey = apiKeyManager.getAvailableKey('openai');
         if (nextKey && nextKey !== apiKey) {
-          return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction, streaming);
+          return executeOpenAIRequest(model, messages, nextKey, userAttachments, persona, retryCount + 1, languageInstruction, streaming, maxOutputTokens);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('openai');
@@ -407,7 +476,7 @@ Example style:
 }
 
 // Google AI Studio (Gemini) 호출 (비스트리밍 JSON - Netlify 호환)
-async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+async function callGemini(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number, maxOutputTokens?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('gemini');
   if (!apiKey) {
     throw new Error('[ERR_KEY_02] Gemini API key not configured.');
@@ -480,7 +549,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         contents,
         generationConfig: { 
           temperature: temperature ?? 0.9,
-          maxOutputTokens: 2048,
+          maxOutputTokens: maxOutputTokens ?? 2048,
           topP: 0.95,
           topK: 40
         },
@@ -514,7 +583,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         
         const nextKey = apiKeyManager.getAvailableKey('gemini');
         if (nextKey && nextKey !== apiKey) {
-          return callGemini(model, messages, userAttachments, retryCount + 1, temperature);
+          return callGemini(model, messages, userAttachments, retryCount + 1, temperature, maxOutputTokens);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('gemini');
@@ -539,7 +608,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
 
 // Anthropic API 호출 (비스트리밍 JSON - Netlify 호환)
-async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+async function callAnthropic(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number, maxOutputTokens?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('anthropic');
   
   if (!apiKey) {
@@ -605,6 +674,9 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
   } else if (model.includes('opus')) {
     maxTokens = 2000; // Opus
   }
+  if (typeof maxOutputTokens === 'number') {
+    maxTokens = Math.min(maxTokens, maxOutputTokens);
+  }
   
   let response: Response;
   try {
@@ -651,7 +723,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
         
         const nextKey = apiKeyManager.getAvailableKey('anthropic');
         if (nextKey && nextKey !== apiKey) {
-          return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature);
+          return callAnthropic(model, messages, userAttachments, retryCount + 1, temperature, maxOutputTokens);
         }
         
         const availability = apiKeyManager.getNextAvailableTime('anthropic');
@@ -674,7 +746,7 @@ async function callAnthropic(model: string, messages: any[], userAttachments?: U
 }
 
 // Perplexity API 호출 (비스트리밍 JSON - Netlify 완벽 호환)
-async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+async function callPerplexity(model: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number, maxOutputTokens?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('perplexity');
   
   if (!apiKey) {
@@ -689,6 +761,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
     'perplexity-sonar-pro': 'sonar-pro',
     'perplexity-deep-research': 'sonar-reasoning'
   };
+  const cappedMaxTokens = typeof maxOutputTokens === 'number' ? Math.min(800, maxOutputTokens) : 800;
 
   // 첨부파일 메모 추가
   let finalMessages = messages;
@@ -716,7 +789,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
         model: modelMap[model] || 'sonar',
         stream: false,
         messages: finalMessages,
-        max_tokens: 800, // Perplexity 모든 모델
+        max_tokens: cappedMaxTokens,
         temperature: temperature ?? 0.9,
         top_p: 0.9,
       })
@@ -745,7 +818,7 @@ async function callPerplexity(model: string, messages: any[], userAttachments?: 
         apiKeyManager.handleRateLimitError('perplexity', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
         const nextKey = apiKeyManager.getAvailableKey('perplexity');
         if (nextKey && nextKey !== apiKey) {
-          return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature);
+          return callPerplexity(model, messages, userAttachments, retryCount + 1, temperature, maxOutputTokens);
         }
         const availability = apiKeyManager.getNextAvailableTime('perplexity');
         throw new Error('[ERR_RATE_04] Perplexity rate limit');
@@ -849,7 +922,7 @@ async function callGrokVideo(prompt: string, durationSeconds: number): Promise<s
 }
 
 // xAI Grok 텍스트 API 호출
-async function callGrok(modelId: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number): Promise<string> {
+async function callGrok(modelId: string, messages: any[], userAttachments?: UserAttachment[], retryCount: number = 0, temperature?: number, maxOutputTokens?: number): Promise<string> {
   const apiKey = apiKeyManager.getAvailableKey('xai');
   if (!apiKey) {
     throw new Error('[ERR_KEY_05] xAI API key not configured.');
@@ -900,7 +973,7 @@ async function callGrok(modelId: string, messages: any[], userAttachments?: User
       body: JSON.stringify({
         model: xaiModel,
         messages: finalMessages,
-        max_tokens: 2000,
+        max_tokens: typeof maxOutputTokens === 'number' ? Math.min(2000, maxOutputTokens) : 2000,
         temperature: temperature ?? 0.7,
         stream: false,
       }),
@@ -921,7 +994,7 @@ async function callGrok(modelId: string, messages: any[], userAttachments?: User
         apiKeyManager.handleRateLimitError('xai', apiKey, rateLimitInfo.resetTime, rateLimitInfo.rateLimitType);
         const nextKey = apiKeyManager.getAvailableKey('xai');
         if (nextKey && nextKey !== apiKey) {
-          return callGrok(modelId, messages, userAttachments, retryCount + 1, temperature);
+          return callGrok(modelId, messages, userAttachments, retryCount + 1, temperature, maxOutputTokens);
         }
       }
     }
@@ -1017,7 +1090,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel, videoSeconds } = await request.json();
+    const { modelId, messages, userAttachments, persona, language, temperature, storedFacts, conversationSummary, speechLevel, videoSeconds, chainMaxOutputTokens } = await request.json();
+    const normalizedChainMaxOutputTokens = normalizeMaxOutputTokens(chainMaxOutputTokens);
 
     const resolvedLanguage = (language === 'en' || language === 'ja' || language === 'ko') ? language : 'ko';
     const speechStyle = speechLevel === 'informal'
@@ -1134,7 +1208,7 @@ Example style:
     }
 
     // 마지막 사용자 메시지 검증 (고의 에러 방지)
-    const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+    const lastUserMsg = findLastMessageByRole(messages, 'user');
     if (lastUserMsg) {
       const content = typeof lastUserMsg.content === 'string' ? lastUserMsg.content.trim() : '';
       // 빈 메시지 차단
@@ -1175,19 +1249,11 @@ Example style:
     }
 
     // 모델 제공사 판별
-    const ANTHROPIC_MODEL_IDS = new Set(['haiku35', 'sonnet35', 'haiku45', 'sonnet45', 'opus45', 'sonnet46', 'opus46', 'opus4']);
-    const PERPLEXITY_MODEL_IDS = new Set(['sonar', 'sonarPro', 'deepResearch']);
-    const IMAGE_MODEL_IDS = new Set(['gptimage1', 'dalle3']);
-    const CODEX_MODEL_IDS = new Set(['codex']);
-    const GROK_TEXT_IDS = new Set(['grok3mini','grok3','grok4fastNR','grok4fastR','grok41fastNR','grok41fastR','grok40709','grokCodeFast1']);
-    const GROK_IMAGE_IDS = new Set(['grokImagine','grok2image']);
-    const SORA_VIDEO_IDS = new Set(['sora2_720p','sora2pro_720p','sora2pro_1024p']);
-    const GROK_VIDEO_IDS = new Set(['grokImagineVideo']);
     const isGrokModel = GROK_TEXT_IDS.has(modelId) || GROK_IMAGE_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId);
 
     // 영상 모델 먼저 처리
     if (SORA_VIDEO_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId)) {
-      const userMsg = messages.filter((m: any) => m.role === 'user').pop();
+      const userMsg = findLastMessageByRole(messages, 'user');
       const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
       const duration = Math.max(1, Math.min(50, Number(videoSeconds) || 5));
       let videoResult: string;
@@ -1210,51 +1276,19 @@ Example style:
 
     // GPT 스트리밍 모델: ReadableStream으로 감싸서 즉시 반환 (Netlify 안전 패턴)
     if (isStreamableGPT && OPENAI_STREAMING_ALLOWED) {
-      const stream = new ReadableStream({
-        async start(ctrl) {
-          try {
-            const openaiRes = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true) as Response;
-            
-            if (!openaiRes.body) {
-              throw new Error('OpenAI response has no body');
-            }
-            
-            const reader = openaiRes.body.getReader();
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                ctrl.enqueue(value);
-              }
-            } finally {
-              reader.releaseLock();
-            }
-            ctrl.close();
-          } catch (err: any) {
-            // 스트림 내부 에러를 에러코드로 전달
-            console.error('[Stream Error]:', err.message);
-            const errCode = err.message?.includes('ERR_') ? err.message.match(/ERR_\w+/)?.[0] || 'ERR_STREAM' : 'ERR_STREAM';
-            const errEvent = `data: ${JSON.stringify({ error: errCode })}\n\ndata: [DONE]\n\n`;
-            ctrl.enqueue(new TextEncoder().encode(errEvent));
-            ctrl.close();
-          }
-        }
-      });
+      const openaiRes = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, true, normalizedChainMaxOutputTokens) as Response;
+      if (!openaiRes.body) {
+        throw new Error('OpenAI response has no body');
+      }
 
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache, no-store',
-          'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no',
-          'X-Content-Type-Options': 'nosniff',
-        },
+      return new Response(openaiRes.body, {
+        headers: OPENAI_STREAM_HEADERS,
       });
     }
 
     // Grok 이미지 생성 모델: JSON 응답
     if (GROK_IMAGE_IDS.has(modelId)) {
-      const userMsg = messages.filter((m: any) => m.role === 'user').pop();
+      const userMsg = findLastMessageByRole(messages, 'user');
       const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
       const imageContent = await callGrokImage(modelId, prompt);
       return NextResponse.json({ content: imageContent });
@@ -1268,55 +1302,23 @@ Example style:
       modelId.startsWith('perplexity') ||
       PERPLEXITY_MODEL_IDS.has(modelId) ||
       GROK_TEXT_IDS.has(modelId);
+    const instructedMessages = isPseudoStreamable ? applyLanguageInstruction(messages) : messages;
 
     if (isPseudoStreamable) {
       // 1) 먼저 전체 응답 수신
       let responseContent: string;
       if (modelId.startsWith('gemini')) {
-        responseContent = await callGemini(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+        responseContent = await callGemini(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
       } else if (modelId.startsWith('claude') || ANTHROPIC_MODEL_IDS.has(modelId)) {
-        responseContent = await callAnthropic(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+        responseContent = await callAnthropic(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
       } else if (GROK_TEXT_IDS.has(modelId)) {
-        responseContent = await callGrok(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+        responseContent = await callGrok(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
       } else {
-        responseContent = await callPerplexity(modelId, applyLanguageInstruction(messages), userAttachments, 0, temperature);
+        responseContent = await callPerplexity(modelId, instructedMessages, userAttachments, 0, temperature, normalizedChainMaxOutputTokens);
       }
 
-      // 2) pseudo-streaming: 가변 청크 크기로 타이핑 효과 극대화
-      // - 초반(0~200자): 작은 청크(4자) → 빠른 첫 글자 체감
-      // - 중반(200~1000자): 중간 청크(12자)
-      // - 후반(1000자~): 큰 청크(40자) → 빠른 완료
-      const encoder = new TextEncoder();
-      const sseChunks: Uint8Array[] = [];
-      for (let i = 0; i < responseContent.length; ) {
-        const chunkSize = i < 200 ? 4 : i < 1000 ? 12 : 40;
-        const chunk = responseContent.slice(i, i + chunkSize);
-        sseChunks.push(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`));
-        i += chunkSize;
-      }
-      sseChunks.push(encoder.encode('data: [DONE]\n\n'));
-
-      const stream = new ReadableStream({
-        start(ctrl) {
-          try {
-            for (const chunk of sseChunks) ctrl.enqueue(chunk);
-            ctrl.close();
-          } catch (err: any) {
-            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'ERR_STREAM' })}\n\ndata: [DONE]\n\n`));
-            ctrl.close();
-          }
-        }
-      });
-
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache, no-store',
-          'Connection': 'keep-alive',
-          'X-Accel-Buffering': 'no',
-          'X-Content-Type-Options': 'nosniff',
-          'Transfer-Encoding': 'chunked',
-        },
+      return new Response(buildPseudoStream(responseContent), {
+        headers: PSEUDO_STREAM_HEADERS,
       });
     }
 
@@ -1324,7 +1326,7 @@ Example style:
     let responseContent: string;
 
     if (isOpenAIModel) {
-      responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory) as string;
+      responseContent = await callOpenAI(modelId, messages, userAttachments, persona, languageInstructionWithMemory, false, normalizedChainMaxOutputTokens) as string;
     } else {
       if (DEBUG_LOGS) {
         console.log('[Chat API] Unknown model, using demo response:', modelId);

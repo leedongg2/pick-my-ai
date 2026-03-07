@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Sparkles, Loader2, Lock } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useStore } from '@/store';
+import { shallow } from 'zustand/shallow';
 
 type Props = {
   question: string;
@@ -14,10 +15,21 @@ type Props = {
 };
 
 export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, language, compact }) => {
-  const { smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed } = useStore();
+  const { smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed } = useStore(
+    (state) => ({
+      smartRouterPurchased: state.smartRouterPurchased,
+      smartRouterFreeUsed: state.smartRouterFreeUsed,
+      setSmartRouterFreeUsed: state.setSmartRouterFreeUsed,
+    }),
+    shallow
+  );
   const [recommendation, setRecommendation] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const routerModels = useMemo(
+    () => models.map((m) => ({ id: m.id, displayName: m.displayName, description: m.description || '' })),
+    [models]
+  );
 
   const handleAnalyze = useCallback(async (premium = false) => {
     if (!question.trim()) return;
@@ -35,7 +47,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question,
-          models: models.map(m => ({ id: m.id, displayName: m.displayName, description: m.description || '' })),
+          models: routerModels,
           speechLevel: speechLevel || 'formal',
           language: language || 'ko',
           premium,
@@ -49,7 +61,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
     } finally {
       setLoading(false);
     }
-  }, [question, models, speechLevel, language]);
+  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed]);
 
   if (!question.trim() || models.length === 0) return null;
 

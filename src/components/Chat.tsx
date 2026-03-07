@@ -9,6 +9,7 @@ import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bo
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
+import type { ChatMessage } from '@/types';
 import { useTranslation } from '@/utils/translations';
 import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
 import { extractSummary, buildConversationContext, ConversationSummary } from '@/utils/summaryExtractor';
@@ -116,7 +117,7 @@ type Attachment = {
  };
 
  type ChatMessageRowProps = {
-   msg: any;
+   msg: ChatMessage;
    msgIndex: number;
    overrideContent?: string;
    modelById: Map<string, any>;
@@ -415,8 +416,17 @@ export const Chat: React.FC = () => {
   );
 
   // 스트리밍 content Map: 버전 카운터만 구독 (Map 복사 없이 O(1) 리렌더 트리거)
-  useStore((state) => state._streamingVersion);
-  const streamingContent = useStore.getState()._streamingContent;
+  const streamingState = useStore(
+    (state) =>
+      draftMessageId
+        ? null
+        : {
+            version: state._streamingVersion,
+            content: state._streamingContent,
+          },
+    shallow
+  );
+  const streamingContent = streamingState?.content;
 
   const selectedModelPiWon = useMemo(() => {
     const m = models.find(m => m.id === selectedModelId);
@@ -558,6 +568,8 @@ export const Chat: React.FC = () => {
     [chatSessions, currentSessionId]
   );
 
+  const currentMessages = useMemo<ChatMessage[]>(() => currentSession?.messages || [], [currentSession]);
+
   const modelById = useMemo(() => {
     const map = new Map<string, any>();
     for (const m of models) {
@@ -596,6 +608,56 @@ export const Chat: React.FC = () => {
     }),
     [models, walletCredits]
   );
+
+  const startDraftMessage = useCallback((messageId: string | null) => {
+    if (!messageId) return;
+    draftContentRef.current = '';
+    lastDraftFlushRef.current = 0;
+    setDraftMessageId(messageId);
+    setDraftContent('');
+  }, []);
+
+  const flushDraftMessage = useCallback((content: string, force: boolean = false) => {
+    draftContentRef.current = content;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!force && STREAMING_DRAFT_UI_THROTTLE_MS > 0 && now - lastDraftFlushRef.current < STREAMING_DRAFT_UI_THROTTLE_MS) {
+      return;
+    }
+    lastDraftFlushRef.current = now;
+    setDraftContent(content);
+  }, []);
+
+  const clearDraftMessage = useCallback(() => {
+    draftContentRef.current = '';
+    lastDraftFlushRef.current = 0;
+    setDraftMessageId(null);
+    setDraftContent('');
+  }, []);
+
+  const bookmarkedMessageIds = useMemo(
+    () => new Set(bookmarkedMessages.map((bookmark) => bookmark.id)),
+    [bookmarkedMessages]
+  );
+
+  const filteredSessions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sortedSessions;
+    return sortedSessions.filter((session) => {
+      if (session.title.toLowerCase().includes(q)) return true;
+      return session.messages.some(
+        (m) => typeof m.content === 'string' && m.content.toLowerCase().includes(q)
+      );
+    });
+  }, [sortedSessions, searchQuery]);
+
+  const lastAssistantMsgId = useMemo(() => {
+    for (let i = currentMessages.length - 1; i >= 0; i -= 1) {
+      if (currentMessages[i].role === 'assistant') {
+        return currentMessages[i].id;
+      }
+    }
+    return null;
+  }, [currentMessages]);
   
   // Close plus menu when clicking outside
   useEffect(() => {
@@ -628,7 +690,8 @@ export const Chat: React.FC = () => {
   useEffect(() => {
     setIsLoading(false);
     streamingRef.current = false;
-  }, [currentSessionId]);
+    clearDraftMessage();
+  }, [currentSessionId, clearDraftMessage]);
   
   // Set default model when available models change (client-side only)
   useEffect(() => {
@@ -648,12 +711,10 @@ export const Chat: React.FC = () => {
         if (data.status === 'completed' && data.result) {
           const extracted = extractMemoryForDisplay(data.result);
           if (extracted.facts.length) addStoredFacts(extracted.facts);
-          updateMessageContent(currentSessionId, batchPendingMessageId, extracted.displayText);
           finalizeMessageContent(currentSessionId, batchPendingMessageId, extracted.displayText);
           setBatchPendingMessageId(null);
           clearInterval(interval);
         } else if (data.status === 'failed') {
-          updateMessageContent(currentSessionId, batchPendingMessageId, '⚠️ 답변 생성에 실패했습니다. 다시 시도해 주세요.');
           finalizeMessageContent(currentSessionId, batchPendingMessageId, '⚠️ 답변 생성에 실패했습니다. 다시 시도해 주세요.');
           setBatchPendingMessageId(null);
           clearInterval(interval);
@@ -661,7 +722,7 @@ export const Chat: React.FC = () => {
       } catch {}
     }, 30000);
     return () => clearInterval(interval);
-  }, [batchPendingMessageId, currentSessionId, updateMessageContent, finalizeMessageContent, addStoredFacts]);
+  }, [batchPendingMessageId, currentSessionId, finalizeMessageContent, addStoredFacts]);
 
   // 템플릿에서 "사용하기" 선택 시: 입력창 자동 채움 + 모달 닫기
   useEffect(() => {
@@ -687,7 +748,7 @@ export const Chat: React.FC = () => {
   // Scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom();
-  }, [currentSession?.messages.length, scrollToBottom]);
+  }, [currentMessages.length, scrollToBottom]);
 
   // textarea 자동 높이 조절
   useEffect(() => {
@@ -843,7 +904,7 @@ export const Chat: React.FC = () => {
     const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
     const msg = session?.messages.find(m => m.id === msgId);
     if (!msg) return;
-    const isAlreadyBookmarked = bookmarkedMessages.some(b => b.id === msgId);
+    const isAlreadyBookmarked = bookmarkedMessageIds.has(msgId);
     if (isAlreadyBookmarked) {
       removeBookmark(msgId);
       toast.success('북마크가 해제되었습니다.');
@@ -858,7 +919,7 @@ export const Chat: React.FC = () => {
       });
       toast.success('북마크에 저장했습니다! ⭐');
     }
-  }, [currentSessionId, bookmarkedMessages, addBookmark, removeBookmark]);
+  }, [currentSessionId, bookmarkedMessageIds, addBookmark, removeBookmark]);
 
   const handleTTS = useCallback((content: string) => {
     if (!window.speechSynthesis) { toast.error('이 브라우저는 TTS를 지원하지 않습니다.'); return; }
@@ -932,18 +993,30 @@ export const Chat: React.FC = () => {
     const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
     if (!session) return;
     const messages = session.messages;
-    const lastAssistantIdx = [...messages].reverse().findIndex(m => m.role === 'assistant');
-    if (lastAssistantIdx === -1) return;
-    const realIdx = messages.length - 1 - lastAssistantIdx;
+    let realIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'assistant') {
+        realIdx = i;
+        break;
+      }
+    }
+    if (realIdx === -1) return;
     const lastAssistant = messages[realIdx];
-    const lastUserMsg = messages.slice(0, realIdx).reverse().find(m => m.role === 'user');
-    if (!lastUserMsg) return;
+    let hasUserMessage = false;
+    for (let i = realIdx - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        hasUserMessage = true;
+        break;
+      }
+    }
+    if (!hasUserMessage) return;
     const targetModelId = withModelId || lastAssistant.modelId || selectedModelId;
     const credits = walletCredits?.[targetModelId] || 0;
     if (credits <= 0) { toast.error(`${modelById.get(targetModelId)?.displayName} 크레딧이 부족합니다.`); return; }
     setIsLoading(true);
+    streamingRef.current = true;
     setIsCancelled(false);
-    updateMessageContent(currentSessionId, lastAssistant.id, '');
+    startDraftMessage(lastAssistant.id);
     const controller = new AbortController();
     abortControllerRef.current = controller;
     try {
@@ -958,14 +1031,17 @@ export const Chat: React.FC = () => {
       if (!res.ok) throw new Error('재생성 실패');
       const data = await res.json();
       const newContent = data.content || '';
+      flushDraftMessage(newContent, true);
       finalizeMessageContent(currentSessionId, lastAssistant.id, newContent);
     } catch (e: any) {
       if (e.name !== 'AbortError') toast.error('재생성에 실패했습니다.');
     } finally {
+      clearDraftMessage();
       setIsLoading(false);
       streamingRef.current = false;
+      abortControllerRef.current = null;
     }
-  }, [currentSessionId, selectedModelId, walletCredits, modelById, updateMessageContent, finalizeMessageContent, deductCredit, temperature, language, speechLevel]);
+  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage]);
 
   const handleSendMessage = useCallback(async () => {
     if (!message.trim() || !selectedModelId || !selectedModel) {
@@ -1010,7 +1086,7 @@ export const Chat: React.FC = () => {
       const sessionForThisRequest = sessionIdForThisRequest
         ? liveState.chatSessions.find((s: any) => s.id === sessionIdForThisRequest)
         : null;
-      const currentMessages = sessionForThisRequest?.messages || currentSession?.messages || [];
+      const currentMessages = sessionForThisRequest?.messages || [];
       const newUserMessage = {
         role: 'user' as const,
         content: msg
@@ -1058,6 +1134,9 @@ export const Chat: React.FC = () => {
           timestamp: new Date().toISOString(),
           creditUsed: 1
         });
+        if (STREAMING_DRAFT_V2) {
+          startDraftMessage(assistantMessageId);
+        }
       }
       
       // UI 업데이트 후 스크롤 (한 번만)
@@ -1086,14 +1165,13 @@ export const Chat: React.FC = () => {
             }),
           });
           if (batchRes.ok) {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
             finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
             setBatchPendingMessageId(assistantMessageId);
           } else {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
           }
         } catch {
-          updateMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
         }
         setIsLoading(false);
         streamingRef.current = false;
@@ -1106,13 +1184,13 @@ export const Chat: React.FC = () => {
       const requestTimeout = isVideoModel ? 300000 : 300000; // 영상: 5분, 일반: 5분
       const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
-      const buildRequestBody = () => JSON.stringify({
+      const requestPayload = {
         messages: apiMessages,
         modelId: selectedModelId,
-        temperature: temperature,
+        temperature,
         maxTokens: 4096,
         language,
-        speechLevel: useStore.getState().speechLevel,
+        speechLevel,
         storedFacts,
         conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
         persona: activePersona ? {
@@ -1128,14 +1206,16 @@ export const Chat: React.FC = () => {
           dataUrl: a.dataUrl,
           content: a.content
         }))
-      });
+      };
+      const serializedRequestBody = JSON.stringify(requestPayload);
+      const requestHeaders = { 'Content-Type': 'application/json' };
 
       let response;
       try {
         response = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: buildRequestBody(),
+          headers: requestHeaders,
+          body: serializedRequestBody,
           signal: controller.signal
         });
         // 500/503 서버 에러 시 1.5초 후 1회 자동 재시도
@@ -1143,8 +1223,8 @@ export const Chat: React.FC = () => {
           await new Promise(r => setTimeout(r, 1500));
           response = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: buildRequestBody(),
+            headers: requestHeaders,
+            body: serializedRequestBody,
             signal: controller.signal
           });
         }
@@ -1212,7 +1292,11 @@ export const Chat: React.FC = () => {
         const rafUpdate = () => {
           if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
             lastRenderedContent = accumulated;
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+            if (STREAMING_DRAFT_V2) {
+              flushDraftMessage(accumulated);
+            } else {
+              updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+            }
             scrollToBottom(false);
           }
           rafPending = false;
@@ -1261,7 +1345,11 @@ export const Chat: React.FC = () => {
           // 스트림 완료: RAF 루프 종료 후 최종 내용 반영
           streamDone = true;
           if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+            if (STREAMING_DRAFT_V2) {
+              flushDraftMessage(accumulated, true);
+            } else {
+              updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+            }
             scrollToBottom(false);
           }
           if (streamError) throw streamError;
@@ -1269,25 +1357,32 @@ export const Chat: React.FC = () => {
           reader.releaseLock();
         }
         
-        // 스트리밍 완료 후 빈 응답 체크 (에러가 없을 때만)
-        if (!streamError && !accumulated.trim()) {
+        // 스트리밍 완료 후 응답 처리
+        if (accumulated && accumulated.trim()) {
+          // 정상 응답: 메모리/요약 추출
+          const extracted = extractMemoryForDisplay(accumulated);
+          if (extracted.facts.length) {
+            addStoredFacts(extracted.facts);
+          }
+          if (sessionIdForThisRequest && assistantMessageId) {
+            if (STREAMING_DRAFT_V2) {
+              flushDraftMessage(extracted.displayText, true);
+            }
+            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          }
+        } else if (!streamError) {
+          // 에러 없이 빈 응답인 경우만 에러 처리
           const fallback = language === 'en'
             ? 'Response was interrupted. Please try again.'
             : '응답이 중단되었어요. 다시 시도해 주세요.';
           if (sessionIdForThisRequest && assistantMessageId) {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
+            if (STREAMING_DRAFT_V2) {
+              flushDraftMessage(fallback, true);
+            } else {
+              updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
+            }
           }
           throw new Error('ERR_EMPTY_01');
-        }
-        
-        // 스트리밍 완료 후 메모리/요약 추출
-        const extracted = extractMemoryForDisplay(accumulated);
-        if (extracted.facts.length) {
-          addStoredFacts(extracted.facts);
-        }
-        if (sessionIdForThisRequest && assistantMessageId) {
-          updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
-          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
         }
         try {
           const { summary } = extractSummary(accumulated);
@@ -1326,7 +1421,9 @@ export const Chat: React.FC = () => {
           addStoredFacts(extracted.facts);
         }
         if (sessionIdForThisRequest && assistantMessageId) {
-          updateMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          if (STREAMING_DRAFT_V2) {
+            flushDraftMessage(extracted.displayText, true);
+          }
           finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
           setTimeout(() => scrollToBottom(true), 100);
         }
@@ -1466,6 +1563,7 @@ export const Chat: React.FC = () => {
         toast.error(display.message + refundNote);
       }
     } finally {
+      clearDraftMessage();
       setIsLoading(false);
       streamingRef.current = false;
       abortControllerRef.current = null;
@@ -1484,7 +1582,7 @@ export const Chat: React.FC = () => {
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, walletCredits, currentSession, currentSessionId, deductCredit, refundCredit, selectedModelPiWon, addMessage, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries]);
+  }, [message, selectedModelId, selectedModel, walletCredits, currentSessionId, deductCredit, refundCredit, selectedModelPiWon, addMessage, addCredits, attachments, temperature, language, activePersona, storedFacts, addStoredFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries, isBatchModel, isVideoModel, videoSeconds, startDraftMessage, flushDraftMessage, clearDraftMessage]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
@@ -1857,12 +1955,7 @@ export const Chat: React.FC = () => {
         {/* 대화 목록 */}
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <div className="space-y-1">
-            {sortedSessions.filter(session => {
-              if (!searchQuery.trim()) return true;
-              const q = searchQuery.toLowerCase();
-              if (session.title.toLowerCase().includes(q)) return true;
-              return session.messages.some(m => (m.content as string)?.toLowerCase().includes(q));
-            }).map(session => (
+            {filteredSessions.map(session => (
               <div
                 key={session.id}
                 className={cn(
@@ -1974,7 +2067,7 @@ export const Chat: React.FC = () => {
             ref={messagesContainerRef}
             className={cn(
               "flex-1 chat-message-card",
-              currentSession?.messages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
+              currentMessages.length === 0 ? "overflow-hidden" : "overflow-y-auto"
             )}
             onScroll={(e) => {
               const container = e.currentTarget;
@@ -2015,25 +2108,24 @@ export const Chat: React.FC = () => {
               }
             }}
           >
-          {currentSession?.messages.length === 0 ? (
+          {currentMessages.length === 0 ? (
             <div className="text-center px-4 flex items-center justify-center h-full">
               <h1 className="text-4xl font-bold text-gray-800">{t.chat.welcome}</h1>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto px-6 pt-6">
               {(() => {
-                const messages = currentSession?.messages || [];
-                const shouldUseDraftSplit = STREAMING_DRAFT_V2 && !!draftMessageId;
+                const messages = currentMessages;
+                const shouldUseDraftSplit = !!draftMessageId;
                 const draftIndex = shouldUseDraftSplit
-                  ? messages.findIndex((m) => m.id === draftMessageId)
+                  ? messages.findIndex((m: ChatMessage) => m.id === draftMessageId)
                   : -1;
                 const hasDraftInMessages = shouldUseDraftSplit && draftIndex >= 0;
 
-                const lastAssistantMsgId = [...messages].reverse().find(m => m.role === 'assistant')?.id;
-                const renderMessage = (msg: any, msgIndex: number, overrideContent?: string) => {
+                const renderMessage = (msg: ChatMessage, msgIndex: number, overrideContent?: string) => {
                   // _streamingContent Map에서 스트리밍 중인 content 우선 사용
                   const streamKey = currentSessionId ? `${currentSessionId}:${msg.id}` : null;
-                  const liveContent = streamKey ? streamingContent.get(streamKey) : undefined;
+                  const liveContent = streamKey ? streamingContent?.get(streamKey) : undefined;
                   const resolvedContent = overrideContent ?? liveContent ?? undefined;
                   return (
                   <ChatMessageRow
@@ -2046,26 +2138,26 @@ export const Chat: React.FC = () => {
                     onDownloadImage={handleDownloadImage}
                     isStreaming={isLoading && msg.role === 'assistant' && !msg.content && msgIndex === messages.length - 1}
                     isLastAssistant={msg.role === 'assistant' && msg.id === lastAssistantMsgId && !isLoading}
-                    isBookmarked={bookmarkedMessages.some(b => b.id === msg.id)}
+                    isBookmarked={bookmarkedMessageIds.has(msg.id)}
                     onBookmark={msg.role === 'assistant' ? handleBookmark : undefined}
                     onTTS={msg.role === 'assistant' ? handleTTS : undefined}
                     onRegenerate={msg.role === 'assistant' && msg.id === lastAssistantMsgId && !isLoading ? () => handleRegenerate() : undefined}
-                    availableModels={availableModels}
+                    availableModels={availableModels.filter(m => m.id !== msg.modelId)}
                     onRegenerateWithModel={(modelId) => handleRegenerate(modelId)}
                   />
                   );
                 };
 
                 if (!hasDraftInMessages) {
-                  return <>{messages.map((msg, msgIndex) => renderMessage(msg, msgIndex))}</>;
+                  return <>{messages.map((msg: ChatMessage, msgIndex: number) => renderMessage(msg, msgIndex))}</>;
                 }
 
                 const beforeDraft = messages.slice(0, draftIndex);
                 const draftMsg = messages[draftIndex];
                 const afterDraft = messages.slice(draftIndex + 1);
 
-                const beforeDraftNodes = beforeDraft.map((msg, idx) => renderMessage(msg, idx));
-                const afterDraftNodes = afterDraft.map((msg, idx) => renderMessage(msg, draftIndex + 1 + idx));
+                const beforeDraftNodes = beforeDraft.map((msg: ChatMessage, idx: number) => renderMessage(msg, idx));
+                const afterDraftNodes = afterDraft.map((msg: ChatMessage, idx: number) => renderMessage(msg, draftIndex + 1 + idx));
 
                 return (
                   <>

@@ -42,6 +42,76 @@ import { recordChatPerfLsSetItem } from '@/utils/chatPerf';
 type AppLanguage = 'ko' | 'en' | 'ja';
 
 const MAX_STORED_FACTS = 50;
+const PERSIST_WRITE_DEBOUNCE_MS = 150;
+const persistedValueCache = new Map<string, string>();
+const pendingPersistWrites = new Map<string, string>();
+let persistWriteTimer: ReturnType<typeof setTimeout> | null = null;
+
+const flushPendingPersistWrites = () => {
+  if (typeof window === 'undefined' || pendingPersistWrites.size === 0) return;
+
+  const storage = window.localStorage;
+  const entries = Array.from(pendingPersistWrites.entries());
+  pendingPersistWrites.clear();
+
+  for (const [key, value] of entries) {
+    const start = performance.now();
+    try {
+      storage.setItem(key, value);
+      persistedValueCache.set(key, value);
+    } finally {
+      recordChatPerfLsSetItem(key, value, performance.now() - start);
+    }
+  }
+};
+
+const queuePersistWrite = (key: string, value: string) => {
+  if (persistedValueCache.get(key) === value || pendingPersistWrites.get(key) === value) {
+    return;
+  }
+
+  pendingPersistWrites.set(key, value);
+
+  if (persistWriteTimer !== null) {
+    clearTimeout(persistWriteTimer);
+  }
+
+  persistWriteTimer = setTimeout(() => {
+    persistWriteTimer = null;
+    flushPendingPersistWrites();
+  }, PERSIST_WRITE_DEBOUNCE_MS);
+};
+
+const clearQueuedPersistWrite = (key: string) => {
+  pendingPersistWrites.delete(key);
+  persistedValueCache.delete(key);
+
+  if (persistWriteTimer !== null && pendingPersistWrites.size === 0) {
+    clearTimeout(persistWriteTimer);
+    persistWriteTimer = null;
+  }
+};
+
+const persistWindow = typeof window !== 'undefined'
+  ? (window as Window & { __pickMyAiPersistFlushBound__?: boolean })
+  : undefined;
+
+if (persistWindow && !persistWindow.__pickMyAiPersistFlushBound__) {
+  const flushPersistWrites = () => {
+    flushPendingPersistWrites();
+  };
+
+  persistWindow.addEventListener('pagehide', flushPersistWrites);
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushPersistWrites();
+      }
+    });
+  }
+
+  persistWindow.__pickMyAiPersistFlushBound__ = true;
+}
 
 interface AppState {
   // 설정 관련
@@ -297,7 +367,6 @@ interface AppState {
   getActivePoll: () => Poll | null;
   checkExpiredPolls: () => void;
 }
-
 
 export const useStore = create<AppState>()(
   persist(
@@ -807,67 +876,67 @@ export const useStore = create<AppState>()(
       },
       
       updateChatSessionTitle: (sessionId, newTitle) => {
-    set((state) => ({
-      chatSessions: state.chatSessions.map((session) =>
-        session.id === sessionId ? { ...session, title: newTitle, updatedAt: new Date() } : session
-      ),
-    }));
-  },
-  
-  deleteChatSession: (sessionId) => {
-    set((state) => {
-      const newSessions = state.chatSessions.filter(session => session.id !== sessionId);
+        set((state) => ({
+          chatSessions: state.chatSessions.map((session) =>
+            session.id === sessionId ? { ...session, title: newTitle, updatedAt: new Date() } : session
+          ),
+        }));
+      },
       
-      // If we're deleting the current session, switch to another one or create a new one
-      let newCurrentSessionId = state.currentSessionId;
-      if (sessionId === state.currentSessionId) {
-        newCurrentSessionId = newSessions[0]?.id || null;
-        
-        // If no sessions left, create a new one
-        if (!newCurrentSessionId) {
-          const language = state.language;
-          let title = '새 대화';
-          if (language === 'en') {
-            title = 'New Chat';
-          } else if (language === 'ja') {
-            title = '新しいチャット';
+      deleteChatSession: (sessionId) => {
+        set((state) => {
+          const newSessions = state.chatSessions.filter(session => session.id !== sessionId);
+          
+          // If we're deleting the current session, switch to another one or create a new one
+          let newCurrentSessionId = state.currentSessionId;
+          if (sessionId === state.currentSessionId) {
+            newCurrentSessionId = newSessions[0]?.id || null;
+            
+            // If no sessions left, create a new one
+            if (!newCurrentSessionId) {
+              const language = state.language;
+              let title = '새 대화';
+              if (language === 'en') {
+                title = 'New Chat';
+              } else if (language === 'ja') {
+                title = '新しいチャット';
+              }
+              
+              const newSession = {
+                id: `session-${Date.now()}`,
+                title,
+                messages: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              };
+              newSessions.push(newSession);
+              newCurrentSessionId = newSession.id;
+            }
           }
           
-          const newSession = {
-            id: `session-${Date.now()}`,
-            title,
-            messages: [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
+          return {
+            chatSessions: newSessions,
+            currentSessionId: newCurrentSessionId,
           };
-          newSessions.push(newSession);
-          newCurrentSessionId = newSession.id;
-        }
-      }
-      
-      return {
-        chatSessions: newSessions,
-        currentSessionId: newCurrentSessionId,
-      };
-    });
-  },
-
-  // 현재 세션을 설정하는 액션 추가
-  setCurrentSession: (sessionId) => {
-    // 세션 전환 시 기존 세션을 먼저 동기화하여 마지막 메시지 누락 방지
-    const state = get();
-    const prevId = state.currentSessionId;
-    if (prevId && state.isAuthenticated) {
-      const prevSession = state.chatSessions.find((s) => s.id === prevId);
-      if (prevSession) {
-        import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
-          debouncedSyncChatSession(prevSession.id, prevSession.title, prevSession.messages, prevSession.isStarred || false);
         });
-      }
-    }
-    set({ currentSessionId: sessionId });
-  },
-  
+      },
+      
+      // 현재 세션을 설정하는 액션 추가
+      setCurrentSession: (sessionId) => {
+        // 세션 전환 시 기존 세션을 먼저 동기화하여 마지막 메시지 누락 방지
+        const state = get();
+        const prevId = state.currentSessionId;
+        if (prevId && state.isAuthenticated) {
+          const prevSession = state.chatSessions.find((s) => s.id === prevId);
+          if (prevSession) {
+            import('@/lib/chatSync').then(({ debouncedSyncChatSession }) => {
+              debouncedSyncChatSession(prevSession.id, prevSession.title, prevSession.messages, prevSession.isStarred || false);
+            });
+          }
+        }
+        set({ currentSessionId: sessionId });
+      },
+      
       addMessage: (sessionId, message) => {
         set((state) => ({
           chatSessions: state.chatSessions.map(session =>
@@ -882,14 +951,14 @@ export const useStore = create<AppState>()(
         }));
         // 동기화는 finalizeMessageContent에서만 수행 (빈 content 저장 방지)
       },
-
+      
       updateMessageContent: (sessionId, messageId, content) => {
         // 극한 최적화: Map 객체 재사용 (복사 없음) + 버전 카운터만 증가 → O(1)
         const key = `${sessionId}:${messageId}`;
         get()._streamingContent.set(key, content);
         set((s) => ({ _streamingVersion: s._streamingVersion + 1 }));
       },
-
+      
       finalizeMessageContent: (sessionId, messageId, content) => {
         // 스트리밍 완료: chatSessions에 최종 content 반영 + Map에서 제거
         const key = `${sessionId}:${messageId}`;
@@ -911,7 +980,7 @@ export const useStore = create<AppState>()(
             ),
           };
         });
-
+        
         // 스트리밍 완료 후 즉시 동기화 (debounce 없이 저장 보장)
         const state = get();
         const session = state.chatSessions.find((s) => s.id === sessionId);
@@ -931,7 +1000,7 @@ export const useStore = create<AppState>()(
           });
         }
       },
-
+      
       addStoredFacts: (facts) => {
         const normalizeStoredFact = (fact: unknown) => {
           if (typeof fact !== 'string') return '';
@@ -943,13 +1012,13 @@ export const useStore = create<AppState>()(
           const compact = unbulleted.replace(/\s+/g, ' ');
           return compact.slice(0, 200);
         };
-
+        
         set((state) => {
           if (!Array.isArray(facts) || facts.length === 0) return state;
-
+          
           const normalized = facts.map(normalizeStoredFact).filter(Boolean);
           if (normalized.length === 0) return state;
-
+          
           const existing = Array.isArray(state.storedFacts) ? state.storedFacts : [];
           const merged: string[] = [...existing];
           const existingKeys = new Set(
@@ -957,18 +1026,18 @@ export const useStore = create<AppState>()(
               .map((f) => normalizeStoredFact(f).toLowerCase())
               .filter(Boolean)
           );
-
+          
           for (const fact of normalized) {
             const key = fact.toLowerCase();
             if (existingKeys.has(key)) continue;
             existingKeys.add(key);
             merged.push(fact);
           }
-
+          
           return { storedFacts: merged.slice(-MAX_STORED_FACTS) };
         });
       },
-
+      
       clearStoredFacts: () => {
         set({ storedFacts: [] });
       },
@@ -998,7 +1067,7 @@ export const useStore = create<AppState>()(
       })),
       setExchangeRateMemo: (memo) => set({ exchangeRateMemo: memo }),
       setPaymentFeeMemo: (memo) => set({ paymentFeeMemo: memo }),
-
+      
       // 피드백 관련 액션
       submitFeedback: async (payload: FeedbackPayload) => {
         const state = get();
@@ -1019,7 +1088,7 @@ export const useStore = create<AppState>()(
         set((state) => ({ feedbacks: [item, ...state.feedbacks] }));
         return true;
       },
-
+      
       // Settings actions
       // Feedback actions
       addFeedback: (item: FeedbackItem) => {
@@ -1114,11 +1183,11 @@ export const useStore = create<AppState>()(
           ),
         }));
       },
-
+      
       setActiveTemplate: (template: ChatTemplate | null) => {
         set({ activeTemplate: template });
       },
-
+      
       clearActiveTemplate: () => {
         set({ activeTemplate: null });
       },
@@ -1540,17 +1609,17 @@ export const useStore = create<AppState>()(
           bookmarkedMessages: state.bookmarkedMessages.filter(b => b.id !== msgId),
         }));
       },
-
+      
       // 스마트 라우터 구매
       setSmartRouterPurchased: (v: boolean) => set({ smartRouterPurchased: v }),
       setSmartRouterFreeUsed: (v: boolean) => set({ smartRouterFreeUsed: v }),
-
+      
       // 보험 구매
       setInsurancePurchased: (v: boolean) => set((state) => ({
         insurancePurchased: v,
         insurancePurchaseDate: v ? new Date().toISOString() : state.insurancePurchaseDate,
       })),
-
+      
       // 에러 시 크레딧 환불
       // - 토큰 없으면 환불 불가 (고의 에러 남용 방지)
       // - 일일 모델당 최대 5회 환불 상한
@@ -1558,19 +1627,19 @@ export const useStore = create<AppState>()(
       refundCredit: (modelId: string, piWon: number, refundToken?: string) => {
         const state = get();
         if (!state.wallet) return;
-
+        
         // 1) 토큰 검증: 실제 차감이 일어난 경우에만 환불 허용
         if (refundToken) {
           if (!state._pendingRefundTokens.has(refundToken)) return; // 유효하지 않은 토큰
         }
-
+        
         // 2) 일일 환불 횟수 상한 (모델당 하루 최대 5회)
         const MAX_DAILY_REFUNDS = 5;
         const today = new Date().toISOString().slice(0, 10);
         const todayRecord = state._refundCountToday[modelId];
         const todayCount = (todayRecord?.date === today) ? todayRecord.count : 0;
         if (todayCount >= MAX_DAILY_REFUNDS) return; // 상한 초과 시 환불 거부
-
+        
         // 보험 유효기간 확인 (90일)
         let hasInsurance = state.insurancePurchased;
         if (hasInsurance && state.insurancePurchaseDate) {
@@ -1589,7 +1658,7 @@ export const useStore = create<AppState>()(
             refundAmount = Math.floor(500 / Math.max(piWon, 1)) + 1;
           }
         }
-
+        
         set((s) => {
           if (!s.wallet) return s;
           const newCredits = { ...s.wallet.credits };
@@ -1618,16 +1687,16 @@ export const useStore = create<AppState>()(
           };
         });
       },
-
+      
       // PMC 스왑: 크레딧 → PMC (수수료 1원/개)
       swapCreditsToPMC: (items) => {
         const state = get();
         if (!state.wallet) return { success: false, totalFee: 0, totalPMC: 0 };
-
+        
         let totalCreditsDeducted: { [modelId: string]: number } = {};
         let totalPMC = 0;
         let totalFee = 0;
-
+        
         // 변환 가능 여부 검증
         for (const { modelId, qty, pricePerCredit } of items) {
           const available = state.wallet.credits[modelId] || 0;
@@ -1639,13 +1708,13 @@ export const useStore = create<AppState>()(
           totalPMC += pmc;
           totalFee += fee;
         }
-
+        
         // 크레딧 차감
         const newCredits = { ...state.wallet.credits };
         for (const [modelId, qty] of Object.entries(totalCreditsDeducted)) {
           newCredits[modelId] = (newCredits[modelId] || 0) - qty;
         }
-
+        
         const transaction: Transaction = {
           id: Date.now().toString(),
           userId: state.wallet.userId,
@@ -1654,7 +1723,7 @@ export const useStore = create<AppState>()(
           description: `크레딧 → PMC 환전 (수수료 ${totalFee}원)`,
           credits: Object.fromEntries(Object.entries(totalCreditsDeducted).map(([k, v]) => [k, -v])),
         };
-
+        
         set((state) => ({
           wallet: state.wallet ? {
             ...state.wallet,
@@ -1662,13 +1731,13 @@ export const useStore = create<AppState>()(
             transactions: [...state.wallet.transactions, transaction],
           } : state.wallet,
         }));
-
+        
         // PMC 적립
         get().earnPMC(totalPMC, `크레딧 환전 적립 (+${totalPMC} PMC)`);
-
+        
         return { success: true, totalFee, totalPMC };
       },
-
+      
       // 투표 관련 액션
       createPoll: (title: string, description: string) => {
         const state = get();
@@ -1849,7 +1918,7 @@ export const useStore = create<AppState>()(
           }
         }));
       },
-
+      
       setLanguage: (language) => set({ language }),
       setSpeechLevel: (level) => set({ speechLevel: level }),
       
@@ -1864,7 +1933,7 @@ export const useStore = create<AppState>()(
       clearCustomDesignTheme: () => {
         set({ customDesignTheme: { theme: null, elementColors: {} } });
       },
-
+      
       setSendButtonSymbol: (symbol: string) => set({ sendButtonSymbol: symbol }),
       setSendButtonSound: (sound: string) => set({ sendButtonSound: sound }),
       
@@ -1875,16 +1944,27 @@ export const useStore = create<AppState>()(
         const storage = localStorage;
 
         return {
-          getItem: storage.getItem.bind(storage),
-          setItem: (key: string, value: string) => {
-            const start = performance.now();
-            try {
-              storage.setItem(key, value);
-            } finally {
-              recordChatPerfLsSetItem(key, value, performance.now() - start);
+          getItem: (key: string) => {
+            const pendingValue = pendingPersistWrites.get(key);
+            if (pendingValue !== undefined) {
+              return pendingValue;
             }
+
+            const value = storage.getItem(key);
+            if (value === null) {
+              persistedValueCache.delete(key);
+            } else {
+              persistedValueCache.set(key, value);
+            }
+            return value;
           },
-          removeItem: storage.removeItem.bind(storage),
+          setItem: (key: string, value: string) => {
+            queuePersistWrite(key, value);
+          },
+          removeItem: (key: string) => {
+            clearQueuedPersistWrite(key);
+            storage.removeItem(key);
+          },
         };
       }),
       partialize: (state) => {

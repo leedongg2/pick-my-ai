@@ -2,6 +2,7 @@ import { AIModel } from '@/types';
 
 export const initialModels: AIModel[] = [
   { id: 'gpt4o', series: 'gpt', displayName: 'GPT-4o', piWon: 10, tier: 'mid', enabled: true, description: '멀티모달(이미지+텍스트) 이해 우수. 이미지 분석, 빠른 Q&A, 일상 질문에 최적', maxCharacters: 2000 },
+  { id: 'gpt41', series: 'gpt', displayName: 'GPT-4.1', piWon: 8, tier: 'low', enabled: true, description: '가성비 GPT. 일상적인 글쓰기·번역·요약. 비용 대비 성능 우수', maxCharacters: 2000 },
   { id: 'gpt5', series: 'gpt', displayName: 'GPT-5', piWon: 14, tier: 'low', enabled: true, description: 'OpenAI GPT-5. 복잡한 추론·코딩·분석에 최적. 창작 글쓰기, 수학 문제도 탁월', maxCharacters: 2000 },
   { id: 'gpt51', series: 'gpt', displayName: 'GPT-5.1', piWon: 55, tier: 'low', enabled: true, description: 'OpenAI GPT-5.1. 향상된 정확도와 지시 따르기. 비즈니스 문서·기획서 작성에 적합', maxCharacters: 2000 },
   { id: 'gpt52', series: 'gpt', displayName: 'GPT-5.2', piWon: 60, tier: 'low', enabled: true, description: 'OpenAI GPT-5.2 (Thinking). 최신 추론 모델. 코딩·에이전트 작업 세계 최고 수준', maxCharacters: 2000 },
