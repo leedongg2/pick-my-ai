@@ -1382,7 +1382,7 @@ export const Chat: React.FC = () => {
                   <button
                     onClick={() => finish('leave')}
                     className="px-3 py-1.5 bg-gray-200 text-gray-800 rounded text-xs font-medium"
-                  >나가기</button>
+                  >나가기 (크레딧 1회 보상)</button>
                 </div>
               </div>
             ),
@@ -1392,7 +1392,8 @@ export const Chat: React.FC = () => {
 
         if (userChoice === 'leave') {
           if (sid) {
-            const leaveContent = '응답을 중단했어요. 잠시 후 다시 시도해 주세요.';
+            const modelName = selectedModel?.displayName || currentModelId || 'AI';
+            const leaveContent = `응답을 중단했어요. 불편을 드려 죄송해요. ${modelName} 크레딧 1회를 보상해드렸어요.`;
             if (assistantMessageId) {
               finalizeMessageContent(sid, assistantMessageId, leaveContent);
             } else {
@@ -1422,20 +1423,39 @@ export const Chat: React.FC = () => {
               body: retryBody,
             });
             if (!retryResp.ok) {
-              const { errorReason } = await readApiErrorResponse(retryResp);
-              const retryError = errorReason || '재시도에 실패했습니다. 다시 시도해 주세요.';
-              if (sid) {
-                if (assistantMessageId) {
-                  finalizeMessageContent(sid, assistantMessageId, retryError);
-                } else {
-                  addMessage(sid, {
-                    id: crypto.randomUUID(),
-                    role: 'assistant' as const,
-                    content: retryError,
-                    modelId: currentModelId,
-                    timestamp: new Date().toISOString(),
-                    creditUsed: 0,
-                  });
+              if (retryResp.status === 429) {
+                const modelName = selectedModel?.displayName || currentModelId || 'AI';
+                const retryError = `현재 대기 중인 사용자가 너무 많아 응답이 어려워요. 진심으로 죄송합니다. ${modelName} 크레딧 3회를 보상해드렸어요.`;
+                if (sid) {
+                  if (assistantMessageId) {
+                    finalizeMessageContent(sid, assistantMessageId, retryError);
+                  } else {
+                    addMessage(sid, {
+                      id: crypto.randomUUID(),
+                      role: 'assistant' as const,
+                      content: retryError,
+                      modelId: currentModelId,
+                      timestamp: new Date().toISOString(),
+                      creditUsed: 0,
+                    });
+                  }
+                }
+              } else {
+                const { errorReason } = await readApiErrorResponse(retryResp);
+                const retryError = errorReason || '재시도에 실패했습니다. 다시 시도해 주세요.';
+                if (sid) {
+                  if (assistantMessageId) {
+                    finalizeMessageContent(sid, assistantMessageId, retryError);
+                  } else {
+                    addMessage(sid, {
+                      id: crypto.randomUUID(),
+                      role: 'assistant' as const,
+                      content: retryError,
+                      modelId: currentModelId,
+                      timestamp: new Date().toISOString(),
+                      creditUsed: 0,
+                    });
+                  }
                 }
               }
             } else {
@@ -1535,13 +1555,16 @@ export const Chat: React.FC = () => {
             content: errContent,
             modelId: currentModelId,
             timestamp: new Date().toISOString(),
-            creditUsed: 0,
+            creditUsed: 1,
           });
         }
       }
 
       if (errorCode !== 'ERR_CANCELLED') {
-        toast.error(display.message);
+        const refundNote = useStore.getState().insurancePurchased
+          ? ' (보험 적용 크레딧 환불 완료)'
+          : ' (크레딧 1회 환불 완료)';
+        toast.error(display.message + refundNote);
       }
     } finally {
       await refreshWalletCredits();
