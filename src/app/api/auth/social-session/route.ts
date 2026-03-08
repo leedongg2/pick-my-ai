@@ -9,12 +9,18 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { access_token, code } = body;
+    const { access_token, code, code_verifier } = body;
 
     let resolvedAccessToken = access_token;
 
-    // code가 있으면 Supabase Auth API로 직접 token 교환 (서버사이드 PKCE 대체)
     if (!resolvedAccessToken && code) {
+      if (!code_verifier) {
+        return NextResponse.json(
+          { error: 'PKCE verifier가 없어 인증 코드를 교환할 수 없습니다.' },
+          { status: 400 }
+        );
+      }
+
       console.log('[social-session] Exchanging code for token via Supabase Auth API...');
       const tokenRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=authorization_code`, {
         method: 'POST',
@@ -24,7 +30,7 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           auth_code: code,
-          code_verifier: '', // implicit 방식이므로 빈 값
+          code_verifier,
         }),
       });
 

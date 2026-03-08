@@ -7,11 +7,13 @@ import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
 import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square, Star, Volume2, RefreshCw, Search, FileText, Link2, Swords } from 'lucide-react';
 import { toast } from 'sonner';
+import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
 import type { ChatMessage } from '@/types';
 import { useTranslation } from '@/utils/translations';
 import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
+import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
 import { extractSummary, buildConversationContext, ConversationSummary } from '@/utils/summaryExtractor';
 import { renderLatex } from '@/utils/renderLatex';
 const GraphRenderer = dynamic(() => import('@/components/GraphRenderer').then(m => m.GraphRenderer), { ssr: false });
@@ -428,6 +430,7 @@ export const Chat: React.FC = () => {
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showQuestionAnalysis, setShowQuestionAnalysis] = useState(false);
   const [temperature, setTemperature] = useState(0.7);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showPersona, setShowPersona] = useState(false);
@@ -455,7 +458,6 @@ export const Chat: React.FC = () => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const autoScrollToastIdRef = useRef<string | number | null>(null);
   const isMountedRef = useRef(true);
-  const batchPendingRefundRef = useRef<{ messageId: string; modelId: string; piWon: number; refundToken: string } | null>(null);
   
   const {
     chatSessions,
@@ -468,10 +470,6 @@ export const Chat: React.FC = () => {
     finalizeMessageContent,
     storedFacts,
     addStoredFacts,
-    deductCredit,
-    refundCredit,
-    releasePendingRefundToken,
-    addCredits,
     setCurrentSession,
     models,
     walletCredits,
@@ -500,10 +498,6 @@ export const Chat: React.FC = () => {
       finalizeMessageContent: state.finalizeMessageContent,
       storedFacts: state.storedFacts,
       addStoredFacts: state.addStoredFacts,
-      deductCredit: state.deductCredit,
-      refundCredit: state.refundCredit,
-      releasePendingRefundToken: state.releasePendingRefundToken,
-      addCredits: state.addCredits,
       setCurrentSession: state.setCurrentSession,
       models: state.models,
       walletCredits: state.wallet?.credits ?? null,
@@ -524,7 +518,6 @@ export const Chat: React.FC = () => {
     shallow
   );
 
-  // 스트리밍 content Map: 버전 카운터만 구독 (Map 복사 없이 O(1) 리렌더 트리거)
   const streamingState = useStore(
     (state) =>
       draftMessageId
@@ -537,12 +530,88 @@ export const Chat: React.FC = () => {
   );
   const streamingContent = streamingState?.content;
 
-  const selectedModelPiWon = useMemo(() => {
-    const m = models.find(m => m.id === selectedModelId);
-    return m?.piWon ?? 1;
-  }, [models, selectedModelId]);
+  const { status: openAIStatus } = useOpenAIStatus();
+  const openAIBlockedReason = useMemo(
+    () => getOpenAIStatusBlockedMessage(openAIStatus.reason),
+    [openAIStatus.reason]
+  );
 
   const { t } = useTranslation();
+
+  const chatUi = useMemo(() => {
+    if (language === 'en') {
+      return {
+        remaining: 'Remaining',
+        analysisTitle: 'Question analysis',
+        analysisDesc: 'Get model recommendations for this prompt',
+        analysisEmpty: 'Enter a question first to see recommendations.',
+        templatesTitle: 'Chat templates',
+        templatesDesc: 'Use saved prompts',
+        compareTitle: 'Live comparison',
+        compareDesc: 'Ask multiple AI models together',
+        chainTitle: 'AI chain',
+        chainDesc: 'Let multiple AI models collaborate in sequence',
+        debateTitle: 'AI debate',
+        debateDesc: 'Two AI models debate the same topic',
+        exportTitle: 'Export chat',
+        personaTitle: 'Persona settings',
+        personaDesc: 'Adjust AI personality and tone',
+        filesTitle: 'Add files',
+        filesDesc: 'Upload images and text files',
+        responseStyle: 'Response style',
+        gpt5NoStyle: 'GPT-5 series models do not support response style adjustment.',
+        close: t.close,
+      };
+    }
+
+    if (language === 'ja') {
+      return {
+        remaining: '残り',
+        analysisTitle: '質問分析',
+        analysisDesc: '質問に合うモデルをおすすめします',
+        analysisEmpty: '質問を入力するとおすすめが表示されます。',
+        templatesTitle: 'チャットテンプレート',
+        templatesDesc: '保存したプロンプトを使う',
+        compareTitle: '同時比較',
+        compareDesc: '複数のAIに同時に質問する',
+        chainTitle: 'AIチェーン',
+        chainDesc: '複数のAIが順番に協力する',
+        debateTitle: 'AI討論',
+        debateDesc: '2つのAIが同じテーマで討論する',
+        exportTitle: 'チャットを書き出す',
+        personaTitle: 'ペルソナ設定',
+        personaDesc: 'AIの性格や話し方を調整する',
+        filesTitle: 'ファイル追加',
+        filesDesc: '画像やテキストファイルをアップロード',
+        responseStyle: '応答スタイル',
+        gpt5NoStyle: 'GPT-5シリーズは応答スタイルの調整に対応していません。',
+        close: t.close,
+      };
+    }
+
+    return {
+      remaining: '남은',
+      analysisTitle: '질문 분석',
+      analysisDesc: '질문에 맞는 AI 모델을 추천받기',
+      analysisEmpty: '질문을 입력하면 추천 결과가 표시됩니다.',
+      templatesTitle: '대화 템플릿',
+      templatesDesc: '저장된 프롬프트 사용',
+      compareTitle: '동시 비교',
+      compareDesc: '여러 AI에 동시에 질문',
+      chainTitle: 'AI 체인',
+      chainDesc: '여러 AI가 순서대로 협업',
+      debateTitle: 'AI 토론',
+      debateDesc: '두 AI가 같은 주제로 토론',
+      exportTitle: '대화 내보내기',
+      personaTitle: '페르소나 설정',
+      personaDesc: 'AI 성격 및 말투 조절',
+      filesTitle: '사진 및 파일 추가',
+      filesDesc: '이미지, 텍스트 파일 업로드',
+      responseStyle: '응답 스타일',
+      gpt5NoStyle: 'GPT-5 시리즈 모델은 응답 스타일 조절을 지원하지 않습니다.',
+      close: t.close,
+    };
+  }, [language, t.close]);
 
   const chatPerfEnabled = useMemo(() => isChatPerfEnabled(), []);
 
@@ -550,14 +619,12 @@ export const Chat: React.FC = () => {
     initChatPerfOnce();
   }, []);
 
-  // 컴포넌트 마운트 시 상태 초기화
   useEffect(() => {
     isMountedRef.current = true;
     draftContentRef.current = '';
     lastDraftFlushRef.current = 0;
     setDraftMessageId(null);
     setDraftContent('');
-    // 페이지가 다시 로드될 때 이전 상태 정리
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -580,6 +647,7 @@ export const Chat: React.FC = () => {
       setDraftContent('');
     };
   }, []);
+
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (streamingRef.current || !!abortControllerRef.current || sendInFlightRef.current) {
@@ -590,15 +658,13 @@ export const Chat: React.FC = () => {
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
-  // 링크 클릭 / 뒤로가기 시 스트리밍 중 경고
   useEffect(() => {
-    // Next.js 라우터 이벤트는 직접 감지할 수 없으므로 링크 클릭 감지
     const handleLinkClick = (e: MouseEvent) => {
       if (streamingRef.current || isLoading) {
         const target = e.target as HTMLElement;
@@ -609,7 +675,6 @@ export const Chat: React.FC = () => {
             e.preventDefault();
             e.stopPropagation();
           } else {
-            // 이동을 확인한 경우 상태 정리
             if (abortControllerRef.current) {
               abortControllerRef.current.abort();
               abortControllerRef.current = null;
@@ -622,7 +687,6 @@ export const Chat: React.FC = () => {
       }
     };
 
-    // 브라우저 뒤로가기/앞으로가기 감지
     const handlePopState = (e: PopStateEvent) => {
       if (streamingRef.current || isLoading) {
         const confirmLeave = window.confirm('AI가 답변을 생성하고 있습니다. 페이지를 떠나면 답변이 중단됩니다. 계속하시겠습니까?');
@@ -630,7 +694,6 @@ export const Chat: React.FC = () => {
           e.preventDefault();
           window.history.pushState(null, '', window.location.pathname);
         } else {
-          // 이동을 확인한 경우 상태 정리
           if (abortControllerRef.current) {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
@@ -644,7 +707,7 @@ export const Chat: React.FC = () => {
 
     document.addEventListener('click', handleLinkClick, true);
     window.addEventListener('popstate', handlePopState);
-    
+
     return () => {
       document.removeEventListener('click', handleLinkClick, true);
       window.removeEventListener('popstate', handlePopState);
@@ -670,7 +733,6 @@ export const Chat: React.FC = () => {
     [chatPerfEnabled, handleReactProfilerRender]
   );
 
-  // 메모이제이션으로 불필요한 재계산 방지
   const sortedSessions = useMemo(
     () =>
       [...chatSessions].sort(
@@ -679,8 +741,8 @@ export const Chat: React.FC = () => {
     [chatSessions]
   );
 
-  const currentSession = useMemo(() => 
-    chatSessions.find(s => s.id === currentSessionId), 
+  const currentSession = useMemo(
+    () => chatSessions.find((session) => session.id === currentSessionId),
     [chatSessions, currentSessionId]
   );
 
@@ -688,8 +750,8 @@ export const Chat: React.FC = () => {
 
   const modelById = useMemo(() => {
     const map = new Map<string, any>();
-    for (const m of models) {
-      map.set(m.id, m);
+    for (const model of models) {
+      map.set(model.id, model);
     }
     return map;
   }, [models]);
@@ -699,18 +761,14 @@ export const Chat: React.FC = () => {
     return modelById.get(selectedModelId) ?? null;
   }, [modelById, selectedModelId]);
 
-  const selectedModelMaxCharacters = useMemo(() => {
-    return selectedModel?.maxCharacters || 2500;
-  }, [selectedModel]);
-
+  const selectedModelMaxCharacters = useMemo(() => selectedModel?.maxCharacters || 2500, [selectedModel]);
   const isVideoModel = useMemo(() => selectedModel?.series === 'video', [selectedModel]);
   const isBatchModel = useMemo(() => !!selectedModel?.isBatch, [selectedModel]);
-  // 이미지 첨부 불가 모델 (dalle3, o3mini)
-  const isImageAttachDisabled = useMemo(() => {
-    return selectedModelId === 'dalle3' || selectedModelId === 'o3mini';
-  }, [selectedModelId]);
+  const isImageAttachDisabled = useMemo(
+    () => selectedModelId === 'dalle3' || selectedModelId === 'o3mini',
+    [selectedModelId]
+  );
 
-  // 영상 모델: 남은 크레딧(초) 계산
   const videoMaxSeconds = useMemo(() => {
     if (!isVideoModel || !selectedModelId) return 50;
     const credits = walletCredits?.[selectedModelId] || 0;
@@ -718,9 +776,9 @@ export const Chat: React.FC = () => {
   }, [isVideoModel, selectedModelId, walletCredits]);
 
   const availableModels = useMemo(
-    () => models.filter(m => {
-      const credits = walletCredits?.[m.id] || 0;
-      return credits > 0 && m.enabled;
+    () => models.filter((model) => {
+      const credits = walletCredits?.[model.id] || 0;
+      return credits > 0 && model.enabled;
     }),
     [models, walletCredits]
   );
@@ -750,6 +808,31 @@ export const Chat: React.FC = () => {
     setDraftContent('');
   }, []);
 
+  const refreshWalletCredits = useCallback(async () => {
+    if (!currentUser?.id) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/wallet', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to refresh wallet');
+      }
+
+      const data = await response.json();
+      if (data.wallet) {
+        useStore.setState({ wallet: data.wallet });
+      }
+    } catch (error) {
+      console.error('Failed to refresh wallet credits', error);
+    }
+  }, [currentUser?.id]);
+
   const bookmarkedMessageIds = useMemo(
     () => new Set(bookmarkedMessages.map((bookmark) => bookmark.id)),
     [bookmarkedMessages]
@@ -761,7 +844,7 @@ export const Chat: React.FC = () => {
     return sortedSessions.filter((session) => {
       if (session.title.toLowerCase().includes(q)) return true;
       return session.messages.some(
-        (m) => typeof m.content === 'string' && m.content.toLowerCase().includes(q)
+        (message) => typeof message.content === 'string' && message.content.toLowerCase().includes(q)
       );
     });
   }, [sortedSessions, searchQuery]);
@@ -774,25 +857,23 @@ export const Chat: React.FC = () => {
     }
     return null;
   }, [currentMessages]);
-  
-  // Close plus menu when clicking outside
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
         setShowPlusMenu(false);
       }
     };
-    
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
-  
+
   useEffect(() => {
-    // 세션이 없으면 새로 생성 (초기 진입 시에만)
     if (!currentSessionId && chatSessions.length === 0) {
-      const sessionId = createChatSession('새 대화');
+      createChatSession('새 대화');
     }
   }, [currentSessionId, chatSessions.length, createChatSession]);
 
@@ -802,55 +883,46 @@ export const Chat: React.FC = () => {
     }
   }, [currentSessionId, chatSessions, setCurrentSession]);
 
-  // 세션 전환 시 로딩 상태 초기화
   useEffect(() => {
     setIsLoading(false);
     streamingRef.current = false;
     clearDraftMessage();
   }, [currentSessionId, clearDraftMessage]);
-  
-  // Set default model when available models change (client-side only)
+
   useEffect(() => {
     if (availableModels.length > 0 && !selectedModelId) {
       setSelectedModelId(availableModels[0].id);
     }
   }, [availableModels, selectedModelId]);
 
-  // 48h 배치 결과 폴링 (30초마다)
   useEffect(() => {
     if (!batchPendingMessageId || !currentSessionId) return;
+
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/batch/status?sessionId=${currentSessionId}&messageId=${batchPendingMessageId}`);
         if (!res.ok) return;
+
         const data = await res.json();
         if (data.status === 'completed' && data.result) {
           const extracted = extractMemoryForDisplay(data.result);
           if (extracted.facts.length) addStoredFacts(extracted.facts);
-          const pendingRefund = batchPendingRefundRef.current;
-          if (pendingRefund?.messageId === batchPendingMessageId) {
-            releasePendingRefundToken(pendingRefund.refundToken);
-            batchPendingRefundRef.current = null;
-          }
           finalizeMessageContent(currentSessionId, batchPendingMessageId, extracted.displayText);
           setBatchPendingMessageId(null);
+          void refreshWalletCredits();
           clearInterval(interval);
         } else if (data.status === 'failed') {
-          const pendingRefund = batchPendingRefundRef.current;
-          if (pendingRefund?.messageId === batchPendingMessageId) {
-            refundCredit(pendingRefund.modelId, pendingRefund.piWon, pendingRefund.refundToken);
-            batchPendingRefundRef.current = null;
-          }
           finalizeMessageContent(currentSessionId, batchPendingMessageId, '⚠️ 답변 생성에 실패했습니다. 다시 시도해 주세요.');
           setBatchPendingMessageId(null);
+          void refreshWalletCredits();
           clearInterval(interval);
         }
       } catch {}
     }, 30000);
-    return () => clearInterval(interval);
-  }, [batchPendingMessageId, currentSessionId, finalizeMessageContent, addStoredFacts, refundCredit, releasePendingRefundToken]);
 
-  // 템플릿에서 "사용하기" 선택 시: 입력창 자동 채움 + 모달 닫기
+    return () => clearInterval(interval);
+  }, [batchPendingMessageId, currentSessionId, finalizeMessageContent, addStoredFacts, refreshWalletCredits]);
+
   useEffect(() => {
     if (!activeTemplate) return;
 
@@ -862,7 +934,6 @@ export const Chat: React.FC = () => {
   const scrollRafRef = useRef<number | null>(null);
   const scrollToBottom = useCallback((force: boolean = false) => {
     if (!force && userScrolledUpRef.current) return;
-    // rAF으로 배치 처리 - 같은 프레임 내 중복 스크롤 제거
     if (scrollRafRef.current !== null) return;
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null;
@@ -871,19 +942,17 @@ export const Chat: React.FC = () => {
     });
   }, [streaming?.smoothScrolling]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom();
   }, [currentMessages.length, scrollToBottom]);
 
-  // textarea 자동 높이 조절
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
     textarea.style.height = 'auto';
     const scrollHeight = textarea.scrollHeight;
-    const maxHeight = 200; // maxHeight와 동일
+    const maxHeight = 200;
 
     if (scrollHeight > maxHeight) {
       textarea.style.height = `${maxHeight}px`;
@@ -894,303 +963,6 @@ export const Chat: React.FC = () => {
     }
   }, [message]);
 
-  const handleFiles = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    
-    const beforeCount = attachments.length;
-    const availableSlots = MAX_ATTACHMENTS - beforeCount;
-    
-    if (availableSlots <= 0) {
-      toast.error(`최대 ${MAX_ATTACHMENTS}개까지 업로드할 수 있어요.`);
-      return;
-    }
-    
-    const filesArray = Array.from(files).slice(0, availableSlots);
-    
-    if (filesArray.length < files.length) {
-      toast.error(`최대 ${MAX_ATTACHMENTS}개까지 업로드할 수 있어요. 초과분은 제외됩니다.`);
-    }
-
-    const newItems: Attachment[] = [];
-    
-    for (const file of filesArray) {
-      try {
-        if (file.type.startsWith('image/')) {
-          // canvas로 리사이즈 + 압축 (최대 1024px, 품질 0.75)
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onerror = reject;
-            reader.onload = (e) => {
-              const img = new Image();
-              img.onerror = reject;
-              img.onload = () => {
-                const MAX = 1024;
-                let { width, height } = img;
-                if (width > MAX || height > MAX) {
-                  if (width > height) {
-                    height = Math.round((height * MAX) / width);
-                    width = MAX;
-                  } else {
-                    width = Math.round((width * MAX) / height);
-                    height = MAX;
-                  }
-                }
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) { resolve(e.target?.result as string); return; }
-                ctx.drawImage(img, 0, 0, width, height);
-                resolve(canvas.toDataURL('image/jpeg', 0.75));
-              };
-              img.src = e.target?.result as string;
-            };
-            reader.readAsDataURL(file);
-          });
-          
-          newItems.push({ 
-            id: crypto.randomUUID(), 
-            name: file.name, 
-            type: 'image' as const, 
-            dataUrl 
-          });
-          
-        } else if (file.type.startsWith('text/') || file.type === 'application/json') {
-          const text = await file.text();
-          newItems.push({ 
-            id: crypto.randomUUID(), 
-            name: file.name, 
-            type: 'text' as const, 
-            content: text.slice(0, 20000) 
-          });
-          
-        } else {
-          toast.error(`지원하지 않는 파일 형식입니다: ${file.name}`);
-        }
-      } catch {
-        toast.error(`파일 처리 중 오류가 발생했습니다: ${file.name}`);
-      }
-    }
-    
-    if (newItems.length > 0) {
-      setAttachments(prev => [...prev, ...newItems]);
-    }
-  }, [attachments.length]);
-
-  const handleDownloadImage = useCallback(async (imageUrl: string, filename: string = 'ai-generated-image.png') => {
-    try {
-      // data URL인 경우 직접 다운로드
-      if (imageUrl.startsWith('data:')) {
-        const link = document.createElement('a');
-        link.href = imageUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast.success('이미지를 다운로드했습니다!');
-        return;
-      }
-
-      // 외부 URL인 경우 fetch 시도
-      try {
-        const response = await fetch(imageUrl, { mode: 'cors' });
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        toast.success('이미지를 다운로드했습니다!');
-      } catch (fetchError) {
-        // CORS 오류 시 새 탭에서 열기
-        window.open(imageUrl, '_blank');
-        toast.info('새 탭에서 이미지를 열었습니다. 우클릭하여 저장하세요.');
-      }
-    } catch {
-      toast.error('이미지 다운로드에 실패했습니다.');
-    }
-  }, []);
-
-  const handleCancelStream = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    streamingRef.current = false;
-    setIsLoading(false);
-    setIsCancelled(true);
-    toast.info('응답 생성이 취소되었습니다.');
-  }, []);
-
-  const handleBookmark = useCallback((msgId: string) => {
-    if (!currentSessionId) return;
-    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
-    const msg = session?.messages.find(m => m.id === msgId);
-    if (!msg) return;
-    const isAlreadyBookmarked = bookmarkedMessageIds.has(msgId);
-    if (isAlreadyBookmarked) {
-      removeBookmark(msgId);
-      toast.success('북마크가 해제되었습니다.');
-    } else {
-      addBookmark({
-        id: msgId,
-        sessionId: currentSessionId,
-        content: msg.content as string,
-        modelId: msg.modelId,
-        timestamp: typeof msg.timestamp === 'string' ? msg.timestamp : new Date(msg.timestamp).toISOString(),
-        sessionTitle: session?.title,
-      });
-      toast.success('북마크에 저장했습니다! ⭐');
-    }
-  }, [currentSessionId, bookmarkedMessageIds, addBookmark, removeBookmark]);
-
-  const handleTTS = useCallback((content: string) => {
-    if (!window.speechSynthesis) { toast.error('이 브라우저는 TTS를 지원하지 않습니다.'); return; }
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
-      toast.info('읽기가 중지되었습니다.');
-      return;
-    }
-    const stripped = stripSummaryBlock(content).replace(/[#*`]/g, '').trim();
-    const utter = new SpeechSynthesisUtterance(stripped);
-    utter.lang = language === 'en' ? 'en-US' : language === 'ja' ? 'ja-JP' : 'ko-KR';
-    utter.rate = 1.1;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
-    
-    // 더 좋은 음성 선택 (사용 가능한 경우)
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-      const preferredVoice = voices.find(v => 
-        (language === 'ko' && (v.name.includes('Google') || v.name.includes('Yuna') || v.name.includes('Sora'))) ||
-        (language === 'en' && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen'))) ||
-        (language === 'ja' && (v.name.includes('Google') || v.name.includes('Kyoko')))
-      );
-      if (preferredVoice) utter.voice = preferredVoice;
-    }
-    
-    ttsRef.current = utter;
-    window.speechSynthesis.speak(utter);
-    toast.info('읽기 시작 — 다시 클릭하면 중지됩니다.');
-  }, [language]);
-
-  const handleExportChat = useCallback((format: 'markdown' | 'txt') => {
-    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
-    if (!session || session.messages.length === 0) { toast.error('내보낼 대화가 없습니다.'); return; }
-    const lines: string[] = [];
-    if (format === 'markdown') {
-      lines.push(`# ${session.title}\n`);
-      session.messages.forEach(m => {
-        const role = m.role === 'user' ? '**나**' : `**${modelById.get(m.modelId || '') ?.displayName || 'AI'}**`;
-        const content = stripSummaryBlock(m.content as string);
-        if (content.startsWith('__VIDEO__:')) {
-          lines.push(`${role}: [생성된 영상]\n`);
-        } else if (content.startsWith('http') || content.startsWith('data:image')) {
-          lines.push(`${role}: ![생성된 이미지](${content})\n`);
-        } else {
-          lines.push(`${role}:\n${content}\n`);
-        }
-      });
-    } else {
-      lines.push(`${session.title}\n${'='.repeat(40)}\n`);
-      session.messages.forEach(m => {
-        const role = m.role === 'user' ? '나' : (modelById.get(m.modelId || '')?.displayName || 'AI');
-        const content = stripSummaryBlock(m.content as string);
-        lines.push(`[${role}]\n${content}\n`);
-      });
-    }
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${session.title}.${format === 'markdown' ? 'md' : 'txt'}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success(`${format === 'markdown' ? 'Markdown' : 'TXT'}으로 내보냈습니다!`);
-  }, [currentSessionId, modelById]);
-
-  const handleRegenerate = useCallback(async (withModelId?: string) => {
-    if (sendInFlightRef.current || isLoading || streamingRef.current) return;
-    if (!currentSessionId) return;
-    const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
-    if (!session) return;
-    const messages = session.messages;
-    let realIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i].role === 'assistant') {
-        realIdx = i;
-        break;
-      }
-    }
-    if (realIdx === -1) return;
-    const lastAssistant = messages[realIdx];
-    let hasUserMessage = false;
-    for (let i = realIdx - 1; i >= 0; i -= 1) {
-      if (messages[i].role === 'user') {
-        hasUserMessage = true;
-        break;
-      }
-    }
-    if (!hasUserMessage) return;
-    const targetModelId = withModelId || lastAssistant.modelId || selectedModelId;
-    if (!targetModelId) return;
-    const targetPiWon = modelById.get(targetModelId)?.piWon ?? 1;
-    const credits = walletCredits?.[targetModelId] || 0;
-    if (credits <= 0) { toast.error(`${modelById.get(targetModelId)?.displayName} 크레딧이 부족합니다.`); return; }
-    let regenerateRefundToken: string | false = false;
-    sendInFlightRef.current = true;
-    setIsLoading(true);
-    streamingRef.current = true;
-    setIsCancelled(false);
-    startDraftMessage(lastAssistant.id);
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    try {
-      const apiMessages = messages.slice(0, realIdx).map(m => ({ role: m.role, content: m.content }));
-      regenerateRefundToken = await deductCredit(targetModelId);
-      if (!regenerateRefundToken) throw new Error('ERR_CREDIT_00');
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, modelId: targetModelId, temperature, language, speechLevel }),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        const { errorCode, errorReason } = await readApiErrorResponse(res);
-        const apiError = new Error(errorCode) as Error & { detail?: string };
-        apiError.detail = errorReason;
-        throw apiError;
-      }
-      const nextContent = await readChatSuccessResponse(res);
-      const extracted = extractMemoryForDisplay(nextContent);
-      if (extracted.facts.length) {
-        addStoredFacts(extracted.facts);
-      }
-      if (regenerateRefundToken) {
-        releasePendingRefundToken(regenerateRefundToken);
-        regenerateRefundToken = false;
-      }
-      flushDraftMessage(extracted.displayText, true);
-      finalizeMessageContent(currentSessionId, lastAssistant.id, extracted.displayText);
-    } catch (e: any) {
-      if (e?.message !== 'ERR_CANCELLED' && regenerateRefundToken) {
-        refundCredit(targetModelId, targetPiWon, regenerateRefundToken);
-      }
-      if (e.name !== 'AbortError') toast.error('재생성에 실패했습니다.');
-    } finally {
-      clearDraftMessage();
-      setIsLoading(false);
-      streamingRef.current = false;
-      abortControllerRef.current = null;
-      sendInFlightRef.current = false;
-    }
-  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, refundCredit, releasePendingRefundToken, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage, isLoading, addStoredFacts]);
-
   const handleSendMessage = useCallback(async () => {
     const trimmedMessage = message.trim();
 
@@ -1198,13 +970,17 @@ export const Chat: React.FC = () => {
       return;
     }
 
+    if (isLoading && (selectedModelId === 'gptimage1' || selectedModelId === 'dalle3')) {
+      toast.error('이미지 생성 중입니다. 잠시만 기다려주세요.');
+      return;
+    }
+
     if (sendInFlightRef.current || streamingRef.current || isLoading) {
       return;
     }
 
-    // 이미지 생성 중에는 메시지 전송 차단
-    if (isLoading && (selectedModelId === 'gptimage1' || selectedModelId === 'dalle3')) {
-      toast.error('이미지 생성 중입니다. 잠시만 기다려주세요.');
+    if (!openAIStatus.available && isOpenAITextModelId(selectedModelId)) {
+      toast.error(openAIBlockedReason);
       return;
     }
 
@@ -1220,109 +996,82 @@ export const Chat: React.FC = () => {
     }
 
     const chatPerfRunId = startChatPerfRun('handleSendMessage', STREAMING_DRAFT_V2);
-    
+
     sendInFlightRef.current = true;
     setIsLoading(true);
+    streamingRef.current = true;
     setIsCancelled(false);
-    
-    // 현재 선택된 모델 ID를 고정 (출력 중 모델 선택이 바뀌어도 메시지의 모델은 유지)
+
     const currentModelId = selectedModelId;
-    const currentModelPiWon = modelById.get(currentModelId)?.piWon ?? 1;
-    
+
     let sessionIdForThisRequest = currentSessionId;
-    if (!sessionIdForThisRequest) {
-      const created = createChatSession('새 대화');
-      sessionIdForThisRequest = created || useStore.getState().currentSessionId;
-    }
-
-    if (!sessionIdForThisRequest) {
-      const sessionError = new Error('ERR_SESSION_00') as Error & { detail?: string };
-      sessionError.detail = '대화 세션을 만들지 못했어요. 잠시 후 다시 시도해주세요.';
-      throw sessionError;
-    }
-
-    const assistantMessageId = sessionIdForThisRequest ? crypto.randomUUID() : null;
-    let capturedRefundToken: string | false = false;
+    let assistantMessageId: string | null = null;
 
     try {
+      if (!sessionIdForThisRequest) {
+        const created = createChatSession('새 대화');
+        sessionIdForThisRequest = created || useStore.getState().currentSessionId;
+      }
+
+      if (!sessionIdForThisRequest) {
+        const sessionError = new Error('ERR_SESSION_00') as Error & { detail?: string };
+        sessionError.detail = '대화 세션을 만들지 못했어요. 잠시 후 다시 시도해 주세요.';
+        throw sessionError;
+      }
+
+      assistantMessageId = crypto.randomUUID();
+
+      const ensuredSessionId = sessionIdForThisRequest;
+      const ensuredAssistantMessageId = assistantMessageId;
       const msg = trimmedMessage;
       setMessage('');
-      
-      // API 호출을 위한 메시지 준비 (크레딧 차감 전에 먼저 준비)
+
       const liveState = useStore.getState();
-      const sessionForThisRequest = sessionIdForThisRequest
-        ? liveState.chatSessions.find((s: any) => s.id === sessionIdForThisRequest)
-        : null;
+      const sessionForThisRequest = liveState.chatSessions.find((s: any) => s.id === ensuredSessionId);
       const currentMessages = sessionForThisRequest?.messages || [];
       const newUserMessage = {
         role: 'user' as const,
-        content: msg
+        content: msg,
       };
-      
-      // 전체 대화 내역 (이전 메시지 + 새 메시지)
+
       const apiMessages = [
-        ...currentMessages.map(m => ({
+        ...currentMessages.map((m) => ({
           role: m.role,
-          content: m.content
+          content: m.content,
         })),
-        newUserMessage
+        newUserMessage,
       ];
 
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Chat] Sending messages to API:', {
           totalMessages: apiMessages.length,
-          lastMessage: apiMessages[apiMessages.length - 1]
+          lastMessage: apiMessages[apiMessages.length - 1],
         });
-      }
-      
-      // 사용자 메시지를 세션에 즉시 추가 (UI 먼저 업데이트)
-      if (sessionIdForThisRequest) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('[Chat] Adding user message to session:', sessionIdForThisRequest);
-        }
-        addMessage(sessionIdForThisRequest, {
-          id: crypto.randomUUID(),
-          role: 'user' as const,
-          content: msg,
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        if (process.env.NODE_ENV !== 'production') {
-          console.error('[Chat] No session ID - cannot add user message');
-        }
       }
 
-      if (sessionIdForThisRequest && assistantMessageId) {
-        addMessage(sessionIdForThisRequest, {
-          id: assistantMessageId,
-          role: 'assistant' as const,
-          content: '',
-          modelId: currentModelId,
-          timestamp: new Date().toISOString(),
-          creditUsed: 1
-        });
-        if (STREAMING_DRAFT_V2) {
-          startDraftMessage(assistantMessageId);
-        }
+      addMessage(ensuredSessionId, {
+        id: crypto.randomUUID(),
+        role: 'user' as const,
+        content: msg,
+        timestamp: new Date().toISOString(),
+      });
+
+      addMessage(ensuredSessionId, {
+        id: ensuredAssistantMessageId,
+        role: 'assistant' as const,
+        content: '',
+        modelId: currentModelId,
+        timestamp: new Date().toISOString(),
+        creditUsed: 1,
+      });
+
+      if (STREAMING_DRAFT_V2) {
+        startDraftMessage(ensuredAssistantMessageId);
       }
-      
-      // UI 업데이트 후 스크롤 (한 번만)
+
       scrollToBottom(true);
-      
-      // 크레딧 차감 후 환불 토큰 저장 (에러 시 환불에 사용)
-      try {
-        capturedRefundToken = await deductCredit(currentModelId);
-      } catch (err) {
-        console.error('[Chat] Credit deduction failed:', err);
-      }
-      if (!capturedRefundToken) {
-        const creditError = new Error('ERR_CREDIT_00') as Error & { detail?: string };
-        creditError.detail = '크레딧 차감에 실패해서 요청을 보내지 않았어요.';
-        throw creditError;
-      }
 
-      // 48h 배치 모델: 별도 처리
-      if (isBatchModel && sessionIdForThisRequest && assistantMessageId) {
+      if (isBatchModel) {
         try {
           const batchRes = await fetch('/api/batch/submit', {
             method: 'POST',
@@ -1330,47 +1079,29 @@ export const Chat: React.FC = () => {
             body: JSON.stringify({
               modelId: currentModelId,
               messages: apiMessages,
-              sessionId: sessionIdForThisRequest,
-              messageId: assistantMessageId,
+              sessionId: ensuredSessionId,
+              messageId: ensuredAssistantMessageId,
               language,
               speechLevel: useStore.getState().speechLevel,
             }),
           });
+
           if (batchRes.ok) {
-            if (capturedRefundToken) {
-              batchPendingRefundRef.current = {
-                messageId: assistantMessageId,
-                modelId: currentModelId,
-                piWon: currentModelPiWon,
-                refundToken: capturedRefundToken,
-              };
-            }
-            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
-            setBatchPendingMessageId(assistantMessageId);
+            finalizeMessageContent(ensuredSessionId, ensuredAssistantMessageId, '⏳ 답변을 준비 중입니다. 최대 24시간 내에 답변이 도착합니다.');
+            setBatchPendingMessageId(ensuredAssistantMessageId);
           } else {
             const { errorReason } = await readApiErrorResponse(batchRes);
-            if (capturedRefundToken) {
-              refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
-              capturedRefundToken = false;
-            }
-            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, errorReason || '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+            finalizeMessageContent(ensuredSessionId, ensuredAssistantMessageId, errorReason || '요청 전송에 실패했습니다. 다시 시도해 주세요.');
           }
         } catch {
-          if (capturedRefundToken) {
-            refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
-            capturedRefundToken = false;
-          }
-          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
+          finalizeMessageContent(ensuredSessionId, ensuredAssistantMessageId, '요청 전송에 실패했습니다. 다시 시도해 주세요.');
         }
-        setIsLoading(false);
-        streamingRef.current = false;
         return;
       }
 
-      // API 호출 (500/503 에러 시 1.5초 후 1회 자동 재시도)
       const controller = new AbortController();
       abortControllerRef.current = controller;
-      const requestTimeout = isVideoModel ? 300000 : 300000; // 영상: 5분, 일반: 5분
+      const requestTimeout = 300000;
       const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
       const requestPayload = {
@@ -1386,15 +1117,15 @@ export const Chat: React.FC = () => {
           name: activePersona.name,
           personality: activePersona.personality,
           expertise: activePersona.expertise,
-          speechPatterns: activePersona.speechPatterns
+          speechPatterns: activePersona.speechPatterns,
         } : undefined,
         videoSeconds: isVideoModel ? videoSeconds : undefined,
-        userAttachments: attachments.map(a => ({
+        userAttachments: attachments.map((a) => ({
           type: a.type,
           name: a.name,
           dataUrl: a.dataUrl,
-          content: a.content
-        }))
+          content: a.content,
+        })),
       };
       const serializedRequestBody = JSON.stringify(requestPayload);
       if (getTextByteSize(serializedRequestBody) > REQUEST_BODY_SIZE_LIMIT_BYTES) {
@@ -1410,16 +1141,15 @@ export const Chat: React.FC = () => {
           method: 'POST',
           headers: requestHeaders,
           body: serializedRequestBody,
-          signal: controller.signal
+          signal: controller.signal,
         });
-        // 500/503 서버 에러 시 1.5초 후 1회 자동 재시도
         if ((response.status === 500 || response.status === 503) && !isCancelled) {
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise((resolve) => setTimeout(resolve, 1500));
           response = await fetch('/api/chat', {
             method: 'POST',
             headers: requestHeaders,
             body: serializedRequestBody,
-            signal: controller.signal
+            signal: controller.signal,
           });
         }
       } catch (fetchError: any) {
@@ -1438,7 +1168,7 @@ export const Chat: React.FC = () => {
         console.log('API Response status:', response.status);
         console.log('Content-Type:', response.headers.get('content-type'));
       }
-      
+
       if (!response.ok) {
         const { errorCode, errorReason } = await readApiErrorResponse(response);
 
@@ -1449,14 +1179,10 @@ export const Chat: React.FC = () => {
         apiError.detail = errorReason;
         throw apiError;
       }
-      
+
       const contentType = response.headers.get('content-type') || '';
-      
+
       if (contentType.includes('text/event-stream')) {
-        // GPT 스트리밍 SSE 응답 처리
-        // 혁신적 최적화: 네트워크 읽기와 UI 업데이트를 완전히 분리
-        // - 읽기 루프: 최대 속도로 텍스트 누적 (블로킹 없음)
-        // - RAF 루프: 브라우저 렌더 타이밍에 맞춰 한 프레임에 한 번만 DOM 업데이트
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let accumulated = '';
@@ -1466,14 +1192,13 @@ export const Chat: React.FC = () => {
         let streamError: Error | null = null;
         let lastRenderedContent = '';
 
-        // RAF 기반 UI 업데이트 루프 (브라우저 vsync에 정확히 동기화)
         const rafUpdate = () => {
-          if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
+          if (accumulated !== lastRenderedContent) {
             lastRenderedContent = accumulated;
             if (STREAMING_DRAFT_V2) {
               flushDraftMessage(accumulated);
             } else {
-              updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+              updateMessageContent(ensuredSessionId, ensuredAssistantMessageId, accumulated);
             }
             scrollToBottom(false);
           }
@@ -1483,16 +1208,16 @@ export const Chat: React.FC = () => {
             requestAnimationFrame(rafUpdate);
           }
         };
-        
+
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            
+
             sseBuffer += decoder.decode(value, { stream: true });
             const lines = sseBuffer.split('\n');
             sseBuffer = lines.pop() || '';
-            
+
             for (const line of lines) {
               const trimmed = line.trim();
               if (!trimmed || !trimmed.startsWith('data: ')) continue;
@@ -1504,7 +1229,6 @@ export const Chat: React.FC = () => {
                 const delta = parsed.choices?.[0]?.delta?.content || '';
                 if (delta) {
                   accumulated += delta;
-                  // 첫 토큰: RAF 루프 시작 (이후는 자동으로 vsync에 맞춰 업데이트)
                   if (!rafPending) {
                     rafPending = true;
                     requestAnimationFrame(rafUpdate);
@@ -1519,14 +1243,13 @@ export const Chat: React.FC = () => {
             }
             if (streamError) break;
           }
-          
-          // 스트림 완료: RAF 루프 종료 후 최종 내용 반영
+
           streamDone = true;
-          if (accumulated !== lastRenderedContent && sessionIdForThisRequest && assistantMessageId) {
+          if (accumulated !== lastRenderedContent) {
             if (STREAMING_DRAFT_V2) {
               flushDraftMessage(accumulated, true);
             } else {
-              updateMessageContent(sessionIdForThisRequest, assistantMessageId, accumulated);
+              updateMessageContent(ensuredSessionId, ensuredAssistantMessageId, accumulated);
             }
             scrollToBottom(false);
           }
@@ -1534,53 +1257,45 @@ export const Chat: React.FC = () => {
         } finally {
           reader.releaseLock();
         }
-        
-        // 스트리밍 완료 후 응답 처리
+
         if (accumulated && accumulated.trim()) {
-          // 정상 응답: 메모리/요약 추출
           const extracted = extractMemoryForDisplay(accumulated);
           if (extracted.facts.length) {
             addStoredFacts(extracted.facts);
           }
-          if (sessionIdForThisRequest && assistantMessageId) {
-            if (STREAMING_DRAFT_V2) {
-              flushDraftMessage(extracted.displayText, true);
-            }
-            finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
+          if (STREAMING_DRAFT_V2) {
+            flushDraftMessage(extracted.displayText, true);
           }
+          finalizeMessageContent(ensuredSessionId, ensuredAssistantMessageId, extracted.displayText);
         } else if (!streamError) {
-          // 에러 없이 빈 응답인 경우만 에러 처리
           const fallback = language === 'en'
             ? 'Response was interrupted. Please try again.'
             : '응답이 중단되었어요. 다시 시도해 주세요.';
-          if (sessionIdForThisRequest && assistantMessageId) {
-            if (STREAMING_DRAFT_V2) {
-              flushDraftMessage(fallback, true);
-            } else {
-              updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
-            }
+          if (STREAMING_DRAFT_V2) {
+            flushDraftMessage(fallback, true);
+          } else {
+            updateMessageContent(ensuredSessionId, ensuredAssistantMessageId, fallback);
           }
           throw new Error('ERR_EMPTY_01');
         }
+
         try {
           const { summary } = extractSummary(accumulated);
           if (summary) {
-            setConversationSummaries(prev => [...prev, summary]);
+            setConversationSummaries((prev) => [...prev, summary]);
           }
         } catch {}
-        
       } else {
-        // JSON 응답 처리 (Claude, Perplexity, Codex, 이미지 등)
         let data;
         try {
           data = await response.json();
-        } catch (e) {
+        } catch (error) {
           if (process.env.NODE_ENV !== 'production') {
-            console.error('Failed to parse response:', e);
+            console.error('Failed to parse response:', error);
           }
           throw new Error('ERR_RESP_00');
         }
-        
+
         if (!data || !data.content) {
           const fallback = language === 'en'
             ? 'Response was interrupted. Please try again.'
@@ -1588,27 +1303,27 @@ export const Chat: React.FC = () => {
           if (process.env.NODE_ENV !== 'production') {
             console.error('Empty response from API:', data);
           }
-          if (sessionIdForThisRequest && assistantMessageId) {
-            updateMessageContent(sessionIdForThisRequest, assistantMessageId, fallback);
+          if (STREAMING_DRAFT_V2) {
+            flushDraftMessage(fallback, true);
+          } else {
+            updateMessageContent(ensuredSessionId, ensuredAssistantMessageId, fallback);
           }
           throw new Error('ERR_EMPTY_00');
         }
-        
+
         const extracted = extractMemoryForDisplay(data.content);
         if (extracted.facts.length) {
           addStoredFacts(extracted.facts);
         }
-        if (sessionIdForThisRequest && assistantMessageId) {
-          if (STREAMING_DRAFT_V2) {
-            flushDraftMessage(extracted.displayText, true);
-          }
-          finalizeMessageContent(sessionIdForThisRequest, assistantMessageId, extracted.displayText);
-          setTimeout(() => scrollToBottom(true), 100);
+        if (STREAMING_DRAFT_V2) {
+          flushDraftMessage(extracted.displayText, true);
         }
+        finalizeMessageContent(ensuredSessionId, ensuredAssistantMessageId, extracted.displayText);
+        setTimeout(() => scrollToBottom(true), 100);
         try {
           const { summary } = extractSummary(data.content);
           if (summary) {
-            setConversationSummaries(prev => [...prev, summary]);
+            setConversationSummaries((prev) => [...prev, summary]);
           }
         } catch (summaryError) {
           if (process.env.NODE_ENV !== 'production') {
@@ -1617,32 +1332,30 @@ export const Chat: React.FC = () => {
         }
       }
 
-      if (capturedRefundToken) {
-        releasePendingRefundToken(capturedRefundToken);
-        capturedRefundToken = false;
-      }
-      
       setAttachments([]);
-      // toast.success(`${model.displayName} 크레딧 1회 사용 (잔여: ${credits - 1}회)`);
-      
     } catch (error: any) {
       if (process.env.NODE_ENV !== 'production') {
         console.error('Chat error:', error);
       }
-      
+
       const errorCode = error.message || 'ERR_UNKNOWN';
       const errorDetail = typeof error?.detail === 'string' ? error.detail : undefined;
-
       const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
 
-      // 429 에러: 대기/나가기 선택 흐름
       if (errorCode.startsWith('ERR_RATE')) {
         const waitContent = `현재 AI 요청이 많아 응답이 지연되고 있어요.\n\n이대로 기다리시면 1분 30초 안에 답변이 올 수 있어요. 계속 기다리시겠어요?`;
         if (sid) {
           if (assistantMessageId) {
             finalizeMessageContent(sid, assistantMessageId, waitContent);
           } else {
-            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: waitContent, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+            addMessage(sid, {
+              id: crypto.randomUUID(),
+              role: 'assistant' as const,
+              content: waitContent,
+              modelId: currentModelId,
+              timestamp: new Date().toISOString(),
+              creditUsed: 0,
+            });
           }
         }
 
@@ -1669,7 +1382,7 @@ export const Chat: React.FC = () => {
                   <button
                     onClick={() => finish('leave')}
                     className="px-3 py-1.5 bg-gray-200 text-gray-800 rounded text-xs font-medium"
-                  >나가기 (크레딧 1회 보상)</button>
+                  >나가기</button>
                 </div>
               </div>
             ),
@@ -1678,69 +1391,105 @@ export const Chat: React.FC = () => {
         });
 
         if (userChoice === 'leave') {
-          if (capturedRefundToken) {
-            releasePendingRefundToken(capturedRefundToken);
-            capturedRefundToken = false;
-          }
-          if (currentModelId) await addCredits({ [currentModelId]: 1 });
           if (sid) {
-            const modelName = selectedModel?.displayName || currentModelId || 'AI';
-            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `응답을 중단했어요. 불편을 드려 죄송해요. ${modelName} 크레딧 1회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+            const leaveContent = '응답을 중단했어요. 잠시 후 다시 시도해 주세요.';
+            if (assistantMessageId) {
+              finalizeMessageContent(sid, assistantMessageId, leaveContent);
+            } else {
+              addMessage(sid, {
+                id: crypto.randomUUID(),
+                role: 'assistant' as const,
+                content: leaveContent,
+                modelId: currentModelId,
+                timestamp: new Date().toISOString(),
+                creditUsed: 0,
+              });
+            }
           }
         } else {
-          // 90초 대기 후 재시도
-          await new Promise(r => setTimeout(r, 90000));
+          await new Promise((resolve) => setTimeout(resolve, 90000));
           try {
-            const liveMessages = useStore.getState().chatSessions.find(s => s.id === sid)?.messages || [];
-            const retryBody = JSON.stringify({ modelId: currentModelId, messages: liveMessages.filter((m: any) => m.role !== 'assistant' || m.content).map((m: any) => ({ role: m.role, content: m.content })) });
-            const retryResp = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: retryBody });
+            const liveMessages = useStore.getState().chatSessions.find((s) => s.id === sid)?.messages || [];
+            const retryBody = JSON.stringify({
+              modelId: currentModelId,
+              messages: liveMessages
+                .filter((m: any) => m.role !== 'assistant' || m.content)
+                .map((m: any) => ({ role: m.role, content: m.content })),
+            });
+            const retryResp = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: retryBody,
+            });
             if (!retryResp.ok) {
-              if (retryResp.status === 429) {
-                if (capturedRefundToken) {
-                  releasePendingRefundToken(capturedRefundToken);
-                  capturedRefundToken = false;
+              const { errorReason } = await readApiErrorResponse(retryResp);
+              const retryError = errorReason || '재시도에 실패했습니다. 다시 시도해 주세요.';
+              if (sid) {
+                if (assistantMessageId) {
+                  finalizeMessageContent(sid, assistantMessageId, retryError);
+                } else {
+                  addMessage(sid, {
+                    id: crypto.randomUUID(),
+                    role: 'assistant' as const,
+                    content: retryError,
+                    modelId: currentModelId,
+                    timestamp: new Date().toISOString(),
+                    creditUsed: 0,
+                  });
                 }
-                if (currentModelId) await addCredits({ [currentModelId]: 3 });
-                const modelName = selectedModel?.displayName || currentModelId || 'AI';
-                if (sid) addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `현재 대기 중인 사용자가 너무 많아 응답이 어려워요. 진심으로 죄송합니다. ${modelName} 크레딧 3회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
-              } else {
-                const { errorReason } = await readApiErrorResponse(retryResp);
-                if (capturedRefundToken) {
-                  refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
-                  capturedRefundToken = false;
-                }
-                if (sid) addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: errorReason || '재시도에 실패했습니다. 다시 시도해 주세요.', modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
               }
             } else {
               const retryContent = await readChatSuccessResponse(retryResp);
               const extracted = extractMemoryForDisplay(retryContent);
-              if (extracted.facts.length) addStoredFacts(extracted.facts);
-              if (capturedRefundToken) {
-                releasePendingRefundToken(capturedRefundToken);
-                capturedRefundToken = false;
+              if (extracted.facts.length) {
+                addStoredFacts(extracted.facts);
               }
               if (sid) {
-                addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: extracted.displayText, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+                if (assistantMessageId) {
+                  finalizeMessageContent(sid, assistantMessageId, extracted.displayText);
+                } else {
+                  addMessage(sid, {
+                    id: crypto.randomUUID(),
+                    role: 'assistant' as const,
+                    content: extracted.displayText,
+                    modelId: currentModelId,
+                    timestamp: new Date().toISOString(),
+                    creditUsed: 0,
+                  });
+                }
               }
             }
           } catch {
-            if (capturedRefundToken) {
-              refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
-              capturedRefundToken = false;
+            if (sid) {
+              const retryError = '재시도에 실패했습니다. 다시 시도해 주세요.';
+              if (assistantMessageId) {
+                finalizeMessageContent(sid, assistantMessageId, retryError);
+              } else {
+                addMessage(sid, {
+                  id: crypto.randomUUID(),
+                  role: 'assistant' as const,
+                  content: retryError,
+                  modelId: currentModelId,
+                  timestamp: new Date().toISOString(),
+                  creditUsed: 0,
+                });
+              }
             }
           }
         }
         return;
       }
 
-      // ERR_CANCELLED가 아닌 실제 에러 시 크레딧 환불
-      if (errorCode !== 'ERR_CANCELLED' && currentModelId && capturedRefundToken) {
-        refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
-      }
-      
-      // 에러코드 → 사용자 친화적 메시지 매핑
       const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
         if (code === 'ERR_CANCELLED') return { icon: '', title: '', message: '', tips: [] };
+        if (code === OPENAI_STATUS_ERROR_CODE) {
+          return {
+            icon: '🚧',
+            title: 'OpenAI 장애 감지',
+            message: errorDetail || '현재 OpenAI 장애로 GPT 모델 사용이 일시 중단되었습니다.',
+            tips: ['Claude, Gemini, Grok 같은 다른 모델을 선택해보세요', '잠시 후 다시 시도해주세요'],
+          };
+        }
         if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
           return { icon: '⏱️', title: '응답 시간 초과', message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.', tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요'] };
         }
@@ -1772,38 +1521,38 @@ export const Chat: React.FC = () => {
       };
 
       const display = getErrorDisplay(errorCode);
-      
+
       if (sid) {
-        let errContent;
-        if (errorCode === 'ERR_CANCELLED') {
-          errContent = '<span style="color: #9ca3af; font-style: italic;">응답 중지됨</span>';
-        } else {
-          errContent = `${display.icon} **${display.title}**\n\n${display.message}${errorDetail ? `\n\n**원인:** ${errorDetail}` : ''}\n\n**이렇게 해보세요:**\n${display.tips.map(t => '• ' + t).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
-        }
+        const errContent = errorCode === 'ERR_CANCELLED'
+          ? '<span style="color: #9ca3af; font-style: italic;">응답 중지됨</span>'
+          : `${display.icon} **${display.title}**\n\n${display.message}${errorDetail ? `\n\n**원인:** ${errorDetail}` : ''}\n\n**이렇게 해보세요:**\n${display.tips.map((tip) => '• ' + tip).join('\n')}\n\n문제가 계속되면 **관리자에게 문의**해주세요.\n\n\`${errorCode}\``;
         if (assistantMessageId) {
           finalizeMessageContent(sid, assistantMessageId, errContent);
         } else {
-          addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: errContent, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 1 });
+          addMessage(sid, {
+            id: crypto.randomUUID(),
+            role: 'assistant' as const,
+            content: errContent,
+            modelId: currentModelId,
+            timestamp: new Date().toISOString(),
+            creditUsed: 0,
+          });
         }
       }
-      
+
       if (errorCode !== 'ERR_CANCELLED') {
-        const refundNote = useStore.getState().insurancePurchased
-          ? ' (보험 적용 크레딧 환불 완료)'
-          : ' (크레딧 1회 환불 완료)';
-        toast.error(display.message + refundNote);
+        toast.error(display.message);
       }
     } finally {
+      await refreshWalletCredits();
       clearDraftMessage();
       setIsLoading(false);
       streamingRef.current = false;
       abortControllerRef.current = null;
       setIsCancelled(false);
       sendInFlightRef.current = false;
-      // 전송 후 첨부파일 완전 초기화
       setAttachments([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      // 스트리밍 종료 시 자동스크롤 토스트 닫기
       if (autoScrollToastIdRef.current !== null) {
         toast.dismiss(autoScrollToastIdRef.current);
         autoScrollToastIdRef.current = null;
@@ -1814,42 +1563,397 @@ export const Chat: React.FC = () => {
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, selectedModelMaxCharacters, walletCredits, currentSessionId, deductCredit, refundCredit, releasePendingRefundToken, addMessage, addCredits, attachments, temperature, language, activePersona, storedFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries, isBatchModel, isVideoModel, videoSeconds, startDraftMessage, flushDraftMessage, clearDraftMessage, createChatSession, isLoading, modelById, addStoredFacts]);
-  
+  }, [message, selectedModelId, selectedModel, selectedModelMaxCharacters, walletCredits, currentSessionId, addMessage, attachments, temperature, language, speechLevel, activePersona, storedFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries, isBatchModel, isVideoModel, videoSeconds, startDraftMessage, flushDraftMessage, clearDraftMessage, createChatSession, isLoading, addStoredFacts, openAIStatus.available, openAIBlockedReason, refreshWalletCredits]);
+
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
-    
-    // 항상 쿨다운 시작
+
     setIsOnCooldown(true);
-    
-    // 1.3초 후에 쿨다운 종료
     setTimeout(() => setIsOnCooldown(false), 1300);
-    
-    // 현재 입력창 내용 캡처 (전송 전 상태)
+
     const pendingMessage = message;
     const pendingAttachments = attachments;
-    
-    // 새 대화 생성 시도
     const sessionId = createChatSession('새 대화 ' + (chatSessions.length + 1));
-    
+
     if (sessionId) {
       setCurrentSession(sessionId);
-      // 기존 입력 내용을 새 채팅으로 이전
       setMessage(pendingMessage);
       setAttachments(pendingAttachments);
     }
   }, [isOnCooldown, chatSessions.length, createChatSession, setCurrentSession, message, attachments]);
-  
+
   const handleKeyPress = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // AI 답변 중이거나 로딩 중이면 전송 차단
       if (streamingRef.current || isLoading) {
         return;
       }
       handleSendMessage();
     }
   }, [handleSendMessage, isLoading]);
+
+  const handleFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const beforeCount = attachments.length;
+    const availableSlots = MAX_ATTACHMENTS - beforeCount;
+
+    if (availableSlots <= 0) {
+      toast.error(`최대 ${MAX_ATTACHMENTS}개까지 업로드할 수 있어요.`);
+      return;
+    }
+
+    const filesArray = Array.from(files).slice(0, availableSlots);
+
+    if (filesArray.length < files.length) {
+      toast.error(`최대 ${MAX_ATTACHMENTS}개까지 업로드할 수 있어요. 초과분은 제외됩니다.`);
+    }
+
+    const newItems: Attachment[] = [];
+
+    for (const file of filesArray) {
+      try {
+        if (file.type.startsWith('image/')) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = reject;
+            reader.onload = (e) => {
+              const img = new Image();
+              img.onerror = reject;
+              img.onload = () => {
+                const MAX = 1024;
+                let { width, height } = img;
+                if (width > MAX || height > MAX) {
+                  if (width > height) {
+                    height = Math.round((height * MAX) / width);
+                    width = MAX;
+                  } else {
+                    width = Math.round((width * MAX) / height);
+                    height = MAX;
+                  }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                  resolve(e.target?.result as string);
+                  return;
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.75));
+              };
+              img.src = e.target?.result as string;
+            };
+            reader.readAsDataURL(file);
+          });
+
+          newItems.push({
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: 'image' as const,
+            dataUrl,
+          });
+        } else if (file.type.startsWith('text/') || file.type === 'application/json') {
+          const text = await file.text();
+          newItems.push({
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: 'text' as const,
+            content: text.slice(0, 20000),
+          });
+        } else {
+          toast.error(`지원하지 않는 파일 형식입니다: ${file.name}`);
+        }
+      } catch {
+        toast.error(`파일 처리 중 오류가 발생했습니다: ${file.name}`);
+      }
+    }
+
+    if (newItems.length > 0) {
+      setAttachments((prev) => [...prev, ...newItems]);
+    }
+  }, [attachments.length]);
+
+  const handleDownloadImage = useCallback(async (imageUrl: string, filename: string = 'ai-generated-image.png') => {
+    try {
+      if (imageUrl.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = imageUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success('이미지를 다운로드했습니다!');
+        return;
+      }
+
+      try {
+        const response = await fetch(imageUrl, { mode: 'cors' });
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        toast.success('이미지를 다운로드했습니다!');
+      } catch {
+        window.open(imageUrl, '_blank');
+        toast.info('새 탭에서 이미지를 열었습니다. 우클릭하여 저장하세요.');
+      }
+    } catch {
+      toast.error('이미지 다운로드에 실패했습니다.');
+    }
+  }, []);
+
+  const handleCancelStream = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    streamingRef.current = false;
+    setIsLoading(false);
+    setIsCancelled(true);
+    toast.info('응답 생성이 취소되었습니다.');
+  }, []);
+
+  const handleBookmark = useCallback((msgId: string) => {
+    if (!currentSessionId) return;
+    const session = useStore.getState().chatSessions.find((s) => s.id === currentSessionId);
+    const msg = session?.messages.find((m) => m.id === msgId);
+    if (!msg) return;
+    const isAlreadyBookmarked = bookmarkedMessageIds.has(msgId);
+    if (isAlreadyBookmarked) {
+      removeBookmark(msgId);
+      toast.success('북마크가 해제되었습니다.');
+    } else {
+      addBookmark({
+        id: msgId,
+        sessionId: currentSessionId,
+        content: msg.content as string,
+        modelId: msg.modelId,
+        timestamp: typeof msg.timestamp === 'string' ? msg.timestamp : new Date(msg.timestamp).toISOString(),
+        sessionTitle: session?.title,
+      });
+      toast.success('북마크에 저장했습니다! ⭐');
+    }
+  }, [currentSessionId, bookmarkedMessageIds, addBookmark, removeBookmark]);
+
+  const handleTTS = useCallback((content: string) => {
+    if (!window.speechSynthesis) {
+      toast.error('이 브라우저는 TTS를 지원하지 않습니다.');
+      return;
+    }
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      toast.info('읽기가 중지되었습니다.');
+      return;
+    }
+    const stripped = stripSummaryBlock(content).replace(/[#*`]/g, '').trim();
+    const utter = new SpeechSynthesisUtterance(stripped);
+    utter.lang = language === 'en' ? 'en-US' : language === 'ja' ? 'ja-JP' : 'ko-KR';
+    utter.rate = 1.1;
+    utter.pitch = 1.0;
+    utter.volume = 1.0;
+
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const preferredVoice = voices.find((v) =>
+        (language === 'ko' && (v.name.includes('Google') || v.name.includes('Yuna') || v.name.includes('Sora'))) ||
+        (language === 'en' && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen'))) ||
+        (language === 'ja' && (v.name.includes('Google') || v.name.includes('Kyoko')))
+      );
+      if (preferredVoice) utter.voice = preferredVoice;
+    }
+
+    ttsRef.current = utter;
+    window.speechSynthesis.speak(utter);
+    toast.info('읽기 시작 — 다시 클릭하면 중지됩니다.');
+  }, [language]);
+
+  const handleExportChat = useCallback((format: 'markdown' | 'txt') => {
+    const session = useStore.getState().chatSessions.find((s) => s.id === currentSessionId);
+    if (!session || session.messages.length === 0) {
+      toast.error('내보낼 대화가 없습니다.');
+      return;
+    }
+    const lines: string[] = [];
+    if (format === 'markdown') {
+      lines.push(`# ${session.title}\n`);
+      session.messages.forEach((m) => {
+        const role = m.role === 'user' ? '**나**' : `**${modelById.get(m.modelId || '')?.displayName || 'AI'}**`;
+        const content = stripSummaryBlock(m.content as string);
+        if (content.startsWith('__VIDEO__:')) {
+          lines.push(`${role}: [생성된 영상]\n`);
+        } else if (content.startsWith('http') || content.startsWith('data:image')) {
+          lines.push(`${role}: ![생성된 이미지](${content})\n`);
+        } else {
+          lines.push(`${role}:\n${content}\n`);
+        }
+      });
+    } else {
+      lines.push(`${session.title}\n${'='.repeat(40)}\n`);
+      session.messages.forEach((m) => {
+        const role = m.role === 'user' ? '나' : (modelById.get(m.modelId || '')?.displayName || 'AI');
+        const content = stripSummaryBlock(m.content as string);
+        lines.push(`[${role}]\n${content}\n`);
+      });
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session.title}.${format === 'markdown' ? 'md' : 'txt'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`${format === 'markdown' ? 'Markdown' : 'TXT'}으로 내보냈습니다!`);
+  }, [currentSessionId, modelById]);
+
+  const handleRegenerate = useCallback(async (withModelId?: string) => {
+    if (sendInFlightRef.current || isLoading || streamingRef.current) return;
+    if (!currentSessionId) return;
+
+    const session = useStore.getState().chatSessions.find((s) => s.id === currentSessionId);
+    if (!session) return;
+
+    const messages = session.messages;
+    let realIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'assistant') {
+        realIdx = i;
+        break;
+      }
+    }
+    if (realIdx === -1) return;
+
+    const lastAssistant = messages[realIdx];
+    let hasUserMessage = false;
+    for (let i = realIdx - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user') {
+        hasUserMessage = true;
+        break;
+      }
+    }
+    if (!hasUserMessage) return;
+
+    const targetModelId = withModelId || lastAssistant.modelId || selectedModelId;
+    if (!targetModelId) return;
+
+    if (!openAIStatus.available && isOpenAITextModelId(targetModelId)) {
+      toast.error(openAIBlockedReason);
+      return;
+    }
+
+    const credits = walletCredits?.[targetModelId] || 0;
+    if (credits <= 0) {
+      toast.error(`${modelById.get(targetModelId)?.displayName} 크레딧이 부족합니다.`);
+      return;
+    }
+
+    const originalModelId = lastAssistant.modelId;
+    const syncAssistantModelId = (modelId?: string) => {
+      useStore.setState((state: any) => ({
+        chatSessions: state.chatSessions.map((chatSession: any) =>
+          chatSession.id === currentSessionId
+            ? {
+                ...chatSession,
+                updatedAt: new Date(),
+                messages: chatSession.messages.map((message: any) =>
+                  message.id === lastAssistant.id ? { ...message, modelId } : message
+                ),
+              }
+            : chatSession
+        ),
+      }));
+    };
+
+    let modelChanged = false;
+    let completed = false;
+
+    sendInFlightRef.current = true;
+    setIsLoading(true);
+    streamingRef.current = true;
+    setIsCancelled(false);
+    startDraftMessage(lastAssistant.id);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 300000);
+
+    try {
+      if (targetModelId !== originalModelId) {
+        syncAssistantModelId(targetModelId);
+        modelChanged = true;
+      }
+
+      const apiMessages = messages.slice(0, realIdx).map((m) => ({ role: m.role, content: m.content }));
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: apiMessages,
+          modelId: targetModelId,
+          temperature,
+          language,
+          speechLevel,
+          storedFacts,
+          conversationSummary: conversationSummaries.length > 0 ? buildConversationContext(conversationSummaries) : undefined,
+          persona: activePersona ? {
+            name: activePersona.name,
+            personality: activePersona.personality,
+            expertise: activePersona.expertise,
+            speechPatterns: activePersona.speechPatterns,
+          } : undefined,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const { errorCode, errorReason } = await readApiErrorResponse(res);
+        const apiError = new Error(errorCode) as Error & { detail?: string };
+        apiError.detail = errorReason;
+        throw apiError;
+      }
+
+      const nextContent = await readChatSuccessResponse(res);
+      const extracted = extractMemoryForDisplay(nextContent);
+      if (extracted.facts.length) {
+        addStoredFacts(extracted.facts);
+      }
+      flushDraftMessage(extracted.displayText, true);
+      finalizeMessageContent(currentSessionId, lastAssistant.id, extracted.displayText);
+      try {
+        const { summary } = extractSummary(nextContent);
+        if (summary) {
+          setConversationSummaries((prev) => [...prev, summary]);
+        }
+      } catch {}
+      completed = true;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (!completed && modelChanged) {
+        syncAssistantModelId(originalModelId);
+      }
+      if (error?.name !== 'AbortError' && error?.message !== 'ERR_CANCELLED') {
+        toast.error('재생성에 실패했습니다.');
+      }
+    } finally {
+      await refreshWalletCredits();
+      clearDraftMessage();
+      setIsLoading(false);
+      streamingRef.current = false;
+      abortControllerRef.current = null;
+      sendInFlightRef.current = false;
+      setIsCancelled(false);
+    }
+  }, [currentSessionId, selectedModelId, walletCredits, modelById, temperature, language, speechLevel, storedFacts, conversationSummaries, activePersona, addStoredFacts, startDraftMessage, flushDraftMessage, clearDraftMessage, finalizeMessageContent, isLoading, openAIStatus.available, openAIBlockedReason, refreshWalletCredits]);
   
   const removeAttachment = useCallback((id: string) => {
     setAttachments(prev => prev.filter(att => att.id !== id));
@@ -2436,22 +2540,42 @@ export const Chat: React.FC = () => {
                   const credits = walletCredits?.[model.id] || 0;
                   return (
                     <option key={model.id} value={model.id}>
-                      {model.displayName} (잔여 {credits}회)
+                      {model.displayName} ({chatUi.remaining} {credits}회)
                     </option>
                   );
                 })}
               </select>
             </div>
-            {/* 스마트 라우터 */}
-            {message.trim().length > 0 && availableModels.length > 0 && (
+            {!openAIStatus.available && (
+              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {openAIBlockedReason}
+              </div>
+            )}
+            {showQuestionAnalysis && (
               <div className="mb-3">
-                <SmartRouterContent
-                  question={message}
-                  models={availableModels}
-                  speechLevel={speechLevel}
-                  language={language}
-                  compact
-                />
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <div className="text-xs font-semibold text-gray-600">{chatUi.analysisTitle}</div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuestionAnalysis(false)}
+                    className="text-xs text-gray-500 hover:text-gray-800 transition-colors"
+                  >
+                    {chatUi.close}
+                  </button>
+                </div>
+                {message.trim().length > 0 && availableModels.length > 0 ? (
+                  <SmartRouterContent
+                    question={message}
+                    models={availableModels}
+                    speechLevel={speechLevel}
+                    language={language}
+                    compact
+                  />
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    {chatUi.analysisEmpty}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2528,6 +2652,22 @@ export const Chat: React.FC = () => {
                           {/* 템플릿 */}
                           <button
                             onClick={() => {
+                              setShowQuestionAnalysis((prev) => !prev);
+                              setShowPlusMenu(false);
+                            }}
+                            className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                          >
+                            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                              <Search className="w-5 h-5 text-indigo-700" />
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.analysisTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.analysisDesc}</div>
+                            </div>
+                          </button>
+
+                          <button
+                            onClick={() => {
                               setShowTemplates(true);
                               setShowPlusMenu(false);
                             }}
@@ -2537,8 +2677,8 @@ export const Chat: React.FC = () => {
                               <MessageSquare className="w-5 h-5 text-blue-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">대화 템플릿</div>
-                              <div className="text-xs text-gray-500">저장된 프롬프트 사용</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.templatesTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.templatesDesc}</div>
                             </div>
                           </button>
 
@@ -2554,8 +2694,8 @@ export const Chat: React.FC = () => {
                               <GitCompare className="w-5 h-5 text-purple-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">동시 비교</div>
-                              <div className="text-xs text-gray-500">여러 AI에 동시 질문</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.compareTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.compareDesc}</div>
                             </div>
                           </button>
 
@@ -2571,8 +2711,8 @@ export const Chat: React.FC = () => {
                               <Link2 className="w-5 h-5 text-orange-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">AI 체인</div>
-                              <div className="text-xs text-gray-500">여러 AI가 순서대로 협업</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.chainTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.chainDesc}</div>
                             </div>
                           </button>
 
@@ -2588,14 +2728,14 @@ export const Chat: React.FC = () => {
                               <Swords className="w-5 h-5 text-red-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">AI 토론</div>
-                              <div className="text-xs text-gray-500">두 AI가 주제로 끝장 토론</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.debateTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.debateDesc}</div>
                             </div>
                           </button>
 
                           {/* 내보내기 */}
                           <div className="px-4 py-2 border-t border-gray-100 mt-1">
-                            <div className="text-xs text-gray-500 mb-1.5">대화 내보내기</div>
+                            <div className="text-xs text-gray-500 mb-1.5">{chatUi.exportTitle}</div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => { handleExportChat('markdown'); setShowPlusMenu(false); }}
@@ -2626,8 +2766,8 @@ export const Chat: React.FC = () => {
                               <UserCircle className="w-5 h-5 text-green-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">페르소나 설정</div>
-                              <div className="text-xs text-gray-500">AI 성격 및 말투 조절</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.personaTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.personaDesc}</div>
                             </div>
                           </button>
 
@@ -2643,8 +2783,8 @@ export const Chat: React.FC = () => {
                               <Paperclip className="w-5 h-5 text-gray-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">사진 및 파일 추가</div>
-                              <div className="text-xs text-gray-500">이미지, 텍스트 파일 업로드</div>
+                              <div className="text-sm font-semibold text-gray-900">{chatUi.filesTitle}</div>
+                              <div className="text-xs text-gray-500">{chatUi.filesDesc}</div>
                             </div>
                           </button>
 
@@ -2652,12 +2792,12 @@ export const Chat: React.FC = () => {
                           <div className="px-4 py-3 border-t border-gray-100 mt-2">
                             <div className="mb-2">
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-semibold text-gray-900">응답 스타일</span>
+                                <span className="text-sm font-semibold text-gray-900">{chatUi.responseStyle}</span>
                                 <span className="text-sm text-gray-600">{temperature.toFixed(1)}</span>
                               </div>
                               {(selectedModelId === 'gpt5' || selectedModelId === 'gpt51' || selectedModelId === 'gpt52') && (
                                 <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded mt-1">
-                                  ⚠️ GPT-5 시리즈 모델은 응답 스타일 조절을 지원하지 않습니다
+                                  ⚠️ {chatUi.gpt5NoStyle}
                                 </div>
                               )}
                             </div>

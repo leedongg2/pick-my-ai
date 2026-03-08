@@ -4,9 +4,17 @@ import { useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useStore } from '@/store';
 
 export default function AuthCallbackPage() {
   const processed = useRef(false);
+  const language = useStore((s) => s.language);
+
+  const ui = language === 'en'
+    ? { title: 'Processing authentication...', desc: 'Please wait a moment.' }
+    : language === 'ja'
+    ? { title: '認証を処理中...', desc: 'しばらくお待ちください。' }
+    : { title: '인증 처리 중...', desc: '잠시만 기다려주세요.' };
 
   useEffect(() => {
     if (processed.current) return;
@@ -22,8 +30,8 @@ export default function AuthCallbackPage() {
           <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
             <Sparkles className="w-8 h-8 text-primary-600" />
           </div>
-          <h2 className="text-2xl font-bold mb-4">인증 처리 중...</h2>
-          <p className="text-gray-600">잠시만 기다려주세요.</p>
+          <h2 className="text-2xl font-bold mb-4">{ui.title}</h2>
+          <p className="text-gray-600">{ui.desc}</p>
           <div className="mt-6 flex justify-center space-x-2">
             <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce"></div>
             <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
@@ -74,6 +82,7 @@ async function handleCallback() {
         console.log('[auth/callback] access_token found in hash, setting session cookie...');
         const ok = await callSocialSessionAPI(accessToken);
         if (ok) {
+          await warmSessionCache();
           console.log('[auth/callback] Session cookie set, redirecting to /chat');
           window.location.replace('/chat');
           return;
@@ -89,34 +98,28 @@ async function handleCallback() {
     if (code) {
       console.log('[auth/callback] code found, exchanging via Supabase client...');
 
-      // PKCE 표준 경로: Supabase SDK가 저장한 code_verifier를 사용해 세션 교환
       const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+      let accessToken = exchangeData.session?.access_token;
 
-      if (!exchangeError) {
-        const accessToken = exchangeData.session?.access_token;
-        if (accessToken) {
-          const ok = await callSocialSessionAPI(accessToken);
-          if (ok) {
-            console.log('[auth/callback] PKCE exchange successful, redirecting to /chat');
-            window.location.replace('/chat');
-            return;
-          }
-          console.error('[auth/callback] Session cookie setup failed after PKCE exchange');
-          window.location.replace('/login?error=cookie_failed');
-          return;
-        }
+      if (!accessToken) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        accessToken = sessionData.session?.access_token;
       }
 
-      // 일부 환경 fallback: 서버 code 교환 경로 시도
-      console.warn('[auth/callback] PKCE exchange failed, trying server fallback...', exchangeError?.message);
-      const ok = await callCodeExchangeAPI(code);
-      if (ok) {
-        console.log('[auth/callback] Server fallback exchange successful, redirecting to /chat');
-        window.location.replace('/chat');
+      if (accessToken) {
+        const ok = await callSocialSessionAPI(accessToken);
+        if (ok) {
+          await warmSessionCache();
+          console.log('[auth/callback] PKCE exchange successful, redirecting to /chat');
+          window.location.replace('/chat');
+          return;
+        }
+        console.error('[auth/callback] Session cookie setup failed after PKCE exchange');
+        window.location.replace('/login?error=cookie_failed');
         return;
       }
 
-      console.error('[auth/callback] Code exchange failed in both client/server paths');
+      console.error('[auth/callback] Code exchange failed:', exchangeError?.message);
       window.location.replace('/login?error=exchange_failed');
       return;
     }
@@ -127,6 +130,32 @@ async function handleCallback() {
   } catch (err) {
     console.error('[auth/callback] Unexpected error:', err);
     window.location.replace('/login?error=callback_error');
+  }
+}
+
+async function warmSessionCache(): Promise<void> {
+  try {
+    sessionStorage.removeItem('__pma_session');
+  } catch {}
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const res = await fetch('/api/auth/session', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        try {
+          sessionStorage.setItem('__pma_session', JSON.stringify({ data, ts: Date.now() }));
+        } catch {}
+        return;
+      }
+    } catch {}
+
+    await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
   }
 }
 

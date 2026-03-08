@@ -1,6 +1,15 @@
 import crypto from 'crypto';
+import { secureCompare } from '@/lib/secureAuth';
 
-const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
+function getAdminSecret(): string | null {
+  const secret = process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+  if (!secret || secret.length < 32) {
+    return null;
+  }
+
+  return secret;
+}
 
 // 비밀번호 실패 추적 (IP 기반)
 interface LoginAttempt {
@@ -94,11 +103,16 @@ export function verifyAdminPassword(password: string): boolean {
     return false;
   }
 
-  return password === adminPassword;
+  return secureCompare(password, adminPassword);
 }
 
 // 간단한 토큰 생성 (role + timestamp + signature)
 export function generateAdminToken(): string {
+  const secret = getAdminSecret();
+  if (!secret) {
+    throw new Error('JWT_SECRET 또는 SUPABASE_SERVICE_ROLE_KEY가 없거나 너무 짧습니다. 최소 32자 이상이어야 합니다.');
+  }
+
   const payload = {
     role: 'admin',
     iat: Date.now(),
@@ -110,7 +124,7 @@ export function generateAdminToken(): string {
   
   // HMAC 서명 생성
   const signature = crypto
-    .createHmac('sha256', SECRET_KEY)
+    .createHmac('sha256', secret)
     .update(payloadBase64)
     .digest('base64');
   
@@ -120,15 +134,23 @@ export function generateAdminToken(): string {
 // 토큰 검증
 export function verifyAdminToken(token: string): boolean {
   try {
+    const secret = getAdminSecret();
+    if (!secret) {
+      return false;
+    }
+
     const [payloadBase64, signature] = token.split('.');
+    if (!payloadBase64 || !signature) {
+      return false;
+    }
     
     // 서명 검증
     const expectedSignature = crypto
-      .createHmac('sha256', SECRET_KEY)
+      .createHmac('sha256', secret)
       .update(payloadBase64)
       .digest('base64');
     
-    if (signature !== expectedSignature) {
+    if (!secureCompare(signature, expectedSignature)) {
       return false;
     }
     

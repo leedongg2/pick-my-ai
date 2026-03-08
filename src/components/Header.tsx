@@ -40,10 +40,15 @@ export const Header = React.memo(() => {
       return {
         chat: 'Chat',
         configurator: 'Buy AI Models',
+        pricing: 'Pricing',
+        guide: 'Guide',
         dashboard: 'Dashboard',
         feedback: 'Feedback',
         vote: 'Vote',
         logout: 'Logout',
+        login: 'Login',
+        signup: 'Sign up',
+        pmcInfo: 'PMC Info',
         language: 'Language',
         korean: 'Korean',
         english: 'English',
@@ -55,10 +60,15 @@ export const Header = React.memo(() => {
       return {
         chat: 'チャット',
         configurator: 'AIモデル購入',
+        pricing: '料金表',
+        guide: 'ガイド',
         dashboard: 'ダッシュボード',
         feedback: 'フィードバック',
         vote: '投票',
         logout: 'ログアウト',
+        login: 'ログイン',
+        signup: '会員登録',
+        pmcInfo: 'PMC情報',
         language: '言語',
         korean: '韓国語',
         english: '英語',
@@ -69,10 +79,15 @@ export const Header = React.memo(() => {
     return {
       chat: '채팅',
       configurator: 'AI 모델 구매',
+      pricing: '가격표',
+      guide: '가이드',
       dashboard: '대시보드',
       feedback: '의견 보내기',
       vote: '투표',
       logout: '로그아웃',
+      login: '로그인',
+      signup: '회원가입',
+      pmcInfo: 'PMC 정보',
       language: '언어',
       korean: '한국어',
       english: '영어',
@@ -167,7 +182,7 @@ export const Header = React.memo(() => {
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
-                  가이드
+                  {ui.guide}
                 </Link>
                 <button
                   onClick={() => setIsPollModalOpen(true)}
@@ -186,7 +201,7 @@ export const Header = React.memo(() => {
                   type="button"
                   onClick={() => setIsPMCInfoOpen(true)}
                   className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                  title="PMC 정보"
+                  title={ui.pmcInfo}
                 >
                   <Info className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 </button>
@@ -260,16 +275,86 @@ export const Header = React.memo(() => {
             ) : (
               <>
                 <Link 
+                  href="/pricing"
+                  className={`px-3 py-2 rounded-lg text-sm transition-colors ${
+                    pathname === '/pricing'
+                      ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  {ui.pricing}
+                </Link>
+                <Link 
+                  href="/guide"
+                  className={`px-3 py-2 rounded-lg text-sm transition-colors ${
+                    pathname === '/guide'
+                      ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white font-medium'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  {ui.guide}
+                </Link>
+                <div className="relative" ref={languageMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsLanguageMenuOpen((prev) => !prev)}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    title={ui.language}
+                  >
+                    <Globe className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                  </button>
+                  {isLanguageMenuOpen ? (
+                    <div className="absolute right-0 mt-2 w-40 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLanguage('ko');
+                          setIsLanguageMenuOpen(false);
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                          language === 'ko' ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-200'
+                        }`}
+                      >
+                        {ui.korean}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLanguage('en');
+                          setIsLanguageMenuOpen(false);
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                          language === 'en' ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-200'
+                        }`}
+                      >
+                        {ui.english}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLanguage('ja');
+                          setIsLanguageMenuOpen(false);
+                        }}
+                        className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${
+                          language === 'ja' ? 'font-semibold text-gray-900 dark:text-white' : 'text-gray-700 dark:text-gray-200'
+                        }`}
+                      >
+                        {ui.japanese}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <Link 
                   href="/login"
                   className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900 transition-colors"
                 >
-                  로그인
+                  {ui.login}
                 </Link>
                 <Link 
                   href="/login"
                   className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:opacity-90 transition-all"
                 >
-                  회원가입
+                  {ui.signup}
                 </Link>
               </>
             )}

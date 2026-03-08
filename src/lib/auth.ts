@@ -185,15 +185,53 @@ export class AuthService {
           return { success: false, error: '로그인 실패' };
         }
 
+        const fallbackName =
+          authData.user.user_metadata?.name ||
+          authData.user.user_metadata?.full_name ||
+          authData.user.email?.split('@')[0] ||
+          'User';
+
         // users 테이블에서 사용자 정보 가져오기
-        const { data: userData, error: dbError } = await supabase
+        const { data: fetchedUserData, error: dbError } = await supabase
           .from('users')
           .select('*')
           .eq('id', authData.user.id)
           .single();
 
+        let userData = fetchedUserData;
+
         if (dbError || !userData) {
-          return { success: false, error: '사용자 정보를 찾을 수 없습니다' };
+          const { data: insertedUser } = await supabase
+            .from('users')
+            .upsert(
+              {
+                id: authData.user.id,
+                email: authData.user.email || email,
+                name: fallbackName,
+              },
+              { onConflict: 'id' }
+            )
+            .select('*')
+            .single();
+
+          userData = insertedUser || {
+            id: authData.user.id,
+            email: authData.user.email || email,
+            name: fallbackName,
+            created_at: new Date().toISOString(),
+          };
+        }
+
+        const { data: walletData } = await supabase
+          .from('user_wallets')
+          .select('user_id')
+          .eq('user_id', authData.user.id)
+          .single();
+
+        if (!walletData) {
+          await supabase
+            .from('user_wallets')
+            .upsert({ user_id: authData.user.id, credits: {} }, { onConflict: 'user_id' });
         }
 
         const user: User = {

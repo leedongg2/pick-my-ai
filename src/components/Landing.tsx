@@ -12,39 +12,6 @@ import { formatWon, getFixedDisplayPriceOrFallback } from '@/utils/pricing';
 import { useCustomTheme } from '@/hooks/useCustomTheme';
 import { LogoMark } from './LogoMark';
 
-const features = [
-  {
-    icon: <Zap className="w-6 h-6" />,
-    title: '1회 단위 결제',
-    description: '필요한 만큼만 구매하세요. 구독없이 사용한 만큼만 결제됩니다.',
-  },
-  {
-    icon: <Users className="w-6 h-6" />,
-    title: '멀티 AI 모델',
-    description: 'ChatGPT, Claude, Perplexity 등 다양한 AI를 한 곳에서 이용하세요.',
-  },
-  {
-    icon: <TrendingDown className="w-6 h-6" />,
-    title: '다중 선택 할인',
-    description: '모델을 많이 선택할수록 할인율이 높아집니다. 최대 30% 할인!',
-  },
-  {
-    icon: <MessageSquare className="w-6 h-6" />,
-    title: '통합 채팅',
-    description: '하나의 화면에서 여러 AI 모델과 자유롭게 전환하며 이용하세요.',
-  },
-  {
-    icon: <CreditCard className="w-6 h-6" />,
-    title: '크레딧 지갑',
-    description: '구매한 크레딧은 지갑에 적립되어 필요할 때마다 사용할 수 있습니다.',
-  },
-  {
-    icon: <Shield className="w-6 h-6" />,
-    title: '투명한 가격',
-    description: '모든 가격을 투명하게 공개하며 실시간으로 계산해 보여줍니다.',
-  },
-];
-
 // pricingExamples는 실제 가격과 동기화를 위해 pricing.ts의 fixedDisplayPriceWon을 참조하도록 수정
 const pricingExamples = [
   {
@@ -66,8 +33,155 @@ const pricingExamples = [
 
 export const Landing: React.FC = () => {
   const router = useRouter();
-  const { isAuthenticated, logout } = useStore();
+  const { isAuthenticated, logout, language, setLanguage } = useStore();
   const { getElementStyle, customDesignTheme, theme, getContrastColor } = useCustomTheme();
+
+  const ui = React.useMemo(() => {
+    if (language === 'en') {
+      return {
+        dashboard: 'Dashboard',
+        chat: 'Chat',
+        pricing: 'Pricing',
+        guide: 'Guide',
+        login: 'Login',
+        signup: 'Sign up',
+        logout: 'Logout',
+        heroBadge: 'Powerful AI platform',
+        heroLine1: 'Choose the AI',
+        heroLine2: 'pay per use',
+        heroLine3: 'without subscriptions',
+        heroDesc1: 'A smarter system where you only pay for what you actually use',
+        heroDesc2: ' no subscription required.',
+        heroPrimaryLoggedIn: 'Start now',
+        heroPrimaryLoggedOut: 'Start free',
+        realTimePrice: 'Live pricing',
+        settingsSr: 'Settings',
+        modelsBadge: 'Model catalog',
+        modelsTitle: 'Pick-My-AI models',
+        modelsSubtitle: 'Browse the latest models at a glance.',
+        loginRequired: 'Login required',
+        pricingDiscount: 'Automatic discount when you select multiple models!',
+        whyTitle: 'Why Pick-My-AI?',
+        whyHeadline1: 'Choosing and using AI,',
+        whyHeadline2: 'made easier',
+        whyDesc: 'Pick-My-AI helps you choose the right models and use them efficiently.',
+        discountLabels: ['2 models', '3 models', '5 models', '7+ models'],
+        ctaTitle: 'Start right now',
+        ctaDesc: 'Skip complicated subscriptions and use only the AI models you need.',
+        ctaPrimaryLoggedIn: 'Start now',
+        ctaPrimaryLoggedOut: 'Start free',
+        ctaSecondary: 'Contact us',
+        footerTagline: 'AI made easier to choose.',
+      };
+    }
+
+    if (language === 'ja') {
+      return {
+        dashboard: 'ダッシュボード',
+        chat: 'チャット',
+        pricing: '料金表',
+        guide: 'ガイド',
+        login: 'ログイン',
+        signup: '会員登録',
+        logout: 'ログアウト',
+        heroBadge: '革新的なAIプラットフォーム',
+        heroLine1: '使いたいAIを選んで',
+        heroLine2: '使った分だけ',
+        heroLine3: '支払えます',
+        heroDesc1: 'サブスクなしで、使った分だけ支払う',
+        heroDesc2: ' スマートな仕組み。',
+        heroPrimaryLoggedIn: '今すぐ始める',
+        heroPrimaryLoggedOut: '無料で始める',
+        realTimePrice: 'リアルタイム価格',
+        settingsSr: '設定',
+        modelsBadge: 'モデル一覧',
+        modelsTitle: 'Pick-My-AIモデル',
+        modelsSubtitle: '最新モデルをひと目で確認できます。',
+        loginRequired: 'ログイン必要',
+        pricingDiscount: '複数モデル選択で自動割引！',
+        whyTitle: 'なぜ Pick-My-AI？',
+        whyHeadline1: 'AIを選んで使うことを、',
+        whyHeadline2: 'もっと簡単に',
+        whyDesc: 'Pick-My-AIは必要なモデルを選び、効率よく使えるようにサポートします。',
+        discountLabels: ['2個選択', '3個選択', '5個選択', '7個以上'],
+        ctaTitle: '今すぐ始めましょう',
+        ctaDesc: '複雑なサブスクなしで、必要なAIだけ選んで使えます。',
+        ctaPrimaryLoggedIn: '今すぐ始める',
+        ctaPrimaryLoggedOut: '無料で始める',
+        ctaSecondary: '相談予約',
+        footerTagline: 'AI、選ぶのももっと簡単に。',
+      };
+    }
+
+    return {
+      dashboard: '대시보드',
+      chat: '채팅',
+      pricing: '가격표',
+      guide: '가이드',
+      login: '로그인',
+      signup: '회원가입',
+      logout: '로그아웃',
+      heroBadge: '혁신적인 AI 플랫폼',
+      heroLine1: '원하는 AI를',
+      heroLine2: '1회 단위로',
+      heroLine3: '결제하세요',
+      heroDesc1: '구독 없이 사용한 만큼만 결제되는',
+      heroDesc2: ' 스마트한 시스템',
+      heroPrimaryLoggedIn: '지금 시작하기',
+      heroPrimaryLoggedOut: '무료로 시작하기',
+      realTimePrice: '실시간 가격',
+      settingsSr: '설정',
+      modelsBadge: '모델 선택',
+      modelsTitle: 'Pick-My-AI 모델',
+      modelsSubtitle: '최신 모델을 한눈에 살펴보세요.',
+      loginRequired: '로그인 필요',
+      pricingDiscount: '여러 모델 선택 시 자동 할인 혜택!',
+      whyTitle: '왜 Pick-My-AI?',
+      whyHeadline1: 'AI를 고르고 쓰는 일,',
+      whyHeadline2: '더 쉽게',
+      whyDesc: 'Pick-My-AI는 필요한 모델을 골라 효율적으로 사용할 수 있도록 도와줍니다.',
+      discountLabels: ['2개 선택', '3개 선택', '5개 선택', '7개 이상'],
+      ctaTitle: '지금 바로 시작하세요',
+      ctaDesc: '복잡한 구독 없이, 필요한 AI만 골라 사용하세요.',
+      ctaPrimaryLoggedIn: '지금 시작하기',
+      ctaPrimaryLoggedOut: '무료로 시작하기',
+      ctaSecondary: '상담 예약하기',
+      footerTagline: 'AI, 이제 고르기도 쉬운 선택',
+    };
+  }, [language]);
+
+  const features = React.useMemo(() => {
+    if (language === 'en') {
+      return [
+        { icon: <Zap className="w-6 h-6" />, title: 'Pay per use', description: 'Buy only what you need and pay only for actual usage.' },
+        { icon: <Users className="w-6 h-6" />, title: 'Multi-AI models', description: 'Use ChatGPT, Claude, Perplexity and more in one place.' },
+        { icon: <TrendingDown className="w-6 h-6" />, title: 'Bundle discounts', description: 'The more models you select, the higher the discount. Up to 30% off.' },
+        { icon: <MessageSquare className="w-6 h-6" />, title: 'Unified chat', description: 'Switch between multiple AI models freely in a single chat view.' },
+        { icon: <CreditCard className="w-6 h-6" />, title: 'Credit wallet', description: 'Purchased credits stay in your wallet until you use them.' },
+        { icon: <Shield className="w-6 h-6" />, title: 'Transparent pricing', description: 'All prices are visible and calculated clearly in real time.' },
+      ];
+    }
+
+    if (language === 'ja') {
+      return [
+        { icon: <Zap className="w-6 h-6" />, title: '回数単位決済', description: '必要な分だけ購入し、使った分だけ支払えます。' },
+        { icon: <Users className="w-6 h-6" />, title: 'マルチAIモデル', description: 'ChatGPT、Claude、Perplexityなどを1か所で使えます。' },
+        { icon: <TrendingDown className="w-6 h-6" />, title: '複数選択割引', description: '選ぶモデルが増えるほど割引率もアップ。最大30%割引。' },
+        { icon: <MessageSquare className="w-6 h-6" />, title: '統合チャット', description: '1つの画面で複数AIモデルを自由に切り替えて会話できます。' },
+        { icon: <CreditCard className="w-6 h-6" />, title: 'クレジットウォレット', description: '購入したクレジットは必要な時まで保存されます。' },
+        { icon: <Shield className="w-6 h-6" />, title: '透明な価格', description: 'すべての価格を公開し、リアルタイムでわかりやすく計算します。' },
+      ];
+    }
+
+    return [
+      { icon: <Zap className="w-6 h-6" />, title: '1회 단위 결제', description: '필요한 만큼만 구매하세요. 구독없이 사용한 만큼만 결제됩니다.' },
+      { icon: <Users className="w-6 h-6" />, title: '멀티 AI 모델', description: 'ChatGPT, Claude, Perplexity 등 다양한 AI를 한 곳에서 이용하세요.' },
+      { icon: <TrendingDown className="w-6 h-6" />, title: '다중 선택 할인', description: '모델을 많이 선택할수록 할인율이 높아집니다. 최대 30% 할인!' },
+      { icon: <MessageSquare className="w-6 h-6" />, title: '통합 채팅', description: '하나의 화면에서 여러 AI 모델과 자유롭게 전환하며 이용하세요.' },
+      { icon: <CreditCard className="w-6 h-6" />, title: '크레딧 지갑', description: '구매한 크레딧은 지갑에 적립되어 필요할 때마다 사용할 수 있습니다.' },
+      { icon: <Shield className="w-6 h-6" />, title: '투명한 가격', description: '모든 가격을 투명하게 공개하며 실시간으로 계산해 보여줍니다.' },
+    ];
+  }, [language]);
 
 
   const handleGetStarted = () => {
@@ -117,26 +231,44 @@ export const Landing: React.FC = () => {
             {isAuthenticated ? (
               <>
                 <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard')}>
-                  대시보드
+                  {ui.dashboard}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => router.push('/chat')}>
-                  채팅
+                  {ui.chat}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => router.push('/settings')}>
                   <Settings className="h-4 w-4" />
-                  <span className="sr-only">설정</span>
+                  <span className="sr-only">{ui.settingsSr}</span>
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleLogout}>
-                  로그아웃
+                  {ui.logout}
                 </Button>
               </>
             ) : (
               <>
+                <div className="flex items-center gap-1 rounded-full border border-gray-200 bg-white/70 px-1 py-1">
+                  {(['ko', 'en', 'ja'] as const).map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setLanguage(lang)}
+                      className={`px-2 py-1 text-xs rounded-full transition-colors ${language === lang ? 'bg-primary text-primary-foreground' : 'text-gray-600 hover:bg-gray-100'}`}
+                    >
+                      {lang.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => router.push('/pricing')}>
+                  {ui.pricing}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => router.push('/guide')}>
+                  {ui.guide}
+                </Button>
                 <Button variant="ghost" size="sm" onClick={handleLogin} className="preview-nav-login" style={getElementStyle('nav-login', {})}>
-                  로그인
+                  {ui.login}
                 </Button>
                 <Button size="sm" onClick={handleSignup} className="preview-nav-signup" style={getElementStyle('nav-signup', {})}>
-                  회원가입
+                  {ui.signup}
                 </Button>
               </>
             )}
@@ -151,16 +283,16 @@ export const Landing: React.FC = () => {
               <div className="space-y-8">
                 <div className="inline-flex items-center gap-2 neo-card px-6 py-3" style={getElementStyle('hero-badge', {})}>
                   <Sparkles className="h-5 w-5 text-blue-600" />
-                  <span className="font-bold text-blue-600">혁신적인 AI 플랫폼</span>
+                  <span className="font-bold text-blue-600">{ui.heroBadge}</span>
                 </div>
                 <h1 className="preview-hero-title text-6xl font-black leading-tight sm:text-7xl tracking-tighter text-gray-900" style={getElementStyle('hero-title', {})}>
-                  <span className="block">원하는 AI를</span>
-                  <span className="block mt-3 text-blue-600">1회 단위로</span>
-                  <span className="block">결제하세요</span>
+                  <span className="block">{ui.heroLine1}</span>
+                  <span className="block mt-3 text-blue-600">{ui.heroLine2}</span>
+                  <span className="block">{ui.heroLine3}</span>
                 </h1>
                 <p className="preview-hero-description text-2xl leading-relaxed font-medium text-gray-600" style={getElementStyle('hero-description', {})}>
-                  구독 없이 사용한 만큼만 결제되는
-                  <span className="font-bold text-gray-900"> 스마트한 시스템</span>
+                  {ui.heroDesc1}
+                  <span className="font-bold text-gray-900">{ui.heroDesc2}</span>
                 </p>
                 <div className="flex flex-wrap items-center gap-4">
                   <Button
@@ -169,7 +301,7 @@ export const Landing: React.FC = () => {
                     className="preview-hero-primary-button bg-primary text-primary-foreground hover:opacity-90 px-8 py-4 text-lg font-bold transition-all duration-200 hover-lift"
                     style={getElementStyle('hero-primary-button', {})}
                   >
-                    {isAuthenticated ? '지금 시작하기' : '무료로 시작하기'}
+                    {isAuthenticated ? ui.heroPrimaryLoggedIn : ui.heroPrimaryLoggedOut}
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                   {isAuthenticated && (
@@ -180,7 +312,7 @@ export const Landing: React.FC = () => {
                       className="preview-hero-secondary-button text-gray-700 hover:text-blue-600"
                       style={getElementStyle('hero-secondary-button', {})}
                     >
-                      대시보드
+                      {ui.dashboard}
                     </Button>
                   )}
                 </div>
@@ -205,7 +337,7 @@ export const Landing: React.FC = () => {
                 <div className="border-b border-gray-200 pb-4 mb-6">
                   <div className="inline-flex items-center gap-2 neo-inset px-4 py-2 rounded-full">
                     <Sparkles className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-bold text-blue-600">실시간 가격</span>
+                    <span className="text-sm font-bold text-blue-600">{ui.realTimePrice}</span>
                   </div>
                 </div>
                 <div className="space-y-4">
@@ -242,14 +374,14 @@ export const Landing: React.FC = () => {
             <div className="text-center space-y-6">
               <div className="inline-flex items-center gap-2 neo-card px-6 py-3">
                 <Zap className="h-5 w-5 text-blue-600" />
-                <span className="font-bold text-blue-600">왜 Pick-My-AI?</span>
+                <span className="font-bold text-blue-600">{ui.whyTitle}</span>
               </div>
               <h2 className="text-5xl font-black text-gray-900 sm:text-6xl tracking-tight">
-                AI를 고르고 쓰는 일,
-                <span className="block mt-2 text-blue-600">더 쉽게</span>
+                {ui.whyHeadline1}
+                <span className="block mt-2 text-blue-600">{ui.whyHeadline2}</span>
               </h2>
               <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
-                Pick-My-AI는 필요한 모델을 골라 효율적으로 사용할 수 있도록 도와줍니다.
+                {ui.whyDesc}
               </p>
             </div>
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
@@ -274,10 +406,10 @@ export const Landing: React.FC = () => {
           <div className="mx-auto max-w-7xl space-y-12">
             <div className="text-center">
               <Badge variant="default" size="sm">
-                모델 선택
+                {ui.modelsBadge}
               </Badge>
-              <h2 className="mt-4 text-3xl font-bold text-gray-900 sm:text-4xl">Pick-My-AI 모델</h2>
-              <p className="mt-4 text-base text-gray-600">최신 모델을 한눈에 살펴보세요.</p>
+              <h2 className="mt-4 text-3xl font-bold text-gray-900 sm:text-4xl">{ui.modelsTitle}</h2>
+              <p className="mt-4 text-base text-gray-600">{ui.modelsSubtitle}</p>
             </div>
 
             <div className="space-y-12">
@@ -300,7 +432,7 @@ export const Landing: React.FC = () => {
                       </div>
                       {!isAuthenticated && (
                         <Badge variant="amber" size="sm">
-                          로그인 필요
+                          {ui.loginRequired}
                         </Badge>
                       )}
                     </div>
@@ -338,10 +470,10 @@ export const Landing: React.FC = () => {
           <div className="mx-auto max-w-7xl space-y-10">
             <div className="grid gap-4 md:grid-cols-4">
               {[
-                { percent: '5%', label: '2개 선택' },
-                { percent: '10%', label: '3개 선택' },
-                { percent: '20%', label: '5개 선택' },
-                { percent: '30%', label: '7개 이상 선택' },
+                { percent: '5%', label: ui.discountLabels[0] },
+                { percent: '10%', label: ui.discountLabels[1] },
+                { percent: '20%', label: ui.discountLabels[2] },
+                { percent: '30%', label: ui.discountLabels[3] },
               ].map((item, index) => (
                 <Card key={item.percent} className="glass-card shadow-soft hover-lift">
                   <CardContent className="space-y-2 p-5 text-center">
@@ -351,14 +483,14 @@ export const Landing: React.FC = () => {
                 </Card>
               ))}
             </div>
-            <p className="text-center text-sm text-gray-600">여러 모델 선택 시 자동 할인 혜택!</p>
+            <p className="text-center text-sm text-gray-600">{ui.pricingDiscount}</p>
           </div>
         </section>
 
         <section className="relative overflow-hidden px-4 py-20 bg-primary text-primary-foreground sm:px-6 lg:px-8">
           <div className="relative mx-auto max-w-4xl text-center">
-            <h2 className="text-4xl font-extrabold sm:text-5xl">지금 바로 시작하세요</h2>
-            <p className="mt-4 text-xl opacity-95">복잡한 구독 없이, 필요한 AI만 골라 사용하세요.</p>
+            <h2 className="text-4xl font-extrabold sm:text-5xl">{ui.ctaTitle}</h2>
+            <p className="mt-4 text-xl opacity-95">{ui.ctaDesc}</p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
               <Button
                 variant="secondary"
@@ -367,7 +499,7 @@ export const Landing: React.FC = () => {
                 className="preview-cta-primary-button bg-white text-primary-600 hover:bg-gray-100 shadow-soft hover:shadow-glow transition-all duration-200 hover:scale-[1.02]"
                 style={getElementStyle('cta-primary-button', {})}
               >
-                {isAuthenticated ? '지금 시작하기' : '무료로 시작하기'}
+                {isAuthenticated ? ui.ctaPrimaryLoggedIn : ui.ctaPrimaryLoggedOut}
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button
@@ -377,7 +509,7 @@ export const Landing: React.FC = () => {
                 className="preview-cta-secondary-button border border-white/60 bg-white/10 text-white hover:bg-white/20"
                 style={getElementStyle('cta-secondary-button', {})}
               >
-                상담 예약하기
+                {ui.ctaSecondary}
               </Button>
             </div>
           </div>
@@ -391,7 +523,7 @@ export const Landing: React.FC = () => {
             <span className="font-semibold text-gray-700">Pick-My-AI</span>
             <span>© 2025 Pick-My-AI. All rights reserved.</span>
           </div>
-          <p className="text-gray-500 text-xs">AI, 이제 고르기도 쉬운 선택</p>
+          <p className="text-gray-500 text-xs">{ui.footerTagline}</p>
         </div>
       </footer>
     </div>

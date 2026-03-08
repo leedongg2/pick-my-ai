@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
 import { Play, Copy, RotateCcw, Sparkles } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { SmartRouter } from './SmartRouter';
+import { getOpenAIStatusBlockedMessage, isOpenAITextModelId } from '@/utils/openaiStatus';
 
 type Props = {
   availableModels: any[];
@@ -26,6 +28,7 @@ type DebateMessage = {
 
 export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, modelById, language, speechLevel }) => {
   const { deductCredit } = useStore();
+  const { status: openAIStatus } = useOpenAIStatus();
   const [topic, setTopic] = useState('');
   const [modelA, setModelA] = useState('');
   const [modelB, setModelB] = useState('');
@@ -34,9 +37,10 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
   const [isRunning, setIsRunning] = useState(false);
   const [conclusion, setConclusion] = useState('');
   const [lastAnalyzedTopic, setLastAnalyzedTopic] = useState('');
+  const openAIBlockedReason = getOpenAIStatusBlockedMessage(openAIStatus.reason);
 
   const textModels = availableModels.filter(m =>
-    m.series !== 'image' && m.series !== 'video' && !m.isBatch
+    m.series !== 'image' && m.series !== 'video' && !m.isBatch && (openAIStatus.available || !isOpenAITextModelId(m.id))
   );
 
   const totalCost = rounds * 2 + 1;
@@ -63,6 +67,7 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
     if (!modelA || !modelB) { toast.error('두 AI를 모두 선택해주세요.'); return; }
     if (modelA === modelB) { toast.error('서로 다른 AI를 선택해주세요.'); return; }
     if (lastAnalyzedTopic === topic.trim()) { toast.error('이미 분석한 질문입니다. 다른 주제로 변경해주세요.'); return; }
+    if (!openAIStatus.available && (isOpenAITextModelId(modelA) || isOpenAITextModelId(modelB))) { toast.error(openAIBlockedReason); return; }
 
     const creditsA = walletCredits[modelA] || 0;
     const creditsB = walletCredits[modelB] || 0;
@@ -145,7 +150,7 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
     } finally {
       setIsRunning(false);
     }
-  }, [topic, modelA, modelB, rounds, walletCredits, modelById, deductCredit, language, speechLevel]);
+  }, [topic, modelA, modelB, rounds, walletCredits, modelById, deductCredit, language, speechLevel, openAIStatus.available, openAIBlockedReason]);
 
   const handleReset = () => {
     setMessages([]);
@@ -157,6 +162,11 @@ export const AiDebate: React.FC<Props> = ({ availableModels, walletCredits, mode
 
   return (
     <div className="p-5">
+      {!openAIStatus.available && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {openAIBlockedReason}
+        </div>
+      )}
       <div className="mb-4 p-3 bg-red-50 rounded-xl text-sm text-red-700 border border-red-200">
         ⚔️ 두 AI가 주제에 대해 찬반으로 나뉘어 실제 토론합니다. 총 {totalCost}회 크레딧이 차감됩니다.
       </div>

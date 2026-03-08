@@ -118,15 +118,16 @@ export const Dashboard: React.FC = () => {
 
   const swapModels = useMemo(() => {
     if (!wallet) return [];
-    return models.filter(m => m.enabled && (wallet.credits[m.id] || 0) > 0 && m.series !== 'image' && m.series !== 'video');
+    return models.filter(m => m.enabled && (wallet.credits[m.id] || 0) > 0 && m.series !== 'image' && m.series !== 'video' && getFixedDisplayPriceOrFallback(m.id, m.piWon).price > 1);
   }, [models, wallet]);
 
   const handleSwap = useCallback(() => {
     if (!swapModelId || swapQty <= 0) return;
     const model = models.find(m => m.id === swapModelId);
     if (!model) return;
+    const normalizedQty = Number.isFinite(swapQty) ? Math.floor(swapQty) : 0;
     const pricePerCredit = getFixedDisplayPriceOrFallback(model.id, model.piWon).price;
-    const result = swapCreditsToPMC([{ modelId: swapModelId, qty: swapQty, pricePerCredit }]);
+    const result = swapCreditsToPMC([{ modelId: swapModelId, qty: normalizedQty, pricePerCredit }]);
     if (result.success) {
       import('sonner').then(({ toast }) => {
         toast.success(`✅ 환전 완료! +${result.totalPMC} PMC (수수료 ${result.totalFee}원)`);

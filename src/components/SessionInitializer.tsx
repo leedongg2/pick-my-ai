@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
 import { initializeRealtimeSync, unsubscribeFromRealtimeUpdates } from '@/lib/realtimeSync';
+import { csrfFetch } from '@/lib/csrfFetch';
 
 /**
  * 앱 전역에서 세션 쿠키를 확인하여 Zustand store의 인증 상태를 자동 복원하는 컴포넌트.
@@ -79,7 +80,7 @@ export function SessionInitializer() {
           // setCurrentUser + wallet을 한 번에 설정하여 partialize가 빈 wallet을 저장하는 것을 방지
           const initialWallet = {
             userId,
-            credits: savedLocalCredits,
+            credits: {},
             transactions: savedLocalTransactions,
           };
           useStore.setState({
@@ -94,7 +95,7 @@ export function SessionInitializer() {
             },
             isAuthenticated: true,
             wallet: initialWallet,
-            hasFirstPurchase: savedLocalHasFirstPurchase || Object.keys(savedLocalCredits).length > 0,
+            hasFirstPurchase: false,
           });
 
           // 서버에서 사용자 데이터(지갑 + 설정) 로드 후 병합
@@ -107,13 +108,7 @@ export function SessionInitializer() {
 
               const serverCredits = userData.credits || {};
               
-              // 병합: 서버와 로컬 중 더 큰 값을 사용
-              const mergedCredits: Record<string, number> = { ...savedLocalCredits };
-              for (const [modelId, amount] of Object.entries(serverCredits)) {
-                const serverVal = typeof amount === 'number' ? amount : 0;
-                const localVal = mergedCredits[modelId] || 0;
-                mergedCredits[modelId] = Math.max(serverVal, localVal);
-              }
+              const mergedCredits: Record<string, number> = { ...serverCredits };
               
               // 0 이하인 크레딧 제거
               for (const key of Object.keys(mergedCredits)) {
@@ -124,19 +119,28 @@ export function SessionInitializer() {
               
               // 신규 사용자 무료 크레딧 지급 (gpt5 10회, haiku45 10회, sonar 10회)
               if (!hasCredits && !savedLocalHasFirstPurchase && !userData.settings?.hasFirstPurchase) {
-                mergedCredits['gpt5'] = 10;
-                mergedCredits['haiku45'] = 10;
-                mergedCredits['sonar'] = 10;
-                hasCredits = true;
-                stateUpdate.hasFirstPurchase = true;
-                
-                // 서버에 무료 크레딧 저장
-                fetch('/api/wallet', {
-                  method: 'PATCH',
-                  credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ credits: mergedCredits }),
-                }).catch(() => {});
+                try {
+                  const walletRes = await csrfFetch('/api/wallet', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'grant_welcome_credits' }),
+                  });
+                  if (walletRes.ok) {
+                    const walletData = await walletRes.json();
+                    const grantedCredits = walletData?.wallet?.credits || {};
+                    Object.keys(mergedCredits).forEach((key) => delete mergedCredits[key]);
+                    Object.entries(grantedCredits).forEach(([modelId, amount]) => {
+                      if (typeof amount === 'number' && amount > 0) {
+                        mergedCredits[modelId] = amount;
+                      }
+                    });
+                    hasCredits = Object.keys(mergedCredits).length > 0;
+                    if (walletData?.granted || hasCredits) {
+                      stateUpdate.hasFirstPurchase = true;
+                    }
+                  }
+                } catch {}
               }
               
               stateUpdate.wallet = {
@@ -146,18 +150,6 @@ export function SessionInitializer() {
               };
               if (hasCredits) {
                 stateUpdate.hasFirstPurchase = true;
-              }
-              
-              // 병합된 크레딧이 서버와 다르면 서버에도 동기화
-              const serverStr = JSON.stringify(serverCredits);
-              const mergedStr = JSON.stringify(mergedCredits);
-              if (hasCredits && serverStr !== mergedStr) {
-                fetch('/api/wallet', {
-                  method: 'PATCH',
-                  credentials: 'include',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ credits: mergedCredits }),
-                }).catch(() => {});
               }
 
               // 설정 복원

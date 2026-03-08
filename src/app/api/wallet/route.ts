@@ -1,24 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/apiAuth';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-function getSupabaseAdmin() {
-  if (!supabaseUrl) {
-    throw new Error('NEXT_PUBLIC_SUPABASE_URL이 설정되지 않았습니다.');
-  }
-  if (!supabaseAnonKey) {
-    throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY가 설정되지 않았습니다.');
-  }
-  // 지갑/트랜잭션 API는 서버에서 DB를 직접 갱신하므로 service role이 필요합니다.
-  if (!supabaseServiceKey) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY가 설정되지 않았습니다. (Netlify 환경변수에 추가 필요)');
-  }
-  return createClient(supabaseUrl, supabaseServiceKey);
-}
+import { getOrCreateWallet, grantWelcomeCreditsIfEligible } from '@/lib/serverWallet';
 
 export async function GET(request: NextRequest) {
   try {
@@ -30,33 +12,8 @@ export async function GET(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
-    const db = getSupabaseAdmin();
-
-    const { data: wallets, error: walletError } = await db
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', userId)
-      .limit(1);
-
-    if (walletError) {
-      return NextResponse.json({ error: walletError.message || '지갑 조회 실패' }, { status: 500 });
-    }
-
-    if (!wallets || wallets.length === 0) {
-      const { data: newWallet, error: createError } = await db
-        .from('user_wallets')
-        .insert({ user_id: userId, credits: {} })
-        .select()
-        .single();
-
-      if (createError) {
-        return NextResponse.json({ error: createError.message || '지갑 생성 실패' }, { status: 500 });
-      }
-
-      return NextResponse.json({ wallet: newWallet });
-    }
-
-    return NextResponse.json({ wallet: wallets[0] });
+    const wallet = await getOrCreateWallet(userId);
+    return NextResponse.json({ wallet });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet GET error:', error);
@@ -75,79 +32,13 @@ export async function POST(request: NextRequest) {
     
     const userId = sessionResult.userId;
 
-    const db = getSupabaseAdmin();
-
-    const { credits, type, description } = await request.json();
-
-    if (!credits || typeof credits !== 'object') {
-      return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
+    const body = await request.json().catch(() => null);
+    if (body?.action !== 'grant_welcome_credits') {
+      return NextResponse.json({ error: '허용되지 않은 지갑 변경 요청입니다.' }, { status: 403 });
     }
 
-    const { data: currentWalletRows, error: fetchError } = await db
-      .from('user_wallets')
-      .select('credits')
-      .eq('user_id', userId)
-      .limit(1);
-
-    if (fetchError) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('Wallet POST fetch error:', fetchError);
-      }
-      return NextResponse.json({ error: fetchError.message || '지갑 조회 실패' }, { status: 500 });
-    }
-
-    const currentCredits = (currentWalletRows?.[0] as any)?.credits || {};
-    const newCredits = { ...currentCredits };
-
-    Object.entries(credits).forEach(([modelId, amount]) => {
-      const numAmount = Number(amount);
-      if (!isNaN(numAmount)) {
-        newCredits[modelId] = (newCredits[modelId] || 0) + numAmount;
-        if (newCredits[modelId] <= 0) {
-          delete newCredits[modelId];
-        }
-      }
-    });
-
-    const { data: updatedWalletRows, error: updateError } = await db
-      .from('user_wallets')
-      .update({ credits: newCredits })
-      .eq('user_id', userId)
-      .select();
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
-    }
-
-    const updatedWallet = updatedWalletRows?.[0];
-    if (!updatedWallet) {
-      const insertResult = await db
-        .from('user_wallets')
-        .insert({ user_id: userId, credits: newCredits })
-        .select()
-        .single();
-
-      if (insertResult.error) {
-        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
-      }
-
-      return NextResponse.json({ wallet: insertResult.data });
-    }
-
-    const { error: txError } = await db
-      .from('transactions')
-      .insert({
-        user_id: userId,
-        type: type || 'purchase',
-        credits: credits,
-        description: description || '크레딧 변경',
-      });
-
-    if (txError && process.env.NODE_ENV !== 'production') {
-      console.error('Transaction insert error:', txError);
-    }
-
-    return NextResponse.json({ wallet: updatedWallet });
+    const result = await grantWelcomeCreditsIfEligible(userId);
+    return NextResponse.json({ wallet: result.wallet, granted: result.granted });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet POST error:', error);
@@ -158,46 +49,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const sessionResult = await verifySession(request);
-    
-    if (!sessionResult.authenticated || !sessionResult.userId) {
-      return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
-    }
-    
-    const userId = sessionResult.userId;
-
-    const db = getSupabaseAdmin();
-
-    const { credits } = await request.json();
-
-    if (!credits || typeof credits !== 'object') {
-      return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
-    }
-
-    const { data: updatedWalletRows, error: updateError } = await db
-      .from('user_wallets')
-      .update({ credits })
-      .eq('user_id', userId)
-      .select();
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
-    }
-
-    const updatedWallet = updatedWalletRows?.[0];
-    if (!updatedWallet) {
-      const insertResult = await db
-        .from('user_wallets')
-        .insert({ user_id: userId, credits })
-        .select()
-        .single();
-      if (insertResult.error) {
-        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
-      }
-      return NextResponse.json({ wallet: insertResult.data });
-    }
-
-    return NextResponse.json({ wallet: updatedWallet });
+    return NextResponse.json({ error: '직접 지갑 덮어쓰기는 허용되지 않습니다.' }, { status: 403 });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet PATCH error:', error);

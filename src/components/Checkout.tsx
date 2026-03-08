@@ -10,6 +10,7 @@ import { calculatePrice, formatWon, getFixedDisplayPriceOrFallback, calculatePMC
 import { CreditCard, CheckCircle, ArrowLeft, Coins, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { loadTossPayments } from '@tosspayments/payment-sdk';
+import { csrfFetch } from '@/lib/csrfFetch';
 
 export const Checkout: React.FC = React.memo(() => {
   const router = useRouter();
@@ -21,17 +22,11 @@ export const Checkout: React.FC = React.memo(() => {
     models, 
     selections, 
     policy, 
-    wallet,
     currentUser,
     isAuthenticated,
     hasFirstPurchase,
-    initWallet,
-    addCredits,
     clearSelections,
-    pmcBalance,
     userPlan,
-    earnPMC,
-    usePMC,
     getAvailablePMC,
   } = useStore();
   
@@ -201,7 +196,6 @@ export const Checkout: React.FC = React.memo(() => {
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('🛒 결제 시작:', { 
-        wallet, 
         selections,
         currentUser: currentUser?.email,
         isAuthenticated,
@@ -236,99 +230,62 @@ export const Checkout: React.FC = React.memo(() => {
       return;
     }
     
-    // 지갑 초기화 (없는 경우) - 동기 처리로 즉시 완료
-    if (!wallet) {
-      initWallet(stateBeforeClose.currentUser!.id);
-      // Zustand는 동기적으로 상태를 업데이트하므로 즉시 확인
-      const stateAfterInit = useStore.getState();
-      if (!stateAfterInit.wallet) {
-        toast.error('지갑 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
-        setIsProcessing(false);
-        return;
-      }
-    }
-    
-    // 크레딧 추가
-    const credits: { [modelId: string]: number } = {};
-    selections.forEach(sel => {
-      if (sel.quantity > 0) {
-        credits[sel.modelId] = sel.quantity;
-      }
-    });
-    
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('💳 추가할 크레딧:', credits);
-    }
-    
-    if (Object.keys(credits).length === 0) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('❌ 추가할 크레딧이 없음!');
-      }
+    const selectionPayload = selections
+      .filter(sel => sel.quantity > 0)
+      .map(sel => ({ modelId: sel.modelId, quantity: sel.quantity }));
+
+    if (selectionPayload.length === 0) {
       toast.error('추가할 크레딧이 없습니다.');
       setIsProcessing(false);
       return;
     }
-    
-    // 크레딧 추가 실행
-    addCredits(credits);
-    
-    // PMC 사용 처리
-    const orderId = `order_${Date.now()}`;
-    if (usePMCChecked && pmcToUse > 0) {
-      const pmcStore = useStore.getState();
-      pmcStore.usePMC(pmcToUse, `결제 시 사용`, orderId);
-    }
-    
-    // PMC 적립 처리
-    if (pmcCalculation.earnAmount > 0) {
-      const totalSelectedQuantity = selections.reduce((sum, sel) => sum + (sel.quantity || 0), 0);
-      earnPMC(pmcCalculation.earnAmount, `결제 적립 (총 선택 수량 ${totalSelectedQuantity})`, orderId);
-    }
-    
-    // 저장 대기
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    // 크레딧이 제대로 추가되었는지 확인
-    const updatedState = useStore.getState();
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('✅ 최종 지갑 상태:', updatedState.wallet);
-    }
-    
-    if (updatedState.wallet) {
-      const hasCredits = Object.keys(credits).every(
-        modelId => (updatedState.wallet!.credits[modelId] || 0) > 0
-      );
-      
-      if (!hasCredits) {
-        if (process.env.NODE_ENV !== 'production') {
-          console.warn('⚠️ 크레딧이 제대로 추가되지 않았을 수 있습니다!');
-        }
+
+    try {
+      const prepareResponse = await csrfFetch('/api/payments/toss/prepare', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selections: selectionPayload,
+          pmcToUse: usePMCChecked ? pmcToUse : 0,
+        }),
+      });
+
+      const prepared = await prepareResponse.json();
+      if (!prepareResponse.ok) {
+        toast.error(prepared?.error || '결제 준비에 실패했습니다.');
+        setIsProcessing(false);
+        return;
       }
+
+      const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY as string | undefined;
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL as string | undefined;
+      if (!clientKey || !baseUrl) {
+        toast.error('결제 설정이 누락되었습니다. 환경변수를 확인하세요.');
+        setIsProcessing(false);
+        return;
+      }
+
+      const successUrl = new URL('/checkout/success', baseUrl);
+      successUrl.searchParams.set('purchaseToken', prepared.purchaseToken);
+
+      const failUrl = new URL('/checkout/fail', baseUrl);
+      const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
+      await tossPayments.requestPayment('CARD', {
+        amount: prepared.amount,
+        orderId: prepared.orderId,
+        orderName: prepared.orderName,
+        successUrl: successUrl.toString(),
+        failUrl: failUrl.toString(),
+        customerName: currentUser?.name || currentUser?.email || '사용자'
+      } as any);
+    } catch (error: any) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Checkout payment start error:', error);
+      }
+      toast.error('결제 시작에 실패했습니다.');
+      setIsProcessing(false);
     }
-    
-    setPaymentComplete(true);
-    setIsProcessing(false);
-    
-    const modelCount = Object.keys(credits).length;
-    const totalCredits = Object.values(credits).reduce((sum, val) => sum + val, 0);
-    
-    // 결제 완료 메시지 (PMC 정보 포함)
-    let successMsg = `결제 완료! ${modelCount}개 모델, 총 ${totalCredits}회 크레딧 충전`;
-    if (pmcCalculation.earnAmount > 0) {
-      successMsg += ` (+${pmcCalculation.earnAmount} PMC 적립)`;
-    }
-    
-    toast.success(successMsg, {
-      duration: 3000
-    });
-    
-    // 선택 초기화
-    clearSelections();
-    
-    // 2초 후 대시보드로 이동
-    setTimeout(() => {
-      router.push('/dashboard');
-    }, 2000);
   };
   
   const handleCancelPayment = () => {

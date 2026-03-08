@@ -356,7 +356,162 @@ export default function GuidePage() {
       },
     } as const;
 
-    const ja = base.en; // 일본어 미번역 시 영어로 폴백
+    const ja = {
+      title: '利用ガイド',
+      subtitle: 'Pick-My-AIを初めて使いますか？下のガイドをご覧ください。',
+      sections: {
+        start: {
+          title: 'はじめに',
+          body: (
+            <>
+              <p><strong>Pick-My-AI</strong>は、さまざまなAIモデルを1か所で使えるプラットフォームです。</p>
+              <p>使いたいAIモデルを選び、必要な分だけクレジットを購入して利用してください。</p>
+              <ol className="list-decimal list-inside space-y-2 mt-2">
+                <li><strong>会員登録 / ログイン</strong> — 上部メニューからアカウントを作成するかログインしてください。</li>
+                <li><strong>クレジット購入</strong> — 「AIモデル購入」でモデルと回数を選択してください。</li>
+                <li><strong>チャット開始</strong> — 「チャット」でAIとの会話を始めましょう。</li>
+              </ol>
+            </>
+          ),
+        },
+        chat: {
+          title: 'チャットの使い方',
+          body: (
+            <>
+              <p>チャット画面では複数のAIモデルと会話できます。</p>
+              <ul className="list-disc list-inside space-y-2 mt-2">
+                <li><strong>モデル選択</strong> — 入力欄の上にあるドロップダウンからモデルを選びます。</li>
+                <li><strong>新しい会話</strong> — 左サイドバーの「新しい会話」から開始できます。</li>
+                <li><strong>ファイル添付</strong> — + ボタン → 「写真とファイルを追加」で画像やテキストを添付できます。</li>
+                <li><strong>応答スタイル</strong> — + ボタン内のスライダーで正確さと創造性を調整できます。</li>
+                <li><strong>応答停止</strong> — AIが回答中のとき「応答停止」で生成を中止できます。</li>
+                <li><strong>コピー</strong> — メッセージ上にマウスを置くとコピーボタンが表示されます。</li>
+                <li><strong>会話テンプレート</strong> — 保存したプロンプトを再利用できます。</li>
+                <li><strong>モデル比較</strong> — 複数モデルの回答を同時に比較できます。</li>
+              </ul>
+            </>
+          ),
+        },
+        credits: {
+          title: 'クレジットと決済',
+          body: (
+            <>
+              <p>各AIモデルは1回利用ごとに1クレジット差し引かれます。</p>
+              <ul className="list-disc list-inside space-y-2 mt-2">
+                <li><strong>クレジット購入</strong> — 「AIモデル購入」でモデル別に回数を入力して決済します。</li>
+                <li><strong>PMC</strong> — PMCを持っている場合、決済時の割引に使えます。</li>
+                <li><strong>ダッシュボード</strong> — モデル別の残りクレジットと利用状況を確認できます。</li>
+                <li><strong>クレジットギフト</strong> — 他のユーザーにクレジットを送れます。</li>
+              </ul>
+            </>
+          ),
+        },
+        models: {
+          title: 'AIモデル案内',
+          body: (
+            <>
+              <p>Pick-My-AIで利用できる主なAIモデルです。</p>
+              <div className="mt-2 space-y-2">
+                <p><strong>OpenAI GPTシリーズ</strong> — GPT-4o、GPT-4.1、GPT-5シリーズなど</p>
+                <p><strong>OpenAI oシリーズ</strong> — o3、o3-mini、o4-miniなど推論特化モデル</p>
+                <p><strong>Anthropic Claude</strong> — Claude 3.5 Sonnet、Claude 4 Sonnetなど</p>
+                <p><strong>Google Gemini</strong> — Gemini 2.5 Pro、Gemini 3.0 FlashなどのマルチモーダルAI</p>
+                <p><strong>Perplexity</strong> — リアルタイムWeb検索に強いモデル</p>
+                <p><strong>画像生成</strong> — DALL-E 3、GPT Image 1</p>
+                <p><strong>動画生成</strong> — Sora 2シリーズ（秒単位課金）</p>
+              </div>
+            </>
+          ),
+        },
+        pricing: {
+          title: 'PMI 2026 料金表',
+          body: (
+            <>
+              <p className="mb-3">すべての価格は1回利用基準です。トークン上限内で利用できます。</p>
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-semibold text-green-700 mb-2">🟢 Claude Haiku</h4>
+                  <p className="text-sm">• Haiku 3.5: <strong>5ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                  <p className="text-sm">• Haiku 4.5: <strong>15ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-yellow-700 mb-2">🟡 Claude Sonnet</h4>
+                  <p className="text-sm">• Sonnet 4.5: <strong>45ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                  <p className="text-sm">• Sonnet 4.6: <strong>45ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-blue-700 mb-2">🔵 Claude Opus (中級)</h4>
+                  <p className="text-sm">• Opus 4.5: <strong>79ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                  <p className="text-sm">• Opus 4.6: <strong>79ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-red-700 mb-2">🔴 Claude Opus (プレミアム)</h4>
+                  <p className="text-sm">• Opus 4: <strong>199ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                  <p className="text-sm">• Opus 4.1: <strong>199ウォン/回</strong> (トークン: 1000 in / 1000 out)</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-700 mb-2">GPT / Gemini / Perplexity</h4>
+                  <p className="text-sm">• GPT-5: 10ウォン/回 (500/500) • GPT-4o: 10ウォン/回 (500/500)</p>
+                  <p className="text-sm">• Gemini 3.0: 8ウォン/回 (500/500) • Perplexity Sonar: 1ウォン/回 (300/300)</p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-purple-700 mb-2">🎨 画像 & 動画</h4>
+                  <p className="text-sm">• GPT Image 1: 40ウォン/回</p>
+                  <p className="text-sm">• Sora 2-720p: 190ウォン/秒 • Sora 2 Pro-720p: 450ウォン/秒 • Sora 2 Pro-1024p: 750ウォン/秒</p>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded">💡 動画モデルには割引 / プロモーションは適用されません</p>
+            </>
+          ),
+        },
+        settings: {
+          title: '設定',
+          body: (
+            <>
+              <p>設定ページではさまざまな項目を調整できます。</p>
+              <ul className="list-disc list-inside space-y-2 mt-2">
+                <li><strong>AI口調</strong> — 丁寧語 / カジュアルを選択</li>
+                <li><strong>ダークモード</strong> — ライト / ダーク / システム</li>
+                <li><strong>テーマカラー</strong> — 複数の色から選択</li>
+                <li><strong>デザインエディタ</strong> — ボタン・カード・ヘッダーの色を調整</li>
+                <li><strong>通知設定</strong> — 成功通知の表示有無</li>
+              </ul>
+            </>
+          ),
+        },
+        design: {
+          title: 'デザインカスタマイズ',
+          body: (
+            <>
+              <p>Pick-My-AIは自由なデザインカスタマイズに対応しています。</p>
+              <ul className="list-disc list-inside space-y-2 mt-2">
+                <li><strong>テーマカラー</strong> — サイト全体のメインカラー変更</li>
+                <li><strong>デザインエディタ</strong> — 要素ごとの色 / スタイル調整</li>
+                <li><strong>ダークモード</strong> — すべてのページで対応</li>
+              </ul>
+            </>
+          ),
+        },
+        safety: {
+          title: 'エラー & トラブルシューティング',
+          body: (
+            <>
+              <p>問題が発生したときは次を確認してください。</p>
+              <ul className="list-disc list-inside space-y-2 mt-2">
+                <li><strong>⏱️ タイムアウト</strong> — 質問を短くするか、少し後で再試行してください。</li>
+                <li><strong>🕐 リクエスト上限</strong> — 1〜2分待つか別モデルを使ってください。</li>
+                <li><strong>🔧 メンテナンス中</strong> — 一時的に利用できません。後で再試行してください。</li>
+                <li><strong>🌐 接続エラー</strong> — インターネット接続を確認してください。</li>
+                <li><strong>💬 AI応答なし</strong> — 質問を送り直すか表現を変えてください。</li>
+                <li><strong>🛡️ ポリシー違反</strong> — 表現を修正して再試行してください。</li>
+              </ul>
+              <p className="mt-3 text-xs text-gray-500">エラーコード（例: <code>ERR_NET_01</code>）も一緒に伝えると対応が早くなります。</p>
+            </>
+          ),
+        },
+      },
+    } as const;
+
     return { ...base, ja } as const;
   }, []);
 

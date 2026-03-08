@@ -1,0 +1,155 @@
+            setConversationSummaries(prev => [...prev, summary]);
+          }
+        } catch (summaryError) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('Summary extraction failed:', summaryError);
+          }
+        }
+      }
+
+      if (capturedRefundToken) {
+        releasePendingRefundToken(capturedRefundToken);
+        capturedRefundToken = false;
+      }
+      
+      setAttachments([]);
+      // toast.success(`${model.displayName} 크레딧 1회 사용 (잔여: ${credits - 1}회)`);
+      
+    } catch (error: any) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Chat error:', error);
+      }
+      
+      const errorCode = error.message || 'ERR_UNKNOWN';
+      const errorDetail = typeof error?.detail === 'string' ? error.detail : undefined;
+
+      const sid = sessionIdForThisRequest || useStore.getState().currentSessionId;
+
+      // 429 에러: 대기/나가기 선택 흐름
+      if (errorCode.startsWith('ERR_RATE')) {
+        const waitContent = `현재 AI 요청이 많아 응답이 지연되고 있어요.\n\n이대로 기다리시면 1분 30초 안에 답변이 올 수 있어요. 계속 기다리시겠어요?`;
+        if (sid) {
+          if (assistantMessageId) {
+            finalizeMessageContent(sid, assistantMessageId, waitContent);
+          } else {
+            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: waitContent, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+          }
+        }
+
+        const userChoice = await new Promise<'wait' | 'leave'>((resolve) => {
+          let resolved = false;
+          const rateToastId = `rate-limit-${Date.now()}`;
+          const finish = (choice: 'wait' | 'leave') => {
+            if (resolved) return;
+            resolved = true;
+            window.clearTimeout(autoResolveId);
+            toast.dismiss(rateToastId);
+            resolve(choice);
+          };
+          const autoResolveId = window.setTimeout(() => finish('leave'), 90000);
+          toast.custom(
+            () => (
+              <div className="flex flex-col gap-2 bg-white dark:bg-gray-800 shadow-lg rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">현재 AI 요청이 많아 지연 중</span>
+                <div className="flex gap-2 mt-1">
+                  <button
+                    onClick={() => finish('wait')}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium"
+                  >기다리기</button>
+                  <button
+                    onClick={() => finish('leave')}
+                    className="px-3 py-1.5 bg-gray-200 text-gray-800 rounded text-xs font-medium"
+                  >나가기 (크레딧 1회 보상)</button>
+                </div>
+              </div>
+            ),
+            { duration: 90000, id: rateToastId }
+          );
+        });
+
+        if (userChoice === 'leave') {
+          if (capturedRefundToken) {
+            releasePendingRefundToken(capturedRefundToken);
+            capturedRefundToken = false;
+          }
+          if (currentModelId) await addCredits({ [currentModelId]: 1 });
+          if (sid) {
+            const modelName = selectedModel?.displayName || currentModelId || 'AI';
+            addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `응답을 중단했어요. 불편을 드려 죄송해요. ${modelName} 크레딧 1회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+          }
+        } else {
+          // 90초 대기 후 재시도
+          await new Promise(r => setTimeout(r, 90000));
+          try {
+            const liveMessages = useStore.getState().chatSessions.find(s => s.id === sid)?.messages || [];
+            const retryBody = JSON.stringify({ modelId: currentModelId, messages: liveMessages.filter((m: any) => m.role !== 'assistant' || m.content).map((m: any) => ({ role: m.role, content: m.content })) });
+            const retryResp = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: retryBody });
+            if (!retryResp.ok) {
+              if (retryResp.status === 429) {
+                if (capturedRefundToken) {
+                  releasePendingRefundToken(capturedRefundToken);
+                  capturedRefundToken = false;
+                }
+                if (currentModelId) await addCredits({ [currentModelId]: 3 });
+                const modelName = selectedModel?.displayName || currentModelId || 'AI';
+                if (sid) addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: `현재 대기 중인 사용자가 너무 많아 응답이 어려워요. 진심으로 죄송합니다. ${modelName} 크레딧 3회를 보상해드렸어요.`, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+              } else {
+                const { errorReason } = await readApiErrorResponse(retryResp);
+                if (capturedRefundToken) {
+                  refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
+                  capturedRefundToken = false;
+                }
+                if (sid) addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: errorReason || '재시도에 실패했습니다. 다시 시도해 주세요.', modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+              }
+            } else {
+              const retryContent = await readChatSuccessResponse(retryResp);
+              const extracted = extractMemoryForDisplay(retryContent);
+              if (extracted.facts.length) addStoredFacts(extracted.facts);
+              if (capturedRefundToken) {
+                releasePendingRefundToken(capturedRefundToken);
+                capturedRefundToken = false;
+              }
+              if (sid) {
+                addMessage(sid, { id: crypto.randomUUID(), role: 'assistant' as const, content: extracted.displayText, modelId: currentModelId, timestamp: new Date().toISOString(), creditUsed: 0 });
+              }
+            }
+          } catch {
+            if (capturedRefundToken) {
+              refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
+              capturedRefundToken = false;
+            }
+          }
+        }
+        return;
+      }
+
+      // ERR_CANCELLED가 아닌 실제 에러 시 크레딧 환불
+      if (errorCode !== 'ERR_CANCELLED' && currentModelId && capturedRefundToken) {
+        refundCredit(currentModelId, currentModelPiWon, capturedRefundToken);
+      }
+      
+      // 에러코드 → 사용자 친화적 메시지 매핑
+      const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
+        if (code === 'ERR_CANCELLED') return { icon: '', title: '', message: '', tips: [] };
+        if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
+          return { icon: '⏱️', title: '응답 시간 초과', message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.', tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요'] };
+        }
+        if (code.startsWith('ERR_SESSION')) {
+          return { icon: '🗂️', title: '대화를 준비하지 못했어요', message: '새 대화를 만드는 중 문제가 생겨 요청을 시작하지 못했어요.', tips: ['잠시 후 다시 시도해주세요', '새 채팅 버튼을 눌러 다시 시작해보세요'] };
+        }
+        if (code.startsWith('ERR_CREDIT')) {
+          return { icon: '💳', title: '크레딧 처리 오류', message: '크레딧 상태를 확인하지 못해 요청을 안전하게 중단했어요.', tips: ['보유 크레딧을 확인해주세요', '잠시 후 다시 시도해주세요'] };
+        }
+        if (code.startsWith('ERR_REQ')) {
+          return { icon: '🧾', title: '요청을 보낼 수 없어요', message: '보내는 데이터가 너무 크거나 형식이 올바르지 않았어요.', tips: ['질문을 조금 더 짧게 나눠서 보내보세요', '첨부파일 수나 크기를 줄여주세요'] };
+        }
+        if (code.startsWith('ERR_CONFIG')) {
+          return { icon: '🛠️', title: '모델 설정 오류', message: '현재 이 AI 모델 설정에 문제가 있어 요청을 처리할 수 없어요.', tips: ['잠시 후 다시 시도해주세요', '문제가 계속되면 관리자에게 문의해주세요'] };
+        }
+        if (code.startsWith('ERR_KEY') || code === 'ERR_AUTH') {
+          return { icon: '🔧', title: '서비스 점검 중', message: '현재 이 AI 모델의 서비스를 일시적으로 이용할 수 없어요.', tips: ['다른 AI 모델을 선택해보세요', '잠시 후 다시 시도해주세요'] };
+        }
+        if (code.startsWith('ERR_NET')) {
+          return { icon: '🌐', title: '연결 오류', message: 'AI 서버와 연결하는 데 문제가 발생했어요.', tips: ['인터넷 연결을 확인해주세요', '잠시 후 다시 시도해주세요'] };
+        }
+        if (code.startsWith('ERR_EMPTY') || code.startsWith('ERR_RESP')) {

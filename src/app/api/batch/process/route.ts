@@ -34,6 +34,8 @@ const OPENAI_MODEL_MAP: Record<string, string> = {
   'gpt5_48h': 'gpt-4o',
   'gpt51_48h': 'gpt-4o',
   'gpt52_48h': 'gpt-4o',
+  'gpt53instant_48h': 'gpt-5.3-instant',
+  'gpt54_48h': 'gpt-5.4',
   'gpt4o_48h': 'gpt-4o',
   'gpt41_48h': 'gpt-4o',
   'o3_48h': 'o3-mini',

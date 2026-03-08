@@ -12,45 +12,49 @@ import { toast } from 'sonner';
 export default function CheckoutSuccessPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { addCredits, clearSelections, wallet, initWallet, currentUser } = useStore();
+  const { clearSelections, currentUser } = useStore();
 
   useEffect(() => {
     const run = async () => {
-      // 결제 승인(confirm) 처리 (선택): Toss 결제 승인 API 호출
       const paymentKey = params.get('paymentKey');
       const amount = params.get('amount');
       const orderId = params.get('orderId');
+      const purchaseToken = params.get('purchaseToken');
 
-      if (paymentKey && amount && orderId) {
+      if (paymentKey && amount && orderId && purchaseToken) {
         try {
           const res = await csrfFetch('/api/payments/toss/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentKey, orderId, amount: Number(amount) })
+            body: JSON.stringify({ paymentKey, orderId, amount: Number(amount), purchaseToken })
           });
+
+          const result = await res.json();
           if (!res.ok) {
-            const err = await res.json();
-            console.error('Confirm failed:', err);
+            console.error('Confirm failed:', result);
+            toast.error(result?.error || '결제 확정에 실패했습니다.');
+            return;
           }
+
+          const currentState = useStore.getState();
+          useStore.setState({
+            wallet: {
+              userId: currentUser?.id || result?.wallet?.user_id || currentState.wallet?.userId || '',
+              credits: result?.wallet?.credits || {},
+              transactions: currentState.wallet?.transactions || [],
+            },
+            pmcBalance: result?.pmcBalance || currentState.pmcBalance,
+            hasFirstPurchase: result?.hasFirstPurchase ?? true,
+          });
+
+          toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
         } catch (e) {
           console.error('Confirm error', e);
+          toast.error('결제 확인 중 오류가 발생했습니다.');
         }
-      }
-
-      // 로컬 저장된 pending_purchase로 크레딧 지급
-      const raw = localStorage.getItem('pending_purchase');
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as { orderId: string; credits: { [k: string]: number } };
-          // 지갑 준비
-          if (!wallet && currentUser) {
-            initWallet(currentUser.id);
-          }
-          await new Promise(r => setTimeout(r, 200));
-          addCredits(parsed.credits);
-          localStorage.removeItem('pending_purchase');
-          toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
-        } catch {}
+      } else {
+        toast.error('결제 확인 정보가 올바르지 않습니다.');
+        return;
       }
 
       clearSelections();

@@ -41,7 +41,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 보호된 경로 정의
-  const protectedPaths = ['/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
+  const protectedPaths = ['/chat', '/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
   const isProtectedPath = protectedPaths.some(p => pathname.startsWith(p));
 
   // 보호된 경로에 대한 세션 검증
@@ -53,7 +53,7 @@ export async function middleware(request: NextRequest) {
     }
 
     try {
-      const secret = process.env.JWT_SECRET;
+      const secret = process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (!secret || secret.length < 32) {
         return NextResponse.redirect(new URL('/login', request.url));
       }

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminToken } from '@/lib/adminAuth';
-import { supabase } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
+
+const SAFE_SCHEMA_TABLES = new Set(['users', 'user_wallets', 'chat_sessions', 'transactions', 'user_settings']);
+const SAFE_ACTIONS = new Set(['deleteUser']);
 
 // Admin 전용 Supabase 클라이언트 (Service Role)
 const getAdminSupabase = () => {
@@ -29,69 +31,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '관리자 권한이 필요합니다.' }, { status: 401 });
     }
 
-    const { action, table, data, filters } = await request.json();
+    const { action, data } = await request.json();
     const adminClient = getAdminSupabase();
 
+    if (typeof action !== 'string' || !SAFE_ACTIONS.has(action)) {
+      return NextResponse.json({ error: '허용되지 않은 관리자 작업입니다.' }, { status: 403 });
+    }
+
     switch (action) {
-      case 'list': {
-        // 테이블 데이터 조회
-        let query = adminClient.from(table).select('*');
-        
-        if (filters) {
-          Object.entries(filters).forEach(([key, value]) => {
-            query = query.eq(key, value);
-          });
-        }
-        
-        const { data: results, error } = await query;
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true, data: results });
-      }
-
-      case 'insert': {
-        // 데이터 삽입
-        const { data: result, error } = await adminClient
-          .from(table)
-          .insert(data)
-          .select();
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true, data: result });
-      }
-
-      case 'update': {
-        // 데이터 업데이트
-        const { id, updates } = data;
-        const { data: result, error } = await adminClient
-          .from(table)
-          .update(updates)
-          .eq('id', id)
-          .select();
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true, data: result });
-      }
-
-      case 'delete': {
-        // 데이터 삭제
-        const { id } = data;
-        const { error } = await adminClient
-          .from(table)
-          .delete()
-          .eq('id', id);
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true });
-      }
-
       case 'deleteUser': {
         // 사용자 완전 삭제 (auth + public tables)
         const { userId } = data;
+        if (typeof userId !== 'string' || !userId.trim()) {
+          return NextResponse.json({ error: 'userId가 필요합니다.' }, { status: 400 });
+        }
         
         // 1. user_wallets 삭제
         await adminClient.from('user_wallets').delete().eq('user_id', userId);
@@ -111,28 +64,6 @@ export async function POST(request: NextRequest) {
         }
         
         return NextResponse.json({ success: true });
-      }
-
-      case 'listTables': {
-        // 모든 테이블 목록 조회
-        const { data: tables, error } = await adminClient
-          .from('information_schema.tables')
-          .select('table_name')
-          .eq('table_schema', 'public');
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true, data: tables });
-      }
-
-      case 'executeSQL': {
-        // 직접 SQL 실행 (매우 위험 - 신중하게 사용)
-        const { sql } = data;
-        const { data: result, error } = await adminClient.rpc('exec_sql', { sql_query: sql });
-        
-        if (error) throw error;
-        
-        return NextResponse.json({ success: true, data: result });
       }
 
       default:
@@ -161,6 +92,10 @@ export async function GET(request: NextRequest) {
 
     if (!table) {
       return NextResponse.json({ error: 'table 파라미터가 필요합니다.' }, { status: 400 });
+    }
+
+    if (!SAFE_SCHEMA_TABLES.has(table)) {
+      return NextResponse.json({ error: '허용되지 않은 테이블입니다.' }, { status: 403 });
     }
 
     const adminClient = getAdminSupabase();

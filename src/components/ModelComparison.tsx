@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
 import { Sparkles, Clock, Zap, Copy, Check, RefreshCw, ArrowRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { getOpenAIStatusBlockedMessage, isOpenAITextModelId } from '@/utils/openaiStatus';
 
 export const ModelComparison: React.FC = () => {
   const { 
@@ -16,13 +18,15 @@ export const ModelComparison: React.FC = () => {
     deductCredit,
     language,
   } = useStore();
+  const { status: openAIStatus } = useOpenAIStatus();
 
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [prompt, setPrompt] = useState('');
   const [isComparing, setIsComparing] = useState(false);
   const [copied, setCopied] = useState<{ [key: string]: boolean }>({});
+  const openAIBlockedReason = getOpenAIStatusBlockedMessage(openAIStatus.reason);
 
-  const availableModels = models.filter(m => m.enabled && (wallet?.credits[m.id] || 0) > 0);
+  const availableModels = models.filter(m => m.enabled && (wallet?.credits[m.id] || 0) > 0 && (openAIStatus.available || !isOpenAITextModelId(m.id)));
 
   const toggleModel = (modelId: string) => {
     setSelectedModels(prev => 
@@ -46,6 +50,11 @@ export const ModelComparison: React.FC = () => {
     const hasCredits = selectedModels.every(modelId => (wallet?.credits[modelId] || 0) > 0);
     if (!hasCredits) {
       toast.error('선택한 모델의 크레딧이 부족합니다.');
+      return;
+    }
+
+    if (!openAIStatus.available && selectedModels.some((modelId) => isOpenAITextModelId(modelId))) {
+      toast.error(openAIBlockedReason);
       return;
     }
 
@@ -172,6 +181,11 @@ export const ModelComparison: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {!openAIStatus.available && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {openAIBlockedReason}
+        </div>
+      )}
       {/* 헤더 */}
       <div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-white">모델 비교</h2>

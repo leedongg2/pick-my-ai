@@ -197,6 +197,8 @@ const tokenBudgets: Record<string, TokenBudget> = {
   'gpt5': { input: 500, output: 500 },
   'gpt51': { input: 500, output: 500 },
   'gpt52': { input: 500, output: 500 },
+  'gpt53instant': { input: 500, output: 500 },
+  'gpt54': { input: 500, output: 500 },
   'gpt4o': { input: 500, output: 500 },
   'gpt41': { input: 500, output: 500 },
   'o3': { input: 500, output: 500 },
@@ -211,7 +213,7 @@ const tokenBudgets: Record<string, TokenBudget> = {
   'opus41': { input: 1000, output: 1000 },
   'opus45': { input: 1000, output: 1000 },
   'opus46': { input: 1000, output: 1000 },
-  // Gemini 계열 (500 In / 500 Out)
+  // Gemini 계열
   'gemini3': { input: 500, output: 500 },
   'gemini3pro': { input: 500, output: 500 },
   // Perplexity 계열 (300 In / 300 Out - 검색 전용)
@@ -234,6 +236,10 @@ const modelData: Record<string, ModelData> = {
   'gpt5': { price: 10, tier: 'low' },        // 순이익 +0.92원
   'gpt51': { price: 11, tier: 'low' },       // 안정적 마진
   'gpt52': { price: 14, tier: 'low' },
+  'gpt53instant': { price: 30, tier: 'mid' },
+  'gpt54': { price: 45, tier: 'mid' },
+  'gpt53instant_48h': { price: 15, tier: 'mid' },
+  'gpt54_48h': { price: 23, tier: 'mid' },
   'gpt4o': { price: 10, tier: 'mid' },       // 순이익 +0.92원
   'gpt41': { price: 8, tier: 'low' },
   'o3': { price: 8, tier: 'low' },

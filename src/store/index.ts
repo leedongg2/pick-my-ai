@@ -36,7 +36,7 @@ type FeedbackPayload = Omit<FeedbackItem, 'id' | 'status' | 'createdAt' | 'creat
 };
 
 import { initialModels } from '@/data/models';
-import { defaultPolicy } from '@/utils/pricing';
+import { defaultPolicy, getFixedDisplayPriceOrFallback } from '@/utils/pricing';
 import { recordChatPerfLsSetItem } from '@/utils/chatPerf';
 
 type AppLanguage = 'ko' | 'en' | 'ja';
@@ -731,16 +731,7 @@ export const useStore = create<AppState>()(
         // Supabase에 동기화 (세션 쿠키 기반)
         if (state.currentUser) {
           try {
-            await fetch('/api/wallet', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                credits,
-                type: 'purchase',
-                description: '크레딧 구매'
-              })
-            });
+            await Promise.resolve();
           } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
               console.error('Supabase 크레딧 동기화 실패:', error);
@@ -791,16 +782,7 @@ export const useStore = create<AppState>()(
         // Supabase에 동기화 (세션 쿠키 기반)
         if (state.currentUser) {
           try {
-            await fetch('/api/wallet', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                credits: { [modelId]: -1 },
-                type: 'usage',
-                description: '크레딧 사용'
-              })
-            });
+            await Promise.resolve();
           } catch (error) {
             if (process.env.NODE_ENV !== 'production') {
               console.error('Supabase 크레딧 사용 동기화 실패:', error);
@@ -1711,12 +1693,17 @@ export const useStore = create<AppState>()(
         
         // 변환 가능 여부 검증
         for (const { modelId, qty, pricePerCredit } of items) {
+          const normalizedQty = Number.isFinite(qty) ? Math.floor(qty) : 0;
           const available = state.wallet.credits[modelId] || 0;
-          if (qty > available || qty <= 0) return { success: false, totalFee: 0, totalPMC: 0 };
-          const fee = qty; // 1원/개
-          const pmc = qty * pricePerCredit - fee;
+          if (normalizedQty > available || normalizedQty <= 0) return { success: false, totalFee: 0, totalPMC: 0 };
+          const model = state.models.find((entry) => entry.id === modelId);
+          const resolvedPricePerCredit = model
+            ? getFixedDisplayPriceOrFallback(model.id, model.piWon).price
+            : pricePerCredit;
+          const fee = normalizedQty;
+          const pmc = normalizedQty * resolvedPricePerCredit - fee;
           if (pmc <= 0) return { success: false, totalFee: 0, totalPMC: 0 };
-          totalCreditsDeducted[modelId] = qty;
+          totalCreditsDeducted[modelId] = normalizedQty;
           totalPMC += pmc;
           totalFee += fee;
         }
