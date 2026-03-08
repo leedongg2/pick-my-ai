@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
-import { verifySession } from '@/lib/apiAuth';
 import { getOpenAIStatus } from '@/lib/openaiStatusServer';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
 import { fetchWithRetry } from '@/utils/fetchWithRetry';
 import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
-import { applyCreditDelta } from '@/lib/serverWallet';
+import { verifySession } from '@/lib/apiAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -508,7 +507,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
   const geminiModelMap: { [key: string]: string } = {
     // Gemini 2.0 실험 모델 (최신)
-    'gemini3': 'gemini-2.0-flash-exp',
+    'gemini3':  'gemini-2.0-flash-exp',
     'gemini3pro': 'gemini-2.0-flash-thinking-exp-1219',
     // 레거시 매핑
     'gemini-flash': 'gemini-1.5-flash',
@@ -537,7 +536,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         } else if (p?.type === 'image_url' && p?.image_url?.url) {
           const parsed = extractBase64(p.image_url.url);
           if (parsed) {
-            append(role, { inline_data: { mime_type: parsed.mime, data: parsed.base64 } });
+            append(role, { inline_data: { type: 'base64', media_type: parsed.mime, data: parsed.base64 } });
           }
         }
       }
@@ -553,7 +552,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         for (const att of userAttachments) {
           if (att.type === 'image' && att.dataUrl) {
             const parsed = extractBase64(att.dataUrl);
-            if (parsed) contents[i].parts.push({ inline_data: { mime_type: parsed.mime, data: parsed.base64 } });
+            if (parsed) contents[i].parts.push({ inline_data: { type: 'base64', media_type: parsed.mime, data: parsed.base64 } });
           } else if (att.type === 'text' && att.content) {
             contents[i].parts.push({ text: `File (${att.name}):\n${att.content.slice(0, 4000)}` });
           }
@@ -1079,30 +1078,19 @@ export async function POST(request: NextRequest) {
   if (isStaticExportPhase) {
     return NextResponse.json(
       { error: 'Chat API unavailable in static export.' },
-      {
-        status: 501,
-        headers: {
-          'Cache-Control': 'no-store',
-          Pragma: 'no-cache',
-          Expires: '0',
-        },
-      }
+      { status: 503 }
     );
   }
 
-  let chargedUserId: string | null = null;
-  let chargedModelId: string | null = null;
-  let chargedRefundDescription: string | null = null;
+  const session = await verifySession(request);
+  if (!session.authenticated) {
+    return NextResponse.json(
+      { error: 'ERR_AUTH_REQUIRED', reason: '로그인이 필요합니다.' },
+      { status: 401 }
+    );
+  }
 
   try {
-    const session = await verifySession(request);
-    if (!session.authenticated || !session.userId) {
-      return NextResponse.json(
-        { error: 'ERR_AUTH', reason: '로그인이 필요합니다.' },
-        { status: 401 }
-      );
-    }
-
     // Rate Limiting 체크
     const clientIp = getClientIp(request);
     const rateLimitResult = chatRateLimiter.check(clientIp);
@@ -1144,10 +1132,10 @@ export async function POST(request: NextRequest) {
       ? (resolvedLanguage === 'ko' ? ' Use casual/informal speech (반말).' : ' Use casual tone.')
       : (resolvedLanguage === 'ko' ? ' Use polite/formal speech (존댓말).' : ' Use polite tone.');
     const languageInstruction = (resolvedLanguage === 'en'
-      ? 'Always respond in English. Every answer must be at least 3 natural lines. If the answer would be short, add one brief explanation line and one practical tip line.'
+      ? 'Always respond in English.'
       : resolvedLanguage === 'ja'
-      ? '必ず日本語で回答してください。すべての回答は自然な3行以上で書いてください。短く済む場合でも、簡単な説明1行と実用的な補足1行を追加してください。'
-      : '반드시 한국어로 답변해주세요. 모든 답변은 자연스럽게 최소 3줄 이상으로 작성해주세요. 짧게 끝날 내용이면 간단한 설명 1줄과 실용적인 팁 1줄을 더해주세요.') + speechStyle;
+      ? '必ず日本語で回答してください。'
+      : '반드시 한국어로 답변해주세요.') + speechStyle;
 
     const normalizeStoredFact = (fact: unknown) => {
       if (typeof fact !== 'string') return '';
@@ -1183,7 +1171,17 @@ export async function POST(request: NextRequest) {
 
     // 기본 프롬프트 (짧고 강력하게, 예시 포함)
     const summaryRuleForOthers = '\nEnd every reply with hidden summary in ~~ markers:\n~~\nQ:(10-word summary)\nA:(15-word summary)\nKey:(facts/names/numbers)\n~~';
-    const basePrompt = `You are a reliable, practical AI assistant. Give clear, accurate, useful answers. Keep the requested language and tone. Do not force emojis, slang, or exaggerated reactions. Structure short answers naturally into at least 3 lines when possible.${summaryRuleForOthers}`;
+    const minResponseRule = resolvedLanguage === 'en'
+      ? 'Visible answer must be at least 3 lines unless the user explicitly asks for a one-line or ultra-short answer.'
+      : resolvedLanguage === 'ja'
+      ? 'ユーザーが1行や超短文を明示的に求めない限り、表示される回答は必ず3行以上にしてください。'
+      : '사용자가 한 줄 답변이나 매우 짧은 답변을 명시적으로 요구하지 않는 한, 화면에 보이는 답변은 반드시 최소 3줄 이상으로 작성해주세요.';
+    const basePrompt = `Best friend AI. Rules: wild reactions, 3+ emojis, ALL CAPS hype, casual texting tone, never formal, short punchy sentences.
+Example style:
+"OMG WAIT 🔥🔥🔥 bro that's INSANE!! okay okay let me break it down 👇
+💡 [answer]
+🎯 [key point]
+😤 honestly you're gonna CRUSH this!!"${summaryRuleForOthers}`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
@@ -1202,7 +1200,7 @@ export async function POST(request: NextRequest) {
         ];
       }
       
-      const systemContent = [basePrompt, languageInstructionWithMemory].filter(Boolean).join('\n\n');
+      const systemContent = [basePrompt, minResponseRule, languageInstructionWithMemory].filter(Boolean).join('\n\n');
       
       if (idx === -1) {
         return [{ role: 'system', content: systemContent }, ...contextMessages];
@@ -1336,25 +1334,6 @@ export async function POST(request: NextRequest) {
 
     // 영상 모델 먼저 처리
     if (SORA_VIDEO_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId)) {
-      const usageDescription = `chat_usage:${session.userId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-      const chargeResult = await applyCreditDelta(session.userId, { [modelId]: -1 }, {
-        amount: 0,
-        description: usageDescription,
-        requireSufficient: true,
-        transactionType: 'usage',
-      });
-
-      if (!chargeResult.ok) {
-        return NextResponse.json(
-          { error: 'ERR_CREDIT_00', reason: '크레딧이 부족합니다.' },
-          { status: 402 }
-        );
-      }
-
-      chargedUserId = session.userId;
-      chargedModelId = modelId;
-      chargedRefundDescription = `chat_refund:${usageDescription}`;
-
       const userMsg = findLastMessageByRole(messages, 'user');
       const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
       const duration = Math.max(1, Math.min(50, Number(videoSeconds) || 5));
@@ -1372,39 +1351,6 @@ export async function POST(request: NextRequest) {
       || IMAGE_MODEL_IDS.has(modelId)
       || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
     );
-
-    const shouldChargeCredits =
-      SORA_VIDEO_IDS.has(modelId)
-      || GROK_VIDEO_IDS.has(modelId)
-      || GROK_IMAGE_IDS.has(modelId)
-      || isOpenAIModel
-      || modelId.startsWith('gemini')
-      || modelId.startsWith('claude')
-      || ANTHROPIC_MODEL_IDS.has(modelId)
-      || modelId.startsWith('perplexity')
-      || PERPLEXITY_MODEL_IDS.has(modelId)
-      || GROK_TEXT_IDS.has(modelId);
-
-    if (shouldChargeCredits) {
-      const usageDescription = `chat_usage:${session.userId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-      const chargeResult = await applyCreditDelta(session.userId, { [modelId]: -1 }, {
-        amount: 0,
-        description: usageDescription,
-        requireSufficient: true,
-        transactionType: 'usage',
-      });
-
-      if (!chargeResult.ok) {
-        return NextResponse.json(
-          { error: 'ERR_CREDIT_00', reason: '크레딧이 부족합니다.' },
-          { status: 402 }
-        );
-      }
-
-      chargedUserId = session.userId;
-      chargedModelId = modelId;
-      chargedRefundDescription = `chat_refund:${usageDescription}`;
-    }
 
     // GPT 스트리밍 가능 모델 (이미지 제외)
     const isStreamableGPT = isOpenAIModel && !IMAGE_MODEL_IDS.has(modelId);
@@ -1471,20 +1417,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ content: responseContent });
 
   } catch (error: any) {
-    if (chargedUserId && chargedModelId && chargedRefundDescription) {
-      try {
-        await applyCreditDelta(chargedUserId, { [chargedModelId]: 1 }, {
-          amount: 0,
-          description: chargedRefundDescription,
-          idempotencyKey: chargedRefundDescription,
-          requireSufficient: false,
-          transactionType: 'purchase',
-        });
-      } catch (refundError) {
-        console.error('[Chat API] Refund failed:', refundError);
-      }
-    }
-
     // 모든 환경에서 에러 로깅 (디버깅용)
     console.error('[Chat API] Error caught:', {
       message: error.message,

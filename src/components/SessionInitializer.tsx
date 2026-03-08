@@ -14,7 +14,7 @@ export function SessionInitializer() {
   const isAuthenticated = useStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    if (isAuthenticated || checkedRef.current) return;
+    if (checkedRef.current) return;
     checkedRef.current = true;
 
     (async () => {
@@ -39,7 +39,17 @@ export function SessionInitializer() {
             credentials: 'include',
             cache: 'no-store',
           });
-          if (!res.ok) return;
+          if (!res.ok) {
+            useStore.setState({
+              currentUser: null,
+              isAuthenticated: false,
+              wallet: null,
+            });
+            try {
+              sessionStorage.removeItem('__pma_session');
+            } catch {}
+            return;
+          }
           sessionData = await res.json();
           // 캐시 저장
           try {
@@ -48,6 +58,18 @@ export function SessionInitializer() {
         }
 
         const data = sessionData;
+        if (!data?.authenticated || !data?.user) {
+          useStore.setState({
+            currentUser: null,
+            isAuthenticated: false,
+            wallet: null,
+          });
+          try {
+            sessionStorage.removeItem('__pma_session');
+          } catch {}
+          return;
+        }
+
         if (data.authenticated && data.user) {
           const userId = data.user.id;
 
@@ -240,7 +262,11 @@ export function SessionInitializer() {
           initializeRealtimeSync(userId);
         }
       } catch {
-        // 세션 확인 실패 시 무시 (비로그인 상태 유지)
+        useStore.setState({
+          currentUser: null,
+          isAuthenticated: false,
+          wallet: null,
+        });
       }
     })();
   }, [isAuthenticated]);

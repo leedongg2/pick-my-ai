@@ -49,7 +49,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: `
 (function(){
   var prefetched = new Set();
-  var ROUTES = ['/chat','/configurator','/dashboard','/checkout','/login','/guide','/pricing'];
+  var ROUTES = ['/chat','/configurator','/dashboard','/checkout','/login','/guide'];
   function prefetch(href){
     if(prefetched.has(href)) return;
     prefetched.add(href);

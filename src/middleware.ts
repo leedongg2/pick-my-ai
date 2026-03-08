@@ -41,7 +41,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 보호된 경로 정의
-  const protectedPaths = ['/chat', '/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
+  const protectedPaths = ['/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
   const isProtectedPath = protectedPaths.some(p => pathname.startsWith(p));
 
   // 보호된 경로에 대한 세션 검증

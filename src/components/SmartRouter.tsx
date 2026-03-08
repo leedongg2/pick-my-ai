@@ -42,21 +42,21 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
       return {
         analyze: 'Analyze question',
         premium: 'Top 5 detailed analysis',
-        premiumFree: ' (first use free)',
-        premiumLocked: 'Top 5 analysis (Buy AI Models > Other)',
+        premiumFree: ' (first time free)',
+        locked: 'Top 5 analysis (Buy AI Models > Other)',
         failed: 'Analysis failed. Please try again.',
-        idea: 'Tip',
+        loginRequired: 'Login is required.',
       };
     }
 
     if (language === 'ja') {
       return {
-        analyze: '質問を分析する',
+        analyze: '質問分析',
         premium: '上位5件の詳細分析',
-        premiumFree: '（初回1回無料）',
-        premiumLocked: '上位5件分析（購入ページ > その他）',
+        premiumFree: '（初回無料）',
+        locked: '5位分析（AIモデル購入 > その他）',
         failed: '分析に失敗しました。もう一度お試しください。',
-        idea: 'ヒント',
+        loginRequired: 'ログインが必要です。',
       };
     }
 
@@ -64,9 +64,9 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
       analyze: '질문 분석하기',
       premium: '5위 상세 분석',
       premiumFree: ' (최초 1회 무료)',
-      premiumLocked: '5위 분석 (구매페이지 > 기타)',
+      locked: '5위 분석 (구매페이지 > 기타)',
       failed: '분석에 실패했습니다. 다시 시도해주세요.',
-      idea: '추천',
+      loginRequired: '로그인이 필요합니다.',
     };
   }, [language]);
 
@@ -96,7 +96,11 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
           premium,
         }),
       });
-      if (!res.ok) throw new Error('분석 실패');
+      if (res.status === 401) {
+        setRecommendation(ui.loginRequired);
+        return;
+      }
+      if (!res.ok) throw new Error('analysis_failed');
       const data = await res.json();
       setRecommendation(data.recommendation);
     } catch {
@@ -104,7 +108,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
     } finally {
       setLoading(false);
     }
-  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, openAIStatus.available, openAIBlockedReason, ui.failed]);
+  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, openAIStatus.available, openAIBlockedReason, ui]);
 
   if (!question.trim() || models.length === 0) return null;
 
@@ -142,14 +146,14 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
           </button>
         ) : (
           <span className="flex items-center gap-1 text-xs text-gray-500">
-            <Lock className="w-3 h-3" />{ui.premiumLocked}
+            <Lock className="w-3 h-3" />{ui.locked}
           </span>
         )}
       </div>
 
       {recommendation && (
         <div className={cn('mt-2 text-sm text-gray-800', isPremium ? 'whitespace-pre-wrap' : '')}>
-          <span className="font-semibold text-indigo-600">💡 {ui.idea}: </span>
+          <span className="font-semibold text-indigo-600">💡 </span>
           {recommendation}
         </div>
       )}

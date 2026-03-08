@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -8,13 +8,16 @@ import { useStore } from '@/store';
 
 export default function AuthCallbackPage() {
   const processed = useRef(false);
-  const language = useStore((s) => s.language);
-
-  const ui = language === 'en'
-    ? { title: 'Processing authentication...', desc: 'Please wait a moment.' }
-    : language === 'ja'
-    ? { title: '認証を処理中...', desc: 'しばらくお待ちください。' }
-    : { title: '인증 처리 중...', desc: '잠시만 기다려주세요.' };
+  const language = useStore((state) => state.language);
+  const ui = useMemo(() => {
+    if (language === 'en') {
+      return { title: 'Processing authentication...', subtitle: 'Please wait a moment.' };
+    }
+    if (language === 'ja') {
+      return { title: '認証を処理中...', subtitle: 'しばらくお待ちください。' };
+    }
+    return { title: '인증 처리 중...', subtitle: '잠시만 기다려주세요.' };
+  }, [language]);
 
   useEffect(() => {
     if (processed.current) return;
@@ -31,7 +34,7 @@ export default function AuthCallbackPage() {
             <Sparkles className="w-8 h-8 text-primary-600" />
           </div>
           <h2 className="text-2xl font-bold mb-4">{ui.title}</h2>
-          <p className="text-gray-600">{ui.desc}</p>
+          <p className="text-gray-600">{ui.subtitle}</p>
           <div className="mt-6 flex justify-center space-x-2">
             <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce"></div>
             <div className="w-2 h-2 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
@@ -82,7 +85,6 @@ async function handleCallback() {
         console.log('[auth/callback] access_token found in hash, setting session cookie...');
         const ok = await callSocialSessionAPI(accessToken);
         if (ok) {
-          await warmSessionCache();
           console.log('[auth/callback] Session cookie set, redirecting to /chat');
           window.location.replace('/chat');
           return;
@@ -109,7 +111,6 @@ async function handleCallback() {
       if (accessToken) {
         const ok = await callSocialSessionAPI(accessToken);
         if (ok) {
-          await warmSessionCache();
           console.log('[auth/callback] PKCE exchange successful, redirecting to /chat');
           window.location.replace('/chat');
           return;
@@ -133,32 +134,6 @@ async function handleCallback() {
   }
 }
 
-async function warmSessionCache(): Promise<void> {
-  try {
-    sessionStorage.removeItem('__pma_session');
-  } catch {}
-
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      const res = await fetch('/api/auth/session', {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        try {
-          sessionStorage.setItem('__pma_session', JSON.stringify({ data, ts: Date.now() }));
-        } catch {}
-        return;
-      }
-    } catch {}
-
-    await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
-  }
-}
-
 /** access_token을 서버로 보내서 커스텀 JWT 세션 쿠키 설정 */
 async function callSocialSessionAPI(accessToken: string): Promise<boolean> {
   try {
@@ -173,30 +148,25 @@ async function callSocialSessionAPI(accessToken: string): Promise<boolean> {
       console.error('[auth/callback] social-session API error:', res.status, body);
       return false;
     }
-    return true;
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const sessionRes = await fetch('/api/auth/session', {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (sessionRes.ok) {
+        return true;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    console.error('[auth/callback] session cookie was not readable after social-session');
+    return false;
   } catch (err) {
     console.error('[auth/callback] social-session fetch error:', err);
-    return false;
-  }
-}
-
-/** code를 서버로 보내서 서버사이드에서 token 교환 + 세션 쿠키 설정 */
-async function callCodeExchangeAPI(code: string): Promise<boolean> {
-  try {
-    const res = await fetch('/api/auth/social-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ code }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      console.error('[auth/callback] code exchange API error:', res.status, body);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error('[auth/callback] code exchange fetch error:', err);
     return false;
   }
 }
