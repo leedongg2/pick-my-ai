@@ -12,49 +12,45 @@ import { toast } from 'sonner';
 export default function CheckoutSuccessPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { clearSelections, currentUser } = useStore();
+  const { clearSelections } = useStore();
 
   useEffect(() => {
     const run = async () => {
+      // 결제 승인(confirm) 처리 (선택): Toss 결제 승인 API 호출
       const paymentKey = params.get('paymentKey');
       const amount = params.get('amount');
       const orderId = params.get('orderId');
-      const purchaseToken = params.get('purchaseToken');
 
-      if (paymentKey && amount && orderId && purchaseToken) {
+      if (paymentKey && amount && orderId) {
         try {
           const res = await csrfFetch('/api/payments/toss/confirm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentKey, orderId, amount: Number(amount), purchaseToken })
+            body: JSON.stringify({ paymentKey, orderId, amount: Number(amount) })
           });
 
-          const result = await res.json();
+          const body = await res.json().catch(() => ({}));
           if (!res.ok) {
-            console.error('Confirm failed:', result);
-            toast.error(result?.error || '결제 확정에 실패했습니다.');
-            return;
+            console.error('Confirm failed:', body);
+            toast.error(body?.error || '결제 승인에 실패했습니다.');
+          } else {
+            useStore.setState((state) => ({
+              wallet: body?.wallet
+                ? {
+                    userId: body.wallet.userId,
+                    credits: body.wallet.credits || {},
+                    transactions: state.wallet?.transactions || [],
+                  }
+                : state.wallet,
+              hasFirstPurchase: body?.hasFirstPurchase ?? state.hasFirstPurchase,
+              pmcBalance: body?.pmcBalance || state.pmcBalance,
+            }));
+            toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
           }
-
-          const currentState = useStore.getState();
-          useStore.setState({
-            wallet: {
-              userId: currentUser?.id || result?.wallet?.user_id || currentState.wallet?.userId || '',
-              credits: result?.wallet?.credits || {},
-              transactions: currentState.wallet?.transactions || [],
-            },
-            pmcBalance: result?.pmcBalance || currentState.pmcBalance,
-            hasFirstPurchase: result?.hasFirstPurchase ?? true,
-          });
-
-          toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
         } catch (e) {
           console.error('Confirm error', e);
           toast.error('결제 확인 중 오류가 발생했습니다.');
         }
-      } else {
-        toast.error('결제 확인 정보가 올바르지 않습니다.');
-        return;
       }
 
       clearSelections();

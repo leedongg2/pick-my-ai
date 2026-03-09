@@ -1,31 +1,31 @@
 'use client';
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
+import { csrfFetch } from '@/lib/csrfFetch';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { calculatePrice, formatWon, getFixedDisplayPriceOrFallback, calculatePMCEarn } from '@/utils/pricing';
-import { CreditCard, CheckCircle, ArrowLeft, Coins, Info } from 'lucide-react';
+import { CreditCard, ArrowLeft, Coins, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { loadTossPayments } from '@tosspayments/payment-sdk';
-import { csrfFetch } from '@/lib/csrfFetch';
 
 export const Checkout: React.FC = React.memo(() => {
   const router = useRouter();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentComplete, setPaymentComplete] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
   const { 
     models, 
     selections, 
     policy, 
+    wallet,
     currentUser,
     isAuthenticated,
     hasFirstPurchase,
-    clearSelections,
+    initWallet,
     userPlan,
     getAvailablePMC,
   } = useStore();
@@ -103,7 +103,7 @@ export const Checkout: React.FC = React.memo(() => {
     }
   };
 
-  const startTossPayment = async (method: 'CARD' | 'TRANSFER') => {
+  const startTossPayment = async (method: 'CARD' | 'TRANSFER', paymentData: { orderId: string; orderName: string; amount: number }) => {
     try {
       const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY as string | undefined;
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL as string | undefined;
@@ -116,22 +116,11 @@ export const Checkout: React.FC = React.memo(() => {
         return;
       }
 
-      const orderId = `order_${Date.now()}`;
-      const amount = Math.max(100, Math.round(priceCalculation.finalTotal));
-      const orderName = selectedModels.length === 1
-        ? `${selectedModels[0].model.displayName}`
-        : `${selectedModels[0].model.displayName} 외 ${selectedModels.length - 1}건`;
-
-      // 결제 후 지급할 크레딧을 localStorage에 임시 저장
-      const credits: { [modelId: string]: number } = {};
-      selections.forEach(sel => { if (sel.quantity > 0) credits[sel.modelId] = sel.quantity; });
-      localStorage.setItem('pending_purchase', JSON.stringify({ orderId, credits }));
-
       const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
       await tossPayments.requestPayment(method, {
-        amount,
-        orderId,
-        orderName,
+        amount: paymentData.amount,
+        orderId: paymentData.orderId,
+        orderName: paymentData.orderName,
         successUrl: `${baseUrl}/checkout/success`,
         failUrl: `${baseUrl}/checkout/fail`,
         customerName: currentUser?.name || currentUser?.email || '사용자'
@@ -144,47 +133,6 @@ export const Checkout: React.FC = React.memo(() => {
     }
   };
 
-  const startKakaoPay = async () => {
-    try {
-      const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY as string | undefined;
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL as string | undefined;
-      if (!clientKey || !baseUrl) {
-        toast.error('결제 설정이 누락되었습니다. 환경변수를 확인하세요.');
-        return;
-      }
-      if (selectedModels.length === 0) {
-        toast.error('선택한 모델이 없습니다.');
-        return;
-      }
-
-      const orderId = `order_${Date.now()}`;
-      const amount = Math.max(100, Math.round(priceCalculation.finalTotal));
-      const orderName = selectedModels.length === 1
-        ? `${selectedModels[0].model.displayName}`
-        : `${selectedModels[0].model.displayName} 외 ${selectedModels.length - 1}건`;
-
-      const credits: { [modelId: string]: number } = {};
-      selections.forEach(sel => { if (sel.quantity > 0) credits[sel.modelId] = sel.quantity; });
-      localStorage.setItem('pending_purchase', JSON.stringify({ orderId, credits }));
-
-      const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
-      await tossPayments.requestPayment('EASY_PAY' as any, {
-        easyPay: 'KAKAOPAY',
-        amount,
-        orderId,
-        orderName,
-        successUrl: `${baseUrl}/checkout/success`,
-        failUrl: `${baseUrl}/checkout/fail`,
-        customerName: currentUser?.name || currentUser?.email || '사용자'
-      } as any);
-    } catch (error: any) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.error('KakaoPay start error:', error);
-      }
-      toast.error('카카오페이 시작에 실패했습니다.');
-    }
-  };
-  
   const handlePaymentClick = () => {
     // 결제 확인 모달 표시
     setShowConfirmModal(true);
@@ -196,6 +144,7 @@ export const Checkout: React.FC = React.memo(() => {
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('🛒 결제 시작:', { 
+        wallet, 
         selections,
         currentUser: currentUser?.email,
         isAuthenticated,
@@ -230,11 +179,23 @@ export const Checkout: React.FC = React.memo(() => {
       return;
     }
     
-    const selectionPayload = selections
-      .filter(sel => sel.quantity > 0)
-      .map(sel => ({ modelId: sel.modelId, quantity: sel.quantity }));
+    // 지갑 초기화 (없는 경우) - 동기 처리로 즉시 완료
+    if (!wallet) {
+      initWallet(stateBeforeClose.currentUser!.id);
+      // Zustand는 동기적으로 상태를 업데이트하므로 즉시 확인
+      const stateAfterInit = useStore.getState();
+      if (!stateAfterInit.wallet) {
+        toast.error('지갑 초기화에 실패했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+        setIsProcessing(false);
+        return;
+      }
+    }
 
-    if (selectionPayload.length === 0) {
+    const hasCreditsToPurchase = selections.some((sel) => sel.quantity > 0);
+    if (!hasCreditsToPurchase) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('❌ 추가할 크레딧이 없음!');
+      }
       toast.error('추가할 크레딧이 없습니다.');
       setIsProcessing(false);
       return;
@@ -243,49 +204,33 @@ export const Checkout: React.FC = React.memo(() => {
     try {
       const prepareResponse = await csrfFetch('/api/payments/toss/prepare', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          selections: selectionPayload,
+          selections,
           pmcToUse: usePMCChecked ? pmcToUse : 0,
         }),
       });
 
-      const prepared = await prepareResponse.json();
+      const prepareBody = await prepareResponse.json().catch(() => ({}));
       if (!prepareResponse.ok) {
-        toast.error(prepared?.error || '결제 준비에 실패했습니다.');
-        setIsProcessing(false);
-        return;
+        throw new Error(prepareBody?.error || '결제 준비에 실패했습니다.');
       }
 
-      const clientKey = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY as string | undefined;
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL as string | undefined;
-      if (!clientKey || !baseUrl) {
-        toast.error('결제 설정이 누락되었습니다. 환경변수를 확인하세요.');
-        setIsProcessing(false);
-        return;
-      }
-
-      const successUrl = new URL('/checkout/success', baseUrl);
-      successUrl.searchParams.set('purchaseToken', prepared.purchaseToken);
-
-      const failUrl = new URL('/checkout/fail', baseUrl);
-      const tossPayments = tossInstanceRef.current || await loadTossPayments(clientKey);
-      await tossPayments.requestPayment('CARD', {
-        amount: prepared.amount,
-        orderId: prepared.orderId,
-        orderName: prepared.orderName,
-        successUrl: successUrl.toString(),
-        failUrl: failUrl.toString(),
-        customerName: currentUser?.name || currentUser?.email || '사용자'
-      } as any);
+      await startTossPayment('CARD', {
+        orderId: prepareBody.orderId,
+        orderName: prepareBody.orderName,
+        amount: prepareBody.amount,
+      });
     } catch (error: any) {
       if (process.env.NODE_ENV !== 'production') {
-        console.error('Checkout payment start error:', error);
+        console.error('❌ 결제 준비 실패:', error);
       }
-      toast.error('결제 시작에 실패했습니다.');
+      toast.error(error?.message || '결제를 시작하지 못했습니다.');
       setIsProcessing(false);
+      return;
     }
+
+    setIsProcessing(false);
   };
   
   const handleCancelPayment = () => {
@@ -296,7 +241,7 @@ export const Checkout: React.FC = React.memo(() => {
     router.push('/configurator');
   };
   
-  if (!paymentComplete && selectedModels.length === 0) {
+  if (selectedModels.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card variant="bordered" className="max-w-md w-full">
@@ -306,29 +251,6 @@ export const Checkout: React.FC = React.memo(() => {
               <ArrowLeft className="w-4 h-4 mr-2" />
               모델 선택으로 돌아가기
             </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-  
-  if (paymentComplete) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card variant="elevated" className="max-w-md w-full">
-          <CardContent className="p-8 text-center">
-            <div className="mb-4 flex justify-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-10 h-10 text-green-600" />
-              </div>
-            </div>
-            <h2 className="text-2xl font-bold mb-2">결제 완료!</h2>
-            <p className="text-gray-600 mb-4">
-              크레딧이 지갑에 충전되었습니다.
-            </p>
-            <p className="text-sm text-gray-500">
-              잠시 후 대시보드로 이동합니다...
-            </p>
           </CardContent>
         </Card>
       </div>

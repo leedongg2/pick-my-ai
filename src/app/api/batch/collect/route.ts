@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { apiKeyManager } from '@/lib/apiKeyRotation';
+import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,7 @@ export const maxDuration = 60;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const CRON_SECRET = process.env.CRON_SECRET || '';
+const batchCollectRateLimiter = new RateLimiter(20, 5 * 60 * 1000);
 
 function getDb() {
   return createClient(supabaseUrl, supabaseServiceKey);
@@ -16,8 +18,18 @@ function getDb() {
 
 // POST /api/batch/collect  (cron 호출 - 처리 완료된 결과 수집)
 export async function POST(request: NextRequest) {
+  if (!CRON_SECRET) {
+    return NextResponse.json({ error: 'Batch cron is not configured.' }, { status: 503 });
+  }
+
+  const clientIp = getClientIp(request);
+  const rl = batchCollectRateLimiter.check(`batch-collect:${clientIp}`);
+  if (!rl.success) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+  }
+
   const authHeader = request.headers.get('authorization');
-  if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

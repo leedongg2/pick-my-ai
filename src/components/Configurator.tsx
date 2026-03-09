@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/store';
+import { csrfFetch } from '@/lib/csrfFetch';
 import { ModelCard } from '@/components/ModelCard';
 import { PriceSummary } from '@/components/PriceSummary';
 import { calculatePrice, calculatePMCEarn } from '@/utils/pricing';
@@ -65,7 +66,7 @@ const VISIBLE_OTHER_ITEMS = OTHER_ITEMS.filter((item) => item.id !== 'error-insu
 export const Configurator: React.FC = () => {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('all');
-  const { models, selections, policy, hasFirstPurchase, updateSelection, userPlan, smartRouterPurchased, setSmartRouterPurchased, insurancePurchased, setInsurancePurchased, getAvailablePMC, usePMC } = useStore();
+  const { models, selections, policy, hasFirstPurchase, updateSelection, userPlan, smartRouterPurchased, setSmartRouterPurchased, insurancePurchased, setInsurancePurchased, getAvailablePMC } = useStore();
   const { t } = useTranslation();
   
   const filteredModels = useMemo(() => {
@@ -203,13 +204,36 @@ export const Configurator: React.FC = () => {
                   const availablePMC = getAvailablePMC();
                   const canPayWithPMC = item.pmc100 && availablePMC >= item.price;
 
-                  const handleBuy = () => {
+                  const handleBuy = async () => {
                     if (isPurchased) { toast.info('이미 구매한 상품입니다.'); return; }
                     if (canPayWithPMC) {
-                      usePMC(item.price, `${item.name} 구매`, `other-${Date.now()}`);
-                      if (item.storeKey === 'smartRouterPurchased') setSmartRouterPurchased(true);
-                      if (item.storeKey === 'insurancePurchased') setInsurancePurchased(true);
-                      toast.success(`✅ ${item.name} 구매 완료! (-${item.price} PMC)`);
+                      try {
+                        const response = await csrfFetch('/api/entitlements/purchase', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ itemId: item.id }),
+                        });
+
+                        const result = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                          toast.error(result?.error || '구매에 실패했습니다.');
+                          return;
+                        }
+
+                        useStore.setState({
+                          pmcBalance: result?.pmcBalance || useStore.getState().pmcBalance,
+                        });
+                        setSmartRouterPurchased(result?.smartRouterPurchased === true);
+                        setInsurancePurchased(result?.insurancePurchased === true);
+                        useStore.setState({
+                          insurancePurchaseDate: typeof result?.insurancePurchaseDate === 'string'
+                            ? result.insurancePurchaseDate
+                            : useStore.getState().insurancePurchaseDate,
+                        });
+                        toast.success(`✅ ${item.name} 구매 완료! (-${item.price} PMC)`);
+                      } catch {
+                        toast.error('구매 처리 중 오류가 발생했습니다.');
+                      }
                     } else if (availablePMC > 0 && availablePMC < item.price) {
                       toast.error(`PMC가 ${item.price - availablePMC}원 부족합니다. 보유: ${availablePMC} PMC`);
                     } else {

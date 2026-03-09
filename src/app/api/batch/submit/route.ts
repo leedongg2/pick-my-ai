@@ -4,7 +4,6 @@ import { verifySession } from '@/lib/apiAuth';
 import { getOpenAIStatus } from '@/lib/openaiStatusServer';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
-import { applyCreditDelta } from '@/lib/serverWallet';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,19 +78,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const usageDescription = `batch_usage:${session.userId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-    const refundDescription = `batch_refund:${usageDescription}`;
-    const chargeResult = await applyCreditDelta(session.userId, { [modelId]: -1 }, {
-      amount: 0,
-      description: usageDescription,
-      requireSufficient: true,
-      transactionType: 'usage',
-    });
-
-    if (!chargeResult.ok) {
-      return NextResponse.json({ error: 'ERR_CREDIT_00', reason: '크레딧이 부족합니다.' }, { status: 402 });
-    }
-
     const db = getDb();
 
     // batch_requests 테이블에 저장
@@ -108,16 +94,6 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      await applyCreditDelta(session.userId, { [modelId]: 1 }, {
-        amount: 0,
-        description: refundDescription,
-        idempotencyKey: refundDescription,
-        requireSufficient: false,
-        transactionType: 'purchase',
-      }).catch((refundError) => {
-        console.error('[Batch Submit] Refund error:', refundError);
-      });
-
       console.error('[Batch Submit] DB error:', error);
       return NextResponse.json({ error: 'ERR_NET_00', reason: 'DB 저장 실패' }, { status: 500 });
     }

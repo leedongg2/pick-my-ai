@@ -17,11 +17,12 @@ type Props = {
 };
 
 export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, language, compact }) => {
-  const { smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed } = useStore(
+  const { smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, setSmartRouterPurchased } = useStore(
     (state) => ({
       smartRouterPurchased: state.smartRouterPurchased,
       smartRouterFreeUsed: state.smartRouterFreeUsed,
       setSmartRouterFreeUsed: state.setSmartRouterFreeUsed,
+      setSmartRouterPurchased: state.setSmartRouterPurchased,
     }),
     shallow
   );
@@ -78,12 +79,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
     }
     setLoading(true);
     setIsPremium(premium);
-    
-    // 프리미엄 최초 1회 무료 사용 처리
-    if (premium && !smartRouterPurchased && !smartRouterFreeUsed) {
-      setSmartRouterFreeUsed(true);
-    }
-    
+
     try {
       const res = await fetch('/api/smart-router', {
         method: 'POST',
@@ -100,15 +96,21 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
         setRecommendation(ui.loginRequired);
         return;
       }
+      if (res.status === 403) {
+        setRecommendation(ui.locked);
+        return;
+      }
       if (!res.ok) throw new Error('analysis_failed');
       const data = await res.json();
+      setSmartRouterPurchased(data?.smartRouterPurchased === true);
+      setSmartRouterFreeUsed(data?.smartRouterFreeUsed === true);
       setRecommendation(data.recommendation);
     } catch {
       setRecommendation(ui.failed);
     } finally {
       setLoading(false);
     }
-  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, openAIStatus.available, openAIBlockedReason, ui]);
+  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, setSmartRouterPurchased, openAIStatus.available, openAIBlockedReason, ui]);
 
   if (!question.trim() || models.length === 0) return null;
 

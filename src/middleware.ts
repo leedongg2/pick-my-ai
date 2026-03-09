@@ -86,7 +86,7 @@ export async function middleware(request: NextRequest) {
 
   // CSRF 검증 (상태 변경 메서드 + API 라우트)
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method) && pathname.startsWith('/api/')) {
-    const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/auth/social-session', '/api/chat'];
+    const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/auth/social-session'];
     const isPublicEndpoint = publicEndpoints.some(ep => pathname.startsWith(ep));
 
     if (!isPublicEndpoint) {
@@ -145,6 +145,13 @@ export async function middleware(request: NextRequest) {
   response.headers.set('X-DNS-Prefetch-Control', 'off');
   response.headers.set('X-Download-Options', 'noopen');
   response.headers.set('X-Permitted-Cross-Domain-Policies', 'none');
+  response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  response.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  response.headers.set('Origin-Agent-Cluster', '?1');
+
+  if (process.env.NODE_ENV === 'production') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
 
   return response;
 }

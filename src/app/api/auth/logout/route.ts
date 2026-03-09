@@ -1,8 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySecureToken, invalidateSession } from '@/lib/secureAuth';
+import { RateLimiter, getClientIp } from '@/lib/rateLimit';
+
+const logoutRateLimiter = new RateLimiter(30, 5 * 60 * 1000);
 
 export async function POST(request: NextRequest) {
   try {
+    const clientIp = getClientIp(request);
+    const rl = logoutRateLimiter.check(`logout:${clientIp}`);
+    if (!rl.success) {
+      return NextResponse.json(
+        { error: '요청이 너무 많습니다.' },
+        {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+          },
+        }
+      );
+    }
+
     // 현재 세션 토큰에서 jti 추출하여 블랙리스트에 추가
     const sessionToken = request.cookies.get('session')?.value;
     if (sessionToken) {
@@ -16,6 +33,10 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({
       success: true,
       message: '로그아웃되었습니다.'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
     });
 
     // 세션 쿠키 삭제
@@ -45,9 +66,21 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({
       success: true,
       message: '로그아웃되었습니다.'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
     });
     
     response.cookies.set('session', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      path: '/',
+    });
+
+    response.cookies.set('naver_session', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

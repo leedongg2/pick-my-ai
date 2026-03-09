@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { verifySession } from '@/lib/apiAuth';
 import { getOpenAIStatus } from '@/lib/openaiStatusServer';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
 import { fetchWithRetry } from '@/utils/fetchWithRetry';
 import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
-import { verifySession } from '@/lib/apiAuth';
+import { consumeModelCredit, refundModelCredit } from '@/lib/walletSecurity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -507,7 +508,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
 
   const geminiModelMap: { [key: string]: string } = {
     // Gemini 2.0 실험 모델 (최신)
-    'gemini3':  'gemini-2.0-flash-exp',
+    'gemini3': 'gemini-2.0-flash-exp',
     'gemini3pro': 'gemini-2.0-flash-thinking-exp-1219',
     // 레거시 매핑
     'gemini-flash': 'gemini-1.5-flash',
@@ -536,7 +537,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         } else if (p?.type === 'image_url' && p?.image_url?.url) {
           const parsed = extractBase64(p.image_url.url);
           if (parsed) {
-            append(role, { inline_data: { type: 'base64', media_type: parsed.mime, data: parsed.base64 } });
+            append(role, { inline_data: { mime_type: parsed.mime, data: parsed.base64 } });
           }
         }
       }
@@ -552,7 +553,7 @@ async function callGemini(model: string, messages: any[], userAttachments?: User
         for (const att of userAttachments) {
           if (att.type === 'image' && att.dataUrl) {
             const parsed = extractBase64(att.dataUrl);
-            if (parsed) contents[i].parts.push({ inline_data: { type: 'base64', media_type: parsed.mime, data: parsed.base64 } });
+            if (parsed) contents[i].parts.push({ inline_data: { mime_type: parsed.mime, data: parsed.base64 } });
           } else if (att.type === 'text' && att.content) {
             contents[i].parts.push({ text: `File (${att.name}):\n${att.content.slice(0, 4000)}` });
           }
@@ -1078,19 +1079,31 @@ export async function POST(request: NextRequest) {
   if (isStaticExportPhase) {
     return NextResponse.json(
       { error: 'Chat API unavailable in static export.' },
-      { status: 503 }
+      {
+        status: 501,
+        headers: {
+          'Cache-Control': 'no-store',
+          Pragma: 'no-cache',
+          Expires: '0',
+        },
+      }
     );
   }
 
-  const session = await verifySession(request);
-  if (!session.authenticated) {
-    return NextResponse.json(
-      { error: 'ERR_AUTH_REQUIRED', reason: '로그인이 필요합니다.' },
-      { status: 401 }
-    );
-  }
+  let sessionResult: Awaited<ReturnType<typeof verifySession>> | null = null;
+  let chargedCreditModelId: string | null = null;
+  let shouldRefundServerCredit = false;
 
   try {
+    const session = await verifySession(request);
+    sessionResult = session;
+    if (!session.authenticated || !session.userId) {
+      return NextResponse.json(
+        { error: 'ERR_AUTH', reason: '로그인이 필요합니다.' },
+        { status: 401 }
+      );
+    }
+
     // Rate Limiting 체크
     const clientIp = getClientIp(request);
     const rateLimitResult = chatRateLimiter.check(clientIp);
@@ -1132,10 +1145,10 @@ export async function POST(request: NextRequest) {
       ? (resolvedLanguage === 'ko' ? ' Use casual/informal speech (반말).' : ' Use casual tone.')
       : (resolvedLanguage === 'ko' ? ' Use polite/formal speech (존댓말).' : ' Use polite tone.');
     const languageInstruction = (resolvedLanguage === 'en'
-      ? 'Always respond in English.'
+      ? 'Always respond in English. Every answer must be at least 3 natural lines. If the answer would be short, add one brief explanation line and one practical tip line.'
       : resolvedLanguage === 'ja'
-      ? '必ず日本語で回答してください。'
-      : '반드시 한국어로 답변해주세요.') + speechStyle;
+      ? '必ず日本語で回答してください。すべての回答は自然な3行以上で書いてください。短く済む場合でも、簡単な説明1行と実用的な補足1行を追加してください。'
+      : '반드시 한국어로 답변해주세요. 모든 답변은 자연스럽게 최소 3줄 이상으로 작성해주세요. 짧게 끝날 내용이면 간단한 설명 1줄과 실용적인 팁 1줄을 더해주세요.') + speechStyle;
 
     const normalizeStoredFact = (fact: unknown) => {
       if (typeof fact !== 'string') return '';
@@ -1171,17 +1184,7 @@ export async function POST(request: NextRequest) {
 
     // 기본 프롬프트 (짧고 강력하게, 예시 포함)
     const summaryRuleForOthers = '\nEnd every reply with hidden summary in ~~ markers:\n~~\nQ:(10-word summary)\nA:(15-word summary)\nKey:(facts/names/numbers)\n~~';
-    const minResponseRule = resolvedLanguage === 'en'
-      ? 'Visible answer must be at least 3 lines unless the user explicitly asks for a one-line or ultra-short answer.'
-      : resolvedLanguage === 'ja'
-      ? 'ユーザーが1行や超短文を明示的に求めない限り、表示される回答は必ず3行以上にしてください。'
-      : '사용자가 한 줄 답변이나 매우 짧은 답변을 명시적으로 요구하지 않는 한, 화면에 보이는 답변은 반드시 최소 3줄 이상으로 작성해주세요.';
-    const basePrompt = `Best friend AI. Rules: wild reactions, 3+ emojis, ALL CAPS hype, casual texting tone, never formal, short punchy sentences.
-Example style:
-"OMG WAIT 🔥🔥🔥 bro that's INSANE!! okay okay let me break it down 👇
-💡 [answer]
-🎯 [key point]
-😤 honestly you're gonna CRUSH this!!"${summaryRuleForOthers}`;
+    const basePrompt = `You are a reliable, practical AI assistant. Give clear, accurate, useful answers. Keep the requested language and tone. Do not force emojis, slang, or exaggerated reactions. Structure short answers naturally into at least 3 lines when possible.${summaryRuleForOthers}`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
@@ -1200,7 +1203,7 @@ Example style:
         ];
       }
       
-      const systemContent = [basePrompt, minResponseRule, languageInstructionWithMemory].filter(Boolean).join('\n\n');
+      const systemContent = [basePrompt, languageInstructionWithMemory].filter(Boolean).join('\n\n');
       
       if (idx === -1) {
         return [{ role: 'system', content: systemContent }, ...contextMessages];
@@ -1329,11 +1332,41 @@ Example style:
       console.log('[Chat API] Request:', { modelId, messages: messages.length });
     }
 
+    const finalizeJsonResponse = (payload: Record<string, unknown>) => {
+      shouldRefundServerCredit = false;
+      return NextResponse.json(payload);
+    };
+
+    const finalizeStreamResponse = (response: Response) => {
+      shouldRefundServerCredit = false;
+      return response;
+    };
+
     // 모델 제공사 판별
     const isGrokModel = GROK_TEXT_IDS.has(modelId) || GROK_IMAGE_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId);
+    const isVideoModel = SORA_VIDEO_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId);
+    const isOpenAIModel = !isGrokModel && (
+      modelId.startsWith('gpt')
+      || IMAGE_MODEL_IDS.has(modelId)
+      || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
+    );
+    const isPseudoStreamable =
+      modelId.startsWith('gemini') ||
+      modelId.startsWith('claude') ||
+      ANTHROPIC_MODEL_IDS.has(modelId) ||
+      modelId.startsWith('perplexity') ||
+      PERPLEXITY_MODEL_IDS.has(modelId) ||
+      GROK_TEXT_IDS.has(modelId);
+    const isBillableModel = isVideoModel || isOpenAIModel || isPseudoStreamable || GROK_IMAGE_IDS.has(modelId);
+
+    if (isBillableModel) {
+      await consumeModelCredit(session.userId, modelId);
+      chargedCreditModelId = modelId;
+      shouldRefundServerCredit = true;
+    }
 
     // 영상 모델 먼저 처리
-    if (SORA_VIDEO_IDS.has(modelId) || GROK_VIDEO_IDS.has(modelId)) {
+    if (isVideoModel) {
       const userMsg = findLastMessageByRole(messages, 'user');
       const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
       const duration = Math.max(1, Math.min(50, Number(videoSeconds) || 5));
@@ -1343,14 +1376,8 @@ Example style:
       } else {
         videoResult = await callGrokVideo(prompt, duration);
       }
-      return NextResponse.json({ content: videoResult });
+      return finalizeJsonResponse({ content: videoResult });
     }
-
-    const isOpenAIModel = !isGrokModel && (
-      modelId.startsWith('gpt')
-      || IMAGE_MODEL_IDS.has(modelId)
-      || modelId === 'o3' || modelId === 'o3mini' || modelId === 'o4mini'
-    );
 
     // GPT 스트리밍 가능 모델 (이미지 제외)
     const isStreamableGPT = isOpenAIModel && !IMAGE_MODEL_IDS.has(modelId);
@@ -1362,9 +1389,9 @@ Example style:
         throw new Error('OpenAI response has no body');
       }
 
-      return new Response(openaiRes.body, {
+      return finalizeStreamResponse(new Response(openaiRes.body, {
         headers: OPENAI_STREAM_HEADERS,
-      });
+      }));
     }
 
     // Grok 이미지 생성 모델: JSON 응답
@@ -1372,17 +1399,10 @@ Example style:
       const userMsg = findLastMessageByRole(messages, 'user');
       const prompt = typeof userMsg?.content === 'string' ? userMsg.content : (userMsg?.content?.[0]?.text || '');
       const imageContent = await callGrokImage(modelId, prompt);
-      return NextResponse.json({ content: imageContent });
+      return finalizeJsonResponse({ content: imageContent });
     }
 
     // 텍스트 AI는 pseudo-streaming SSE로 응답 (체감 속도 극대화)
-    const isPseudoStreamable =
-      modelId.startsWith('gemini') ||
-      modelId.startsWith('claude') ||
-      ANTHROPIC_MODEL_IDS.has(modelId) ||
-      modelId.startsWith('perplexity') ||
-      PERPLEXITY_MODEL_IDS.has(modelId) ||
-      GROK_TEXT_IDS.has(modelId);
     const instructedMessages = isPseudoStreamable ? applyLanguageInstruction(messages) : messages;
 
     if (isPseudoStreamable) {
@@ -1397,9 +1417,9 @@ Example style:
         responseContent = await callPerplexity(modelId, instructedMessages, userAttachments, 0, normalizedTemperature, normalizedChainMaxOutputTokens);
       }
 
-      return new Response(buildPseudoStream(responseContent), {
+      return finalizeStreamResponse(new Response(buildPseudoStream(responseContent), {
         headers: PSEUDO_STREAM_HEADERS,
-      });
+      }));
     }
 
     // 이미지/Codex 등 나머지 모델은 JSON 응답
@@ -1414,9 +1434,24 @@ Example style:
       responseContent = `[${modelId}] ${resolvedLanguage === 'ja' ? 'こんにちは！質問にお答えします。' : resolvedLanguage === 'en' ? 'Hello! I will answer your question.' : '안녕하세요! 질문에 답변드리겠습니다.'} (Demo mode: Add API key to .env.local)`;
     }
 
-    return NextResponse.json({ content: responseContent });
+    return finalizeJsonResponse({ content: responseContent });
 
   } catch (error: any) {
+    if (error?.message === 'INSUFFICIENT_CREDITS') {
+      return NextResponse.json(
+        { error: 'ERR_CREDIT_00', reason: '크레딧이 부족합니다.' },
+        { status: 409 }
+      );
+    }
+
+    if (sessionResult?.authenticated && sessionResult.userId && typeof chargedCreditModelId === 'string' && shouldRefundServerCredit) {
+      try {
+        await refundModelCredit(sessionResult.userId, chargedCreditModelId, 1);
+      } catch (refundError) {
+        console.error('[Chat API] Server refund failed:', refundError);
+      }
+    }
+
     // 모든 환경에서 에러 로깅 (디버깅용)
     console.error('[Chat API] Error caught:', {
       message: error.message,

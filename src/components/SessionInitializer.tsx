@@ -3,7 +3,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
 import { initializeRealtimeSync, unsubscribeFromRealtimeUpdates } from '@/lib/realtimeSync';
-import { csrfFetch } from '@/lib/csrfFetch';
 
 /**
  * 앱 전역에서 세션 쿠키를 확인하여 Zustand store의 인증 상태를 자동 복원하는 컴포넌트.
@@ -14,7 +13,7 @@ export function SessionInitializer() {
   const isAuthenticated = useStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    if (checkedRef.current) return;
+    if (isAuthenticated || checkedRef.current) return;
     checkedRef.current = true;
 
     (async () => {
@@ -39,17 +38,7 @@ export function SessionInitializer() {
             credentials: 'include',
             cache: 'no-store',
           });
-          if (!res.ok) {
-            useStore.setState({
-              currentUser: null,
-              isAuthenticated: false,
-              wallet: null,
-            });
-            try {
-              sessionStorage.removeItem('__pma_session');
-            } catch {}
-            return;
-          }
+          if (!res.ok) return;
           sessionData = await res.json();
           // 캐시 저장
           try {
@@ -58,18 +47,6 @@ export function SessionInitializer() {
         }
 
         const data = sessionData;
-        if (!data?.authenticated || !data?.user) {
-          useStore.setState({
-            currentUser: null,
-            isAuthenticated: false,
-            wallet: null,
-          });
-          try {
-            sessionStorage.removeItem('__pma_session');
-          } catch {}
-          return;
-        }
-
         if (data.authenticated && data.user) {
           const userId = data.user.id;
 
@@ -102,7 +79,7 @@ export function SessionInitializer() {
           // setCurrentUser + wallet을 한 번에 설정하여 partialize가 빈 wallet을 저장하는 것을 방지
           const initialWallet = {
             userId,
-            credits: {},
+            credits: savedLocalCredits,
             transactions: savedLocalTransactions,
           };
           useStore.setState({
@@ -117,7 +94,7 @@ export function SessionInitializer() {
             },
             isAuthenticated: true,
             wallet: initialWallet,
-            hasFirstPurchase: false,
+            hasFirstPurchase: true,
           });
 
           // 서버에서 사용자 데이터(지갑 + 설정) 로드 후 병합
@@ -129,7 +106,6 @@ export function SessionInitializer() {
               const stateUpdate: Record<string, any> = {};
 
               const serverCredits = userData.credits || {};
-              
               const mergedCredits: Record<string, number> = { ...serverCredits };
               
               // 0 이하인 크레딧 제거
@@ -138,32 +114,6 @@ export function SessionInitializer() {
               }
               
               let hasCredits = Object.keys(mergedCredits).length > 0;
-              
-              // 신규 사용자 무료 크레딧 지급 (gpt5 10회, haiku45 10회, sonar 10회)
-              if (!hasCredits && !savedLocalHasFirstPurchase && !userData.settings?.hasFirstPurchase) {
-                try {
-                  const walletRes = await csrfFetch('/api/wallet', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'grant_welcome_credits' }),
-                  });
-                  if (walletRes.ok) {
-                    const walletData = await walletRes.json();
-                    const grantedCredits = walletData?.wallet?.credits || {};
-                    Object.keys(mergedCredits).forEach((key) => delete mergedCredits[key]);
-                    Object.entries(grantedCredits).forEach(([modelId, amount]) => {
-                      if (typeof amount === 'number' && amount > 0) {
-                        mergedCredits[modelId] = amount;
-                      }
-                    });
-                    hasCredits = Object.keys(mergedCredits).length > 0;
-                    if (walletData?.granted || hasCredits) {
-                      stateUpdate.hasFirstPurchase = true;
-                    }
-                  }
-                } catch {}
-              }
               
               stateUpdate.wallet = {
                 userId,
@@ -191,6 +141,12 @@ export function SessionInitializer() {
                 if (s.activeExpertise) stateUpdate.activeExpertise = s.activeExpertise;
                 if (s.pmcBalance) stateUpdate.pmcBalance = s.pmcBalance;
                 if (s.userPlan) stateUpdate.userPlan = s.userPlan;
+                stateUpdate.smartRouterPurchased = s.smartRouterPurchased === true;
+                stateUpdate.smartRouterFreeUsed = s.smartRouterFreeUsed === true;
+                stateUpdate.insurancePurchased = s.insurancePurchased === true;
+                stateUpdate.insurancePurchaseDate = typeof s.insurancePurchaseDate === 'string'
+                  ? s.insurancePurchaseDate
+                  : null;
                 if (s.storedFacts?.length) stateUpdate.storedFacts = s.storedFacts;
                 if (s.usageAlerts?.length) stateUpdate.usageAlerts = s.usageAlerts;
                 if (s.comparisonSessions?.length) stateUpdate.comparisonSessions = s.comparisonSessions;
@@ -262,11 +218,7 @@ export function SessionInitializer() {
           initializeRealtimeSync(userId);
         }
       } catch {
-        useStore.setState({
-          currentUser: null,
-          isAuthenticated: false,
-          wallet: null,
-        });
+        // 세션 확인 실패 시 무시 (비로그인 상태 유지)
       }
     })();
   }, [isAuthenticated]);

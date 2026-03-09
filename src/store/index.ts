@@ -727,17 +727,6 @@ export const useStore = create<AppState>()(
         set({
           wallet: updatedWallet
         });
-        
-        // Supabase에 동기화 (세션 쿠키 기반)
-        if (state.currentUser) {
-          try {
-            await Promise.resolve();
-          } catch (error) {
-            if (process.env.NODE_ENV !== 'production') {
-              console.error('Supabase 크레딧 동기화 실패:', error);
-            }
-          }
-        }
       },
       
       deductCredit: async (modelId) => {
@@ -775,20 +764,8 @@ export const useStore = create<AppState>()(
               credits: newCredits,
               transactions: [...state.wallet.transactions, transaction]
             },
-            _pendingRefundTokens: newTokens,
           };
         });
-        
-        // Supabase에 동기화 (세션 쿠키 기반)
-        if (state.currentUser) {
-          try {
-            await Promise.resolve();
-          } catch (error) {
-            if (process.env.NODE_ENV !== 'production') {
-              console.error('Supabase 크레딧 사용 동기화 실패:', error);
-            }
-          }
-        }
         
         return refundToken;
       },

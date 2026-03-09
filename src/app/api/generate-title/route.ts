@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifySession } from '@/lib/apiAuth';
+import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 
 const GEMINI_API_KEYS = [
   process.env.GEMINI_API_KEY_1,
@@ -7,14 +9,42 @@ const GEMINI_API_KEYS = [
 ].filter(Boolean);
 
 let currentKeyIndex = 0;
+const titleRateLimiter = new RateLimiter(10, 60 * 1000);
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await verifySession(req);
+
+    if (!session.authenticated || !session.userId) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.' },
+        { status: 401 }
+      );
+    }
+
+    const clientIp = getClientIp(req);
+    const rateLimitResult = titleRateLimiter.check(`title:${session.userId}:${clientIp}`);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+        { status: 429 }
+      );
+    }
+
     const { message } = await req.json();
 
     if (!message || typeof message !== 'string') {
       return NextResponse.json(
         { error: '메시지가 필요합니다.' },
+        { status: 400 }
+      );
+    }
+
+    const normalizedMessage = message.trim();
+
+    if (!normalizedMessage || normalizedMessage.length > 4000) {
+      return NextResponse.json(
+        { error: '메시지 길이가 올바르지 않습니다.' },
         { status: 400 }
       );
     }
@@ -39,7 +69,7 @@ export async function POST(req: NextRequest) {
 - 따옴표 사용 금지
 - 핵심 키워드만 간결하게
 
-메시지: "${message}"
+메시지: "${normalizedMessage}"
 
 제목:`;
 
