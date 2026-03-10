@@ -1,13 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { getBaseUrl } from '@/lib/redirect';
-import { useStore } from '@/store';
 
 interface AuthProps {
   onSuccess?: () => void;
@@ -17,68 +16,10 @@ interface AuthProps {
 export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const language = useStore((state) => state.language);
-
-  const ui = useMemo(() => {
-    if (language === 'en') {
-      return {
-        agreeRequired: 'Please agree to the Terms of Service and Privacy Policy.',
-        loginFailed: 'Login failed.',
-        genericError: 'An error occurred.',
-        subtitle: 'Continue easily with your social account',
-        title: 'Login / Sign Up',
-        google: 'Continue with Google',
-        loggingIn: 'Signing in...',
-        termsLead: 'I agree to the ',
-        terms: 'Terms of Service',
-        and: ' and ',
-        privacy: 'Privacy Policy',
-        termsTail: '.',
-        termsHint: 'Please agree to the terms to use the service.',
-        brandSub: 'AI selection platform',
-      };
-    }
-
-    if (language === 'ja') {
-      return {
-        agreeRequired: '利用規約とプライバシーポリシーに同意してください。',
-        loginFailed: 'ログインに失敗しました。',
-        genericError: 'エラーが発生しました。',
-        subtitle: 'ソーシャルアカウントで簡単に始めましょう',
-        title: 'ログイン / 会員登録',
-        google: 'Googleで続ける',
-        loggingIn: 'ログイン中...',
-        termsLead: '',
-        terms: '利用規約',
-        and: ' と ',
-        privacy: 'プライバシーポリシー',
-        termsTail: ' に同意します。',
-        termsHint: 'サービス利用のため、規約に同意してください。',
-        brandSub: 'AI選択プラットフォーム',
-      };
-    }
-
-    return {
-      agreeRequired: '이용약관 및 개인정보처리방침에 동의해주세요.',
-      loginFailed: '로그인에 실패했습니다.',
-      genericError: '오류가 발생했습니다.',
-      subtitle: '소셜 계정으로 간편하게 시작하세요',
-      title: '로그인 / 회원가입',
-      google: 'Google로 계속하기',
-      loggingIn: '로그인 중...',
-      termsLead: '',
-      terms: '이용약관',
-      and: ' 및 ',
-      privacy: '개인정보처리방침',
-      termsTail: '에 동의합니다.',
-      termsHint: '서비스 이용을 위해 약관에 동의해주세요.',
-      brandSub: 'AI 선택 플랫폼',
-    };
-  }, [language]);
 
   const handleGoogleLogin = useCallback(async () => {
     if (!agreedToTerms) {
-      toast.error(ui.agreeRequired);
+      toast.error('이용약관 및 개인정보처리방침에 동의해주세요.');
       return;
     }
 
@@ -95,14 +36,14 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
       });
 
       if (error) {
-        toast.error(error.message || ui.loginFailed);
+        toast.error(error.message || '로그인에 실패했습니다.');
         setIsLoading(false);
       }
     } catch (err: any) {
-      toast.error(err.message || ui.genericError);
+      toast.error(err.message || '오류가 발생했습니다.');
       setIsLoading(false);
     }
-  }, [agreedToTerms, ui]);
+  }, [agreedToTerms]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-purple-50 to-pink-50 relative">
@@ -117,7 +58,7 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
           </div>
           <div className="flex flex-col">
             <span className="text-xl font-bold text-gray-900 tracking-tight">Pick-My-AI</span>
-            <span className="text-xs text-gray-500 font-medium">{ui.brandSub}</span>
+            <span className="text-xs text-gray-500 font-medium">AI 선택 플랫폼</span>
           </div>
         </a>
       </div>
@@ -136,10 +77,10 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
         <Card variant="elevated" className="shadow-2xl border-2 border-white/50">
           <CardHeader>
             <h2 className="text-2xl font-bold mb-2 text-center">
-              {ui.title}
+              로그인 / 회원가입
             </h2>
             <p className="text-sm text-gray-500 text-center">
-              {ui.subtitle}
+              소셜 계정으로 간편하게 시작하세요
             </p>
           </CardHeader>
 
@@ -156,7 +97,7 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
               {isLoading ? (
                 <span className="flex items-center justify-center space-x-2">
                   <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-600 border-t-transparent"></span>
-                  <span className="text-gray-700">{ui.loggingIn}</span>
+                  <span className="text-gray-700">로그인 중...</span>
                 </span>
               ) : (
                 <>
@@ -166,7 +107,7 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
                     <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                     <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                   </svg>
-                  <span className="text-gray-700 font-medium">{ui.google}</span>
+                  <span className="text-gray-700 font-medium">Google로 계속하기</span>
                 </>
               )}
             </Button>
@@ -181,7 +122,6 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
                   className="mt-0.5 w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                 />
                 <span className="text-sm text-gray-600 leading-relaxed">
-                  {ui.termsLead}
                   <a
                     href="/terms"
                     target="_blank"
@@ -189,9 +129,9 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
                     className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {ui.terms}
+                    이용약관
                   </a>
-                  {ui.and}
+                  {' '}및{' '}
                   <a
                     href="/privacy"
                     target="_blank"
@@ -199,14 +139,14 @@ export const Auth: React.FC<AuthProps> = ({ onSuccess, defaultMode = 'login' }) 
                     className="text-blue-600 hover:text-blue-700 hover:underline font-medium"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {ui.privacy}
+                    개인정보처리방침
                   </a>
-                  {ui.termsTail}
+                  에 동의합니다.
                 </span>
               </label>
               {!agreedToTerms && (
                 <p className="mt-2 text-xs text-gray-400 ml-7">
-                  {ui.termsHint}
+                  서비스 이용을 위해 약관에 동의해주세요.
                 </p>
               )}
             </div>

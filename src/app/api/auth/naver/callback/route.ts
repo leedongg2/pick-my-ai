@@ -1,24 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createSecureToken } from '@/lib/secureAuth';
-import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const naverCallbackRateLimiter = new RateLimiter(20, 5 * 60 * 1000);
 
 function getServerBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
 }
 
 export async function GET(request: NextRequest) {
-  const clientIp = getClientIp(request);
-  const rl = naverCallbackRateLimiter.check(`naver-callback:${clientIp}`);
-  if (!rl.success) {
-    return NextResponse.redirect(new URL(`${getServerBaseUrl()}/login?error=too_many_requests`));
-  }
-
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get('code');
   const state = searchParams.get('state');
@@ -30,15 +22,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL(`${baseUrl}/login?error=naver_auth_failed`));
   }
 
-  if (!code || !state || code.length > 512 || state.length > 512) {
+  if (!code || !state) {
     return NextResponse.redirect(new URL(`${baseUrl}/login?error=invalid_callback`));
-  }
-
-  const naverClientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID || '';
-  const naverClientSecret = process.env.NAVER_CLIENT_SECRET || '';
-
-  if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey || !naverClientId || !naverClientSecret) {
-    return NextResponse.redirect(new URL(`${baseUrl}/login?error=naver_not_configured`));
   }
 
   try {
@@ -50,8 +35,8 @@ export async function GET(request: NextRequest) {
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: naverClientId,
-        client_secret: naverClientSecret,
+        client_id: process.env.NEXT_PUBLIC_NAVER_CLIENT_ID || '',
+        client_secret: process.env.NAVER_CLIENT_SECRET || '',
         code: code,
         state: state,
       }),
@@ -80,12 +65,8 @@ export async function GET(request: NextRequest) {
     const email = naverUser.email;
     const name = naverUser.name || naverUser.nickname || email?.split('@')[0] || 'User';
 
-    if (typeof email !== 'string' || !email.trim() || email.length > 320) {
-      throw new Error('Failed to resolve Naver user email');
-    }
-
     // 서버사이드 Supabase Admin 클라이언트 사용
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
 
     // 사용자 확인 또는 생성
     const { data: existingUser } = await supabaseAdmin

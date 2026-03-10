@@ -7,22 +7,18 @@
  * 환경에 맞는 기본 URL 가져오기
  */
 export function getBaseUrl(): string {
-  // OAuth/쿠키 흐름은 실제 접속 origin과 일치해야 하므로 브라우저에서는 현재 origin을 최우선 사용
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
+  // 서버 사이드에서는 환경 변수만 사용
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_APP_URL || 'https://pickmyai.store';
+  }
+  
+  // 클라이언트 사이드에서는 환경 변수 우선
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL;
   }
 
-  const baseUrl =
-    process.env.URL ||
-    process.env.DEPLOY_PRIME_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    'https://pickmyai.store';
-
-  if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
-    return baseUrl;
-  }
-
-  return `https://${baseUrl}`;
+  // 현재 도메인 그대로 사용 (OAuth 콜백을 위해)
+  return window.location.origin;
 }
 
 /**

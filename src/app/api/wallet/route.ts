@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/apiAuth';
-import { RateLimiter, getClientIp } from '@/lib/rateLimit';
-import { applyCreditDelta, ensureUserWallet, sanitizeUsageDeltas } from '@/lib/walletSecurity';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const walletRateLimiter = new RateLimiter(30, 5 * 60 * 1000);
 
 function getSupabaseAdmin() {
   if (!supabaseUrl) {
@@ -32,15 +29,34 @@ export async function GET(request: NextRequest) {
     }
     
     const userId = sessionResult.userId;
-    const clientIp = getClientIp(request);
-    const rl = walletRateLimiter.check(`${userId}:${clientIp}:wallet:get`);
-    if (!rl.success) {
-      return NextResponse.json({ error: '요청이 너무 많습니다.' }, { status: 429 });
+
+    const db = getSupabaseAdmin();
+
+    const { data: wallets, error: walletError } = await db
+      .from('user_wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (walletError) {
+      return NextResponse.json({ error: walletError.message || '지갑 조회 실패' }, { status: 500 });
     }
 
-    const wallet = await ensureUserWallet(userId);
+    if (!wallets || wallets.length === 0) {
+      const { data: newWallet, error: createError } = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits: {} })
+        .select()
+        .single();
 
-    return NextResponse.json({ wallet });
+      if (createError) {
+        return NextResponse.json({ error: createError.message || '지갑 생성 실패' }, { status: 500 });
+      }
+
+      return NextResponse.json({ wallet: newWallet });
+    }
+
+    return NextResponse.json({ wallet: wallets[0] });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet GET error:', error);
@@ -58,39 +74,80 @@ export async function POST(request: NextRequest) {
     }
     
     const userId = sessionResult.userId;
-    const clientIp = getClientIp(request);
-    const rl = walletRateLimiter.check(`${userId}:${clientIp}:wallet:post`);
-    if (!rl.success) {
-      return NextResponse.json({ error: '요청이 너무 많습니다.' }, { status: 429 });
-    }
+
+    const db = getSupabaseAdmin();
 
     const { credits, type, description } = await request.json();
-    const usageDeltas = sanitizeUsageDeltas(credits);
-    const normalizedDescription = typeof description === 'string' && description.trim()
-      ? description.trim().slice(0, 200)
-      : '크레딧 사용';
 
-    if (Object.keys(usageDeltas).length === 0) {
+    if (!credits || typeof credits !== 'object') {
       return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    if (type && type !== 'usage') {
-      return NextResponse.json({ error: '허용되지 않은 지갑 변경입니다.' }, { status: 403 });
+    const { data: currentWalletRows, error: fetchError } = await db
+      .from('user_wallets')
+      .select('credits')
+      .eq('user_id', userId)
+      .limit(1);
+
+    if (fetchError) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('Wallet POST fetch error:', fetchError);
+      }
+      return NextResponse.json({ error: fetchError.message || '지갑 조회 실패' }, { status: 500 });
     }
 
-    try {
-      const nextCredits = await applyCreditDelta(userId, usageDeltas, {
-        type: 'usage',
-        description: normalizedDescription,
-        credits: usageDeltas,
-      });
-      return NextResponse.json({ wallet: { userId, credits: nextCredits } });
-    } catch (walletError: any) {
-      if (walletError?.message === 'INSUFFICIENT_CREDITS') {
-        return NextResponse.json({ error: '크레딧이 부족합니다.' }, { status: 409 });
+    const currentCredits = (currentWalletRows?.[0] as any)?.credits || {};
+    const newCredits = { ...currentCredits };
+
+    Object.entries(credits).forEach(([modelId, amount]) => {
+      const numAmount = Number(amount);
+      if (!isNaN(numAmount)) {
+        newCredits[modelId] = (newCredits[modelId] || 0) + numAmount;
+        if (newCredits[modelId] <= 0) {
+          delete newCredits[modelId];
+        }
       }
-      throw walletError;
+    });
+
+    const { data: updatedWalletRows, error: updateError } = await db
+      .from('user_wallets')
+      .update({ credits: newCredits })
+      .eq('user_id', userId)
+      .select();
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
     }
+
+    const updatedWallet = updatedWalletRows?.[0];
+    if (!updatedWallet) {
+      const insertResult = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits: newCredits })
+        .select()
+        .single();
+
+      if (insertResult.error) {
+        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
+      }
+
+      return NextResponse.json({ wallet: insertResult.data });
+    }
+
+    const { error: txError } = await db
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        type: type || 'purchase',
+        credits: credits,
+        description: description || '크레딧 변경',
+      });
+
+    if (txError && process.env.NODE_ENV !== 'production') {
+      console.error('Transaction insert error:', txError);
+    }
+
+    return NextResponse.json({ wallet: updatedWallet });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet POST error:', error);
@@ -106,14 +163,41 @@ export async function PATCH(request: NextRequest) {
     if (!sessionResult.authenticated || !sessionResult.userId) {
       return NextResponse.json({ error: '인증이 필요합니다.' }, { status: 401 });
     }
+    
+    const userId = sessionResult.userId;
 
-    const clientIp = getClientIp(request);
-    const rl = walletRateLimiter.check(`${sessionResult.userId}:${clientIp}:wallet:patch`);
-    if (!rl.success) {
-      return NextResponse.json({ error: '요청이 너무 많습니다.' }, { status: 429 });
+    const db = getSupabaseAdmin();
+
+    const { credits } = await request.json();
+
+    if (!credits || typeof credits !== 'object') {
+      return NextResponse.json({ error: '크레딧 정보가 필요합니다.' }, { status: 400 });
     }
 
-    return NextResponse.json({ error: '직접 지갑 재작성은 허용되지 않습니다.' }, { status: 403 });
+    const { data: updatedWalletRows, error: updateError } = await db
+      .from('user_wallets')
+      .update({ credits })
+      .eq('user_id', userId)
+      .select();
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message || '지갑 업데이트 실패' }, { status: 500 });
+    }
+
+    const updatedWallet = updatedWalletRows?.[0];
+    if (!updatedWallet) {
+      const insertResult = await db
+        .from('user_wallets')
+        .insert({ user_id: userId, credits })
+        .select()
+        .single();
+      if (insertResult.error) {
+        return NextResponse.json({ error: insertResult.error.message || '지갑 업데이트 실패' }, { status: 500 });
+      }
+      return NextResponse.json({ wallet: insertResult.data });
+    }
+
+    return NextResponse.json({ wallet: updatedWallet });
   } catch (error: any) {
     if (process.env.NODE_ENV !== 'production') {
       console.error('Wallet PATCH error:', error);

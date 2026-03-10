@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 export default function CheckoutSuccessPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { clearSelections } = useStore();
+  const { addCredits, clearSelections, wallet, initWallet, currentUser } = useStore();
 
   useEffect(() => {
     const run = async () => {
@@ -28,29 +28,29 @@ export default function CheckoutSuccessPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paymentKey, orderId, amount: Number(amount) })
           });
-
-          const body = await res.json().catch(() => ({}));
           if (!res.ok) {
-            console.error('Confirm failed:', body);
-            toast.error(body?.error || '결제 승인에 실패했습니다.');
-          } else {
-            useStore.setState((state) => ({
-              wallet: body?.wallet
-                ? {
-                    userId: body.wallet.userId,
-                    credits: body.wallet.credits || {},
-                    transactions: state.wallet?.transactions || [],
-                  }
-                : state.wallet,
-              hasFirstPurchase: body?.hasFirstPurchase ?? state.hasFirstPurchase,
-              pmcBalance: body?.pmcBalance || state.pmcBalance,
-            }));
-            toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
+            const err = await res.json();
+            console.error('Confirm failed:', err);
           }
         } catch (e) {
           console.error('Confirm error', e);
-          toast.error('결제 확인 중 오류가 발생했습니다.');
         }
+      }
+
+      // 로컬 저장된 pending_purchase로 크레딧 지급
+      const raw = localStorage.getItem('pending_purchase');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { orderId: string; credits: { [k: string]: number } };
+          // 지갑 준비
+          if (!wallet && currentUser) {
+            initWallet(currentUser.id);
+          }
+          await new Promise(r => setTimeout(r, 200));
+          addCredits(parsed.credits);
+          localStorage.removeItem('pending_purchase');
+          toast.success('결제가 완료되었습니다. 크레딧이 지급되었습니다.');
+        } catch {}
       }
 
       clearSelections();

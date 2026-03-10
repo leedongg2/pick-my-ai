@@ -2,11 +2,10 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 // 최적화된 로딩 스켈레톤
 const ChatLoadingSkeleton = () => (
-  <div className="min-h-screen bg-white dark:bg-gray-900">
+  <div className="flex h-screen">
     <div className="w-64 bg-gray-50 border-r border-gray-200 animate-pulse">
       <div className="p-4 space-y-3">
         <div className="h-10 bg-gray-200 rounded"></div>
@@ -40,10 +39,6 @@ export default function ChatPage() {
     };
   }, []);
 
-  return (
-    <ProtectedRoute>
-      <Chat />
-    </ProtectedRoute>
-  );
+  return <Chat />;
 }
 

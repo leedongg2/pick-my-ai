@@ -9,16 +9,6 @@ import crypto from 'crypto';
 // 세션 블랙리스트 (프로덕션에서는 Redis 사용 권장)
 const sessionBlacklist = new Set<string>();
 
-function getSessionSecret(): string | null {
-  const secret = process.env.JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-  if (!secret || secret.length < 32) {
-    return null;
-  }
-
-  return secret;
-}
-
 /**
  * 안전한 문자열 비교 (타이밍 공격 방지)
  */
@@ -117,10 +107,15 @@ export async function createSecureToken(payload: {
   email: string;
   name: string;
 }): Promise<string> {
-  const secret = getSessionSecret();
-
+  const secret = process.env.JWT_SECRET;
+  
   if (!secret) {
-    throw new Error('세션 서명용 비밀키가 없거나 너무 짧습니다. JWT_SECRET 또는 SUPABASE_SERVICE_ROLE_KEY를 확인해주세요.');
+    throw new Error('JWT_SECRET이 설정되지 않았습니다.');
+  }
+  
+  // Secret 최소 길이 검증 (256bit = 32자)
+  if (secret.length < 32) {
+    throw new Error('JWT_SECRET은 최소 32자 이상이어야 합니다.');
   }
   
   // jti (JWT ID) 추가로 토큰 고유 식별
@@ -153,8 +148,8 @@ export async function verifySecureToken(token: string): Promise<{
   };
   error?: string;
 }> {
-  const secret = getSessionSecret();
-
+  const secret = process.env.JWT_SECRET;
+  
   if (!secret) {
     return { valid: false, error: '서버 설정 오류' };
   }

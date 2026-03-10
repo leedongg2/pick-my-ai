@@ -2,8 +2,6 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import dynamic from 'next/dynamic';
 import { Toaster } from 'sonner';
-import { OpenAIStatusBanner } from '@/components/OpenAIStatusBanner';
-import { OpenAIStatusProvider } from '@/components/OpenAIStatusProvider';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { SessionInitializer } from '@/components/SessionInitializer';
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar';
@@ -81,24 +79,21 @@ export default function RootLayout({
       </head>
       <body className={inter.className}>
         <ThemeProvider>
-          <OpenAIStatusProvider>
-            <ServiceWorkerRegistrar />
-            <SessionInitializer />
-            <Header />
-            <OpenAIStatusBanner />
-            {children}
-            <Toaster 
-              position="bottom-center"
-              closeButton
-              toastOptions={{
-                classNames: {
-                  toast: 'dark:bg-gray-800 dark:text-white dark:border-gray-700',
-                  cancelButton: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200',
-                  actionButton: 'bg-primary text-primary-foreground hover:opacity-90',
-                },
-              }}
-            />
-          </OpenAIStatusProvider>
+          <ServiceWorkerRegistrar />
+          <SessionInitializer />
+          <Header />
+          {children}
+          <Toaster 
+            position="bottom-center"
+            closeButton
+            toastOptions={{
+              classNames: {
+                toast: 'dark:bg-gray-800 dark:text-white dark:border-gray-700',
+                cancelButton: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200',
+                actionButton: 'bg-primary text-primary-foreground hover:opacity-90',
+              },
+            }}
+          />
         </ThemeProvider>
       </body>
     </html>

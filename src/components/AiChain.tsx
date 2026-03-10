@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
 import { Plus, X, Play, ChevronDown, ChevronUp, ArrowDown, Copy } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { getOpenAIStatusBlockedMessage, isOpenAITextModelId } from '@/utils/openaiStatus';
 
 type Props = {
   availableModels: any[];
@@ -44,7 +42,6 @@ const ROLE_PRESETS = [
 
 export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, modelById, language, speechLevel }) => {
   const { deductCredit } = useStore();
-  const { status: openAIStatus } = useOpenAIStatus();
   const [prompt, setPrompt] = useState('');
   const [steps, setSteps] = useState<ChainStep[]>([
     { id: '1', modelId: '', role: '초안 작성' },
@@ -53,10 +50,9 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
   const [results, setResults] = useState<StepResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
-  const openAIBlockedReason = getOpenAIStatusBlockedMessage(openAIStatus.reason);
 
   const textModels = availableModels.filter(m =>
-    m.series !== 'image' && m.series !== 'video' && !m.isBatch && (openAIStatus.available || !isOpenAITextModelId(m.id))
+    m.series !== 'image' && m.series !== 'video' && !m.isBatch
   );
 
   const addStep = () => {
@@ -95,7 +91,6 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
     if (!prompt.trim()) { toast.error('질문을 입력해주세요.'); return; }
     const incomplete = steps.find(s => !s.modelId);
     if (incomplete) { toast.error('모든 단계에 모델을 선택해주세요.'); return; }
-    if (!openAIStatus.available && steps.some((step) => isOpenAITextModelId(step.modelId))) { toast.error(openAIBlockedReason); return; }
 
     for (const step of steps) {
       const credits = walletCredits[step.modelId] || 0;
@@ -164,17 +159,12 @@ export const AiChain: React.FC<Props> = ({ availableModels, walletCredits, model
 
     setIsRunning(false);
     toast.success('AI 체인이 완료되었습니다! 🎉');
-  }, [prompt, steps, walletCredits, modelById, deductCredit, language, speechLevel, getStepOutputTokenLimit, openAIStatus.available, openAIBlockedReason]);
+  }, [prompt, steps, walletCredits, modelById, deductCredit, language, speechLevel, getStepOutputTokenLimit]);
 
   const finalResult = results.find(r => r.stepId === steps[steps.length - 1]?.id);
 
   return (
     <div className="p-5">
-      {!openAIStatus.available && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {openAIBlockedReason}
-        </div>
-      )}
       <div className="mb-4 p-3 bg-orange-50 rounded-xl text-sm text-orange-700 border border-orange-200">
         💡 각 AI가 이전 AI의 답변을 보고 개선합니다. 마지막 단계의 답변이 최종 결과물입니다.
       </div>

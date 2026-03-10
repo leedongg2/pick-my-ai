@@ -1,29 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
-import { RateLimiter, getClientIp } from '@/lib/rateLimit';
 
 const isStaticExportPhase =
   process.env.NEXT_PHASE === PHASE_EXPORT ||
   process.env.NEXT_PHASE === PHASE_PRODUCTION_BUILD;
-const csrfRateLimiter = new RateLimiter(120, 5 * 60 * 1000);
 
 export async function GET(request: NextRequest) {
-  const clientIp = getClientIp(request);
-  const rl = csrfRateLimiter.check(`csrf:${clientIp}`);
-  if (!rl.success) {
-    return NextResponse.json(
-      { error: '요청이 너무 많습니다.' },
-      {
-        status: 429,
-        headers: {
-          'Cache-Control': 'no-store',
-          Pragma: 'no-cache',
-          Expires: '0',
-        },
-      }
-    );
-  }
-
   if (isStaticExportPhase) {
     return NextResponse.json(
       { error: '정적 내보내기 환경에서는 CSRF 엔드포인트를 사용할 수 없습니다.' },

@@ -42,11 +42,7 @@ export const Header = React.memo(() => {
         configurator: 'Buy AI Models',
         dashboard: 'Dashboard',
         feedback: 'Feedback',
-        guide: 'Guide',
         vote: 'Vote',
-        login: 'Login',
-        signup: 'Sign up',
-        pmcInfo: 'PMC Info',
         logout: 'Logout',
         language: 'Language',
         korean: 'Korean',
@@ -61,11 +57,7 @@ export const Header = React.memo(() => {
         configurator: 'AIモデル購入',
         dashboard: 'ダッシュボード',
         feedback: 'フィードバック',
-        guide: 'ガイド',
         vote: '投票',
-        login: 'ログイン',
-        signup: '会員登録',
-        pmcInfo: 'PMC情報',
         logout: 'ログアウト',
         language: '言語',
         korean: '韓国語',
@@ -79,11 +71,7 @@ export const Header = React.memo(() => {
       configurator: 'AI 모델 구매',
       dashboard: '대시보드',
       feedback: '의견 보내기',
-      guide: '가이드',
       vote: '투표',
-      login: '로그인',
-      signup: '회원가입',
-      pmcInfo: 'PMC 정보',
       logout: '로그아웃',
       language: '언어',
       korean: '한국어',
@@ -102,7 +90,7 @@ export const Header = React.memo(() => {
   
   // 홈 페이지와 로그인 페이지에서만 헤더를 표시하지 않음
   const shouldHideHeader = useMemo(() => {
-    return pathname === '/' || pathname === '/login' || pathname === '/auth/callback';
+    return pathname === '/' || pathname === '/login';
   }, [pathname]);
   
   const handleLogout = useCallback(() => {
@@ -179,7 +167,7 @@ export const Header = React.memo(() => {
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
-                  {ui.guide}
+                  가이드
                 </Link>
                 <button
                   onClick={() => setIsPollModalOpen(true)}
@@ -198,7 +186,7 @@ export const Header = React.memo(() => {
                   type="button"
                   onClick={() => setIsPMCInfoOpen(true)}
                   className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                  title={ui.pmcInfo}
+                  title="PMC 정보"
                 >
                   <Info className="w-5 h-5 text-gray-700 dark:text-gray-300" />
                 </button>
@@ -275,13 +263,13 @@ export const Header = React.memo(() => {
                   href="/login"
                   className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900 transition-colors"
                 >
-                  {ui.login}
+                  로그인
                 </Link>
                 <Link 
                   href="/login"
                   className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:opacity-90 transition-all"
                 >
-                  {ui.signup}
+                  회원가입
                 </Link>
               </>
             )}

@@ -70,35 +70,41 @@ function dedupeIncidents(incidents: OpenAIStatusIncident[]): OpenAIStatusInciden
   });
 }
 
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value != null;
+}
+
 function parseRssIncidents(xml: string): OpenAIStatusIncident[] {
   const itemBlocks = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
 
-  const incidents: OpenAIStatusIncident[] = [];
+  return itemBlocks
+    .map((block) => {
+      const title = stripHtml(extractXmlTag(block, 'title'));
+      const link = stripHtml(extractXmlTag(block, 'link')) || undefined;
+      const description = extractXmlTag(block, 'description');
+      const contentEncoded = extractXmlTag(block, 'content:encoded');
+      const pubDate = stripHtml(extractXmlTag(block, 'pubDate')) || undefined;
+      const combined = [description, contentEncoded].filter(Boolean).join(' ');
+      const statusMatch = combined.match(/status\s*:\s*([^<\n\r]+)/i);
+      const status = normalizeIncidentStatus(statusMatch?.[0] || 'Unknown');
 
-  for (const block of itemBlocks) {
-    const title = stripHtml(extractXmlTag(block, 'title'));
-    const link = stripHtml(extractXmlTag(block, 'link')) || undefined;
-    const description = extractXmlTag(block, 'description');
-    const contentEncoded = extractXmlTag(block, 'content:encoded');
-    const pubDate = stripHtml(extractXmlTag(block, 'pubDate')) || undefined;
-    const combined = [description, contentEncoded].filter(Boolean).join(' ');
-    const statusMatch = combined.match(/status\s*:\s*([^<\n\r]+)/i);
-    const status = normalizeIncidentStatus(statusMatch?.[0] || 'Unknown');
+      if (!title) {
+        return null;
+      }
 
-    if (!title || isResolvedIncident(status, combined)) {
-      continue;
-    }
+      if (isResolvedIncident(status, combined)) {
+        return null;
+      }
 
-    incidents.push({
-      title,
-      status,
-      link,
-      updatedAt: pubDate,
-      source: 'rss',
-    });
-  }
-
-  return incidents;
+      return {
+        title,
+        status,
+        link,
+        updatedAt: pubDate,
+        source: 'rss' as const,
+      };
+    })
+    .filter(isDefined);
 }
 
 function parseStatusPageIncidents(html: string): OpenAIStatusIncident[] {

@@ -7,13 +7,11 @@ import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
 import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square, Star, Volume2, RefreshCw, Search, FileText, Link2, Swords } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
 import type { ChatMessage } from '@/types';
 import { useTranslation } from '@/utils/translations';
 import { endChatPerfRun, initChatPerfOnce, isChatPerfEnabled, recordChatPerfReactCommit, startChatPerfRun } from '@/utils/chatPerf';
-import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
 import { extractSummary, buildConversationContext, ConversationSummary } from '@/utils/summaryExtractor';
 import { renderLatex } from '@/utils/renderLatex';
 const GraphRenderer = dynamic(() => import('@/components/GraphRenderer').then(m => m.GraphRenderer), { ssr: false });
@@ -430,7 +428,6 @@ export const Chat: React.FC = () => {
   const [isOnCooldown, setIsOnCooldown] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
-  const [showQuestionAnalysis, setShowQuestionAnalysis] = useState(false);
   const [temperature, setTemperature] = useState(0.7);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showPersona, setShowPersona] = useState(false);
@@ -544,118 +541,8 @@ export const Chat: React.FC = () => {
     const m = models.find(m => m.id === selectedModelId);
     return m?.piWon ?? 1;
   }, [models, selectedModelId]);
-  const { status: openAIStatus } = useOpenAIStatus();
-  const openAIBlockedReason = useMemo(
-    () => getOpenAIStatusBlockedMessage(openAIStatus.reason),
-    [openAIStatus.reason]
-  );
 
   const { t } = useTranslation();
-  const chatUi = useMemo(() => {
-    if (language === 'en') {
-      return {
-        remaining: 'remaining',
-        analysisTitle: 'Question analysis',
-        analysisDesc: 'Analyze the current prompt and get a model recommendation.',
-        analysisEmpty: 'Enter a question first, then run analysis.',
-        templatesTitle: 'Chat templates',
-        templatesDesc: 'Use a saved prompt',
-        compareTitle: 'Compare models',
-        compareDesc: 'Ask multiple AIs at once',
-        chainTitle: 'AI chain',
-        chainDesc: 'Multiple AIs collaborate in sequence',
-        debateTitle: 'AI debate',
-        debateDesc: 'Two AIs debate the topic',
-        personaTitle: 'Persona settings',
-        personaDesc: 'Adjust AI personality and tone',
-        filesTitle: 'Add photos & files',
-        filesDesc: 'Upload images and text files',
-        exportTitle: 'Export chat',
-        responseStyle: 'Response style',
-        gpt5NoStyle: 'GPT-5 series does not support response style control.',
-        guestTitle: 'Login required',
-        guestDesc: 'You need to log in before using AI chat.',
-        guestLogin: 'Go to login',
-        guestPricing: 'View pricing',
-      };
-    }
-
-    if (language === 'ja') {
-      return {
-        remaining: '残り',
-        analysisTitle: '質問を分析する',
-        analysisDesc: '現在の質問を分析して最適なモデルをおすすめします。',
-        analysisEmpty: 'まず質問を入力してから分析してください。',
-        templatesTitle: '会話テンプレート',
-        templatesDesc: '保存したプロンプトを使う',
-        compareTitle: '同時比較',
-        compareDesc: '複数のAIに同時に質問',
-        chainTitle: 'AIチェーン',
-        chainDesc: '複数のAIが順番に協力',
-        debateTitle: 'AI討論',
-        debateDesc: '2つのAIがテーマで討論',
-        personaTitle: 'ペルソナ設定',
-        personaDesc: 'AIの性格や話し方を調整',
-        filesTitle: '写真とファイルを追加',
-        filesDesc: '画像とテキストファイルをアップロード',
-        exportTitle: 'チャットを書き出す',
-        responseStyle: '応答スタイル',
-        gpt5NoStyle: 'GPT-5シリーズは応答スタイル調整に対応していません。',
-        guestTitle: 'ログインが必要です',
-        guestDesc: 'AIチャットを使うにはログインしてください。',
-        guestLogin: 'ログインへ',
-        guestPricing: '料金表を見る',
-      };
-    }
-
-    return {
-      remaining: '잔여',
-      analysisTitle: '질문 분석하기',
-      analysisDesc: '현재 질문을 분석해서 가장 맞는 모델을 추천받아요.',
-      analysisEmpty: '먼저 질문을 입력한 뒤 분석을 실행해주세요.',
-      templatesTitle: '대화 템플릿',
-      templatesDesc: '저장된 프롬프트 사용',
-      compareTitle: '동시 비교',
-      compareDesc: '여러 AI에 동시 질문',
-      chainTitle: 'AI 체인',
-      chainDesc: '여러 AI가 순서대로 협업',
-      debateTitle: 'AI 토론',
-      debateDesc: '두 AI가 주제로 끝장 토론',
-      personaTitle: '페르소나 설정',
-      personaDesc: 'AI 성격 및 말투 조절',
-      filesTitle: '사진 및 파일 추가',
-      filesDesc: '이미지, 텍스트 파일 업로드',
-      exportTitle: '대화 내보내기',
-      responseStyle: '응답 스타일',
-      gpt5NoStyle: 'GPT-5 시리즈 모델은 응답 스타일 조절을 지원하지 않습니다',
-      guestTitle: '로그인이 필요합니다',
-      guestDesc: 'AI 채팅을 사용하려면 먼저 로그인해주세요.',
-      guestLogin: '로그인하러 가기',
-      guestPricing: '가격표 보기',
-      close: '닫기',
-    };
-  }, [language]);
-
-  const choosePreferredVoice = useCallback((voices: SpeechSynthesisVoice[]) => {
-    if (!voices.length) return null;
-
-    const languagePrefix = language === 'en' ? 'en' : language === 'ja' ? 'ja' : 'ko';
-    const matchingVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith(languagePrefix));
-    const voicePool = matchingVoices.length > 0 ? matchingVoices : voices;
-    const preferredNames = language === 'en'
-      ? ['Google US English', 'Microsoft Aria', 'Microsoft Jenny', 'Samantha', 'Karen']
-      : language === 'ja'
-      ? ['Google 日本語', 'Microsoft Nanami', 'Kyoko', 'Otoya']
-      : ['Google 한국의', 'Google 한국어', 'Microsoft SunHi', 'Yuna', 'Heami'];
-
-    for (const preferredName of preferredNames) {
-      const matched = voicePool.find((voice) => voice.name.includes(preferredName));
-      if (matched) return matched;
-    }
-
-    const localVoice = voicePool.find((voice) => voice.localService);
-    return localVoice || voicePool[0] || null;
-  }, [language]);
 
   const chatPerfEnabled = useMemo(() => isChatPerfEnabled(), []);
 
@@ -811,10 +698,6 @@ export const Chat: React.FC = () => {
     if (!selectedModelId) return null;
     return modelById.get(selectedModelId) ?? null;
   }, [modelById, selectedModelId]);
-  const selectedModelBlocked = useMemo(
-    () => !openAIStatus.available && isOpenAITextModelId(selectedModelId),
-    [openAIStatus.available, selectedModelId]
-  );
 
   const selectedModelMaxCharacters = useMemo(() => {
     return selectedModel?.maxCharacters || 2500;
@@ -837,26 +720,10 @@ export const Chat: React.FC = () => {
   const availableModels = useMemo(
     () => models.filter(m => {
       const credits = walletCredits?.[m.id] || 0;
-      if (credits <= 0 || !m.enabled) {
-        return false;
-      }
-
-      if (!openAIStatus.available && isOpenAITextModelId(m.id)) {
-        return false;
-      }
-
-      return true;
+      return credits > 0 && m.enabled;
     }),
-    [models, walletCredits, openAIStatus.available]
+    [models, walletCredits]
   );
-
-  useEffect(() => {
-    if (!selectedModelBlocked) {
-      return;
-    }
-
-    setSelectedModelId('');
-  }, [selectedModelBlocked]);
 
   const startDraftMessage = useCallback((messageId: string | null) => {
     if (!messageId) return;
@@ -1194,19 +1061,21 @@ export const Chat: React.FC = () => {
     utter.pitch = 1.0;
     utter.volume = 1.0;
     
+    // 더 좋은 음성 선택 (사용 가능한 경우)
     const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = choosePreferredVoice(voices);
-    if (preferredVoice) {
-      utter.voice = preferredVoice;
-      utter.lang = preferredVoice.lang;
-      utter.rate = language === 'en' ? 1.0 : 0.96;
-      utter.pitch = language === 'ja' ? 1.05 : 1.0;
+    if (voices.length > 0) {
+      const preferredVoice = voices.find(v => 
+        (language === 'ko' && (v.name.includes('Google') || v.name.includes('Yuna') || v.name.includes('Sora'))) ||
+        (language === 'en' && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen'))) ||
+        (language === 'ja' && (v.name.includes('Google') || v.name.includes('Kyoko')))
+      );
+      if (preferredVoice) utter.voice = preferredVoice;
     }
     
     ttsRef.current = utter;
     window.speechSynthesis.speak(utter);
     toast.info('읽기 시작 — 다시 클릭하면 중지됩니다.');
-  }, [choosePreferredVoice, language]);
+  }, [language]);
 
   const handleExportChat = useCallback((format: 'markdown' | 'txt') => {
     const session = useStore.getState().chatSessions.find(s => s.id === currentSessionId);
@@ -1273,7 +1142,6 @@ export const Chat: React.FC = () => {
     const targetPiWon = modelById.get(targetModelId)?.piWon ?? 1;
     const credits = walletCredits?.[targetModelId] || 0;
     if (credits <= 0) { toast.error(`${modelById.get(targetModelId)?.displayName} 크레딧이 부족합니다.`); return; }
-    if (!openAIStatus.available && isOpenAITextModelId(targetModelId)) { toast.error(openAIBlockedReason); return; }
     let regenerateRefundToken: string | false = false;
     sendInFlightRef.current = true;
     setIsLoading(true);
@@ -1321,7 +1189,7 @@ export const Chat: React.FC = () => {
       abortControllerRef.current = null;
       sendInFlightRef.current = false;
     }
-  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, refundCredit, releasePendingRefundToken, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage, isLoading, addStoredFacts, openAIStatus.available, openAIBlockedReason]);
+  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, refundCredit, releasePendingRefundToken, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage, isLoading, addStoredFacts]);
 
   const handleSendMessage = useCallback(async () => {
     const trimmedMessage = message.trim();
@@ -1348,11 +1216,6 @@ export const Chat: React.FC = () => {
     const credits = walletCredits?.[selectedModelId] || 0;
     if (credits <= 0) {
       toast.error(`${selectedModel.displayName} 크레딧이 부족합니다.`);
-      return;
-    }
-
-    if (!openAIStatus.available && isOpenAITextModelId(selectedModelId)) {
-      toast.error(openAIBlockedReason);
       return;
     }
 
@@ -1878,14 +1741,6 @@ export const Chat: React.FC = () => {
       // 에러코드 → 사용자 친화적 메시지 매핑
       const getErrorDisplay = (code: string): { title: string; icon: string; message: string; tips: string[] } => {
         if (code === 'ERR_CANCELLED') return { icon: '', title: '', message: '', tips: [] };
-        if (code === OPENAI_STATUS_ERROR_CODE) {
-          return {
-            icon: '🚧',
-            title: 'OpenAI 장애 감지',
-            message: errorDetail || '현재 OpenAI 장애로 GPT 모델 사용이 일시 중단되었습니다.',
-            tips: ['Claude, Gemini, Grok 같은 다른 모델을 선택해보세요', '잠시 후 다시 시도해주세요']
-          };
-        }
         if (code === 'ERR_TIMEOUT' || code.includes('504') || code.includes('Timeout')) {
           return { icon: '⏱️', title: '응답 시간 초과', message: 'AI가 응답하는 데 시간이 너무 오래 걸렸어요.', tips: ['더 짧은 질문으로 다시 시도해보세요', '잠시 후 다시 시도해주세요'] };
         }
@@ -1959,7 +1814,7 @@ export const Chat: React.FC = () => {
         });
       }
     }
-  }, [message, selectedModelId, selectedModel, selectedModelMaxCharacters, walletCredits, currentSessionId, deductCredit, refundCredit, releasePendingRefundToken, addMessage, addCredits, attachments, temperature, language, activePersona, storedFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries, isBatchModel, isVideoModel, videoSeconds, startDraftMessage, flushDraftMessage, clearDraftMessage, createChatSession, isLoading, modelById, addStoredFacts, openAIStatus.available, openAIBlockedReason]);
+  }, [message, selectedModelId, selectedModel, selectedModelMaxCharacters, walletCredits, currentSessionId, deductCredit, refundCredit, releasePendingRefundToken, addMessage, addCredits, attachments, temperature, language, activePersona, storedFacts, updateMessageContent, finalizeMessageContent, scrollToBottom, isCancelled, conversationSummaries, isBatchModel, isVideoModel, videoSeconds, startDraftMessage, flushDraftMessage, clearDraftMessage, createChatSession, isLoading, modelById, addStoredFacts]);
   
   const handleNewChat = useCallback(() => {
     if (isOnCooldown) return;
@@ -2581,42 +2436,22 @@ export const Chat: React.FC = () => {
                   const credits = walletCredits?.[model.id] || 0;
                   return (
                     <option key={model.id} value={model.id}>
-                      {model.displayName} ({chatUi.remaining} {credits}회)
+                      {model.displayName} (잔여 {credits}회)
                     </option>
                   );
                 })}
               </select>
             </div>
-            {!openAIStatus.available && (
-              <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {openAIBlockedReason}
-              </div>
-            )}
-            {showQuestionAnalysis && (
+            {/* 스마트 라우터 */}
+            {message.trim().length > 0 && availableModels.length > 0 && (
               <div className="mb-3">
-                <div className="mb-2 flex items-center justify-between px-1">
-                  <div className="text-xs font-semibold text-gray-600">{chatUi.analysisTitle}</div>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuestionAnalysis(false)}
-                    className="text-xs text-gray-500 hover:text-gray-800 transition-colors"
-                  >
-                    {chatUi.close}
-                  </button>
-                </div>
-                {message.trim().length > 0 && availableModels.length > 0 ? (
-                  <SmartRouterContent
-                    question={message}
-                    models={availableModels}
-                    speechLevel={speechLevel}
-                    language={language}
-                    compact
-                  />
-                ) : (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {chatUi.analysisEmpty}
-                  </div>
-                )}
+                <SmartRouterContent
+                  question={message}
+                  models={availableModels}
+                  speechLevel={speechLevel}
+                  language={language}
+                  compact
+                />
               </div>
             )}
 
@@ -2693,22 +2528,6 @@ export const Chat: React.FC = () => {
                           {/* 템플릿 */}
                           <button
                             onClick={() => {
-                              setShowQuestionAnalysis((prev) => !prev);
-                              setShowPlusMenu(false);
-                            }}
-                            className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
-                          >
-                            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                              <Search className="w-5 h-5 text-indigo-700" />
-                            </div>
-                            <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.analysisTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.analysisDesc}</div>
-                            </div>
-                          </button>
-
-                          <button
-                            onClick={() => {
                               setShowTemplates(true);
                               setShowPlusMenu(false);
                             }}
@@ -2718,8 +2537,8 @@ export const Chat: React.FC = () => {
                               <MessageSquare className="w-5 h-5 text-blue-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.templatesTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.templatesDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">대화 템플릿</div>
+                              <div className="text-xs text-gray-500">저장된 프롬프트 사용</div>
                             </div>
                           </button>
 
@@ -2735,8 +2554,8 @@ export const Chat: React.FC = () => {
                               <GitCompare className="w-5 h-5 text-purple-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.compareTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.compareDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">동시 비교</div>
+                              <div className="text-xs text-gray-500">여러 AI에 동시 질문</div>
                             </div>
                           </button>
 
@@ -2752,8 +2571,8 @@ export const Chat: React.FC = () => {
                               <Link2 className="w-5 h-5 text-orange-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.chainTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.chainDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">AI 체인</div>
+                              <div className="text-xs text-gray-500">여러 AI가 순서대로 협업</div>
                             </div>
                           </button>
 
@@ -2769,14 +2588,14 @@ export const Chat: React.FC = () => {
                               <Swords className="w-5 h-5 text-red-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.debateTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.debateDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">AI 토론</div>
+                              <div className="text-xs text-gray-500">두 AI가 주제로 끝장 토론</div>
                             </div>
                           </button>
 
                           {/* 내보내기 */}
                           <div className="px-4 py-2 border-t border-gray-100 mt-1">
-                            <div className="text-xs text-gray-500 mb-1.5">{chatUi.exportTitle}</div>
+                            <div className="text-xs text-gray-500 mb-1.5">대화 내보내기</div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => { handleExportChat('markdown'); setShowPlusMenu(false); }}
@@ -2807,8 +2626,8 @@ export const Chat: React.FC = () => {
                               <UserCircle className="w-5 h-5 text-green-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.personaTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.personaDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">페르소나 설정</div>
+                              <div className="text-xs text-gray-500">AI 성격 및 말투 조절</div>
                             </div>
                           </button>
 
@@ -2824,8 +2643,8 @@ export const Chat: React.FC = () => {
                               <Paperclip className="w-5 h-5 text-gray-700" />
                             </div>
                             <div>
-                              <div className="text-sm font-semibold text-gray-900">{chatUi.filesTitle}</div>
-                              <div className="text-xs text-gray-500">{chatUi.filesDesc}</div>
+                              <div className="text-sm font-semibold text-gray-900">사진 및 파일 추가</div>
+                              <div className="text-xs text-gray-500">이미지, 텍스트 파일 업로드</div>
                             </div>
                           </button>
 
@@ -2833,12 +2652,12 @@ export const Chat: React.FC = () => {
                           <div className="px-4 py-3 border-t border-gray-100 mt-2">
                             <div className="mb-2">
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-semibold text-gray-900">{chatUi.responseStyle}</span>
+                                <span className="text-sm font-semibold text-gray-900">응답 스타일</span>
                                 <span className="text-sm text-gray-600">{temperature.toFixed(1)}</span>
                               </div>
                               {(selectedModelId === 'gpt5' || selectedModelId === 'gpt51' || selectedModelId === 'gpt52') && (
                                 <div className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded mt-1">
-                                  ⚠️ {chatUi.gpt5NoStyle}
+                                  ⚠️ GPT-5 시리즈 모델은 응답 스타일 조절을 지원하지 않습니다
                                 </div>
                               )}
                             </div>

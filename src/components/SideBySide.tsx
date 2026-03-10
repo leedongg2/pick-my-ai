@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
-import { useOpenAIStatus } from '@/components/OpenAIStatusProvider';
 import { useStore } from '@/store';
 import { toast } from 'sonner';
 import { Send, X, Copy, Check } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { getOpenAIStatusBlockedMessage, isOpenAITextModelId } from '@/utils/openaiStatus';
 
 type Props = {
   availableModels: any[];
@@ -26,17 +24,15 @@ type ModelResponse = {
 
 export const SideBySide: React.FC<Props> = ({ availableModels, walletCredits, modelById, language, speechLevel }) => {
   const { deductCredit } = useStore();
-  const { status: openAIStatus } = useOpenAIStatus();
   const [prompt, setPrompt] = useState('');
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
   const [responses, setResponses] = useState<ModelResponse[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRefs = useRef<{ [modelId: string]: AbortController }>({});
-  const openAIBlockedReason = getOpenAIStatusBlockedMessage(openAIStatus.reason);
 
   const textModels = availableModels.filter(m =>
-    m.series !== 'image' && m.series !== 'video' && !m.isBatch && (openAIStatus.available || !isOpenAITextModelId(m.id))
+    m.series !== 'image' && m.series !== 'video' && !m.isBatch
   );
 
   const toggleModel = (modelId: string) => {
@@ -50,7 +46,6 @@ export const SideBySide: React.FC<Props> = ({ availableModels, walletCredits, mo
   const handleRun = useCallback(async () => {
     if (!prompt.trim()) { toast.error('질문을 입력해주세요.'); return; }
     if (selectedModelIds.length < 2) { toast.error('최소 2개 모델을 선택해주세요.'); return; }
-    if (!openAIStatus.available && selectedModelIds.some((modelId) => isOpenAITextModelId(modelId))) { toast.error(openAIBlockedReason); return; }
 
     const initResponses: ModelResponse[] = selectedModelIds.map(modelId => ({
       modelId, content: '', loading: true, error: undefined
@@ -90,7 +85,7 @@ export const SideBySide: React.FC<Props> = ({ availableModels, walletCredits, mo
     });
 
     setIsRunning(false);
-  }, [prompt, selectedModelIds, deductCredit, modelById, language, speechLevel, openAIStatus.available, openAIBlockedReason]);
+  }, [prompt, selectedModelIds, deductCredit, modelById, language, speechLevel]);
 
   const handleStop = () => {
     Object.values(abortRefs.current).forEach(c => c.abort());
@@ -108,11 +103,6 @@ export const SideBySide: React.FC<Props> = ({ availableModels, walletCredits, mo
 
   return (
     <div className="p-5">
-      {!openAIStatus.available && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {openAIBlockedReason}
-        </div>
-      )}
       {/* 모델 선택 */}
       <div className="mb-4">
         <div className="text-sm font-semibold text-gray-700 mb-2">비교할 모델 선택 (최대 4개)</div>

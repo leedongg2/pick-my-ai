@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifySession } from '@/lib/apiAuth';
-import { getOpenAIStatus } from '@/lib/openaiStatusServer';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
-import { getOpenAIStatusBlockedMessage, isOpenAITextModelId, OPENAI_STATUS_ERROR_CODE } from '@/utils/openaiStatus';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,16 +64,6 @@ export async function POST(request: NextRequest) {
 
     if (!hasValidMessages(messages)) {
       return NextResponse.json({ error: 'ERR_REQ_00', reason: 'Invalid messages.' }, { status: 400 });
-    }
-
-    if (isOpenAITextModelId(modelId)) {
-      const openAIStatus = await getOpenAIStatus();
-      if (!openAIStatus.available) {
-        return NextResponse.json(
-          { error: OPENAI_STATUS_ERROR_CODE, reason: getOpenAIStatusBlockedMessage(openAIStatus.reason) },
-          { status: 503 }
-        );
-      }
     }
 
     const db = getDb();

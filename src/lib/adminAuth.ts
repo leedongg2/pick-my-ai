@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-const SECRET_KEY = process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || '';
+const SECRET_KEY = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 
 // 비밀번호 실패 추적 (IP 기반)
 interface LoginAttempt {
@@ -14,21 +14,6 @@ const loginAttempts = new Map<string, LoginAttempt>();
 // 설정
 const MAX_ATTEMPTS = parseInt(process.env.ADMIN_MAX_ATTEMPTS || '5');
 const LOCKOUT_DURATION = parseInt(process.env.ADMIN_LOCKOUT_DURATION || '1800000'); // 30분 (밀리초)
-
-function hasValidSecretKey() {
-  return SECRET_KEY.length >= 32;
-}
-
-function safeCompareStrings(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
 
 // IP별 로그인 시도 기록
 export function recordLoginAttempt(ip: string, success: boolean): { allowed: boolean; remainingAttempts?: number; lockedUntil?: number } {
@@ -104,20 +89,16 @@ export function isIPLocked(ip: string): { locked: boolean; lockedUntil?: number 
 export function verifyAdminPassword(password: string): boolean {
   const adminPassword = process.env.ADMIN_PASSWORD;
   
-  if (!adminPassword || !hasValidSecretKey()) {
+  if (!adminPassword) {
     console.error('⚠️ ADMIN_PASSWORD가 설정되지 않았습니다!');
     return false;
   }
 
-  return safeCompareStrings(password, adminPassword);
+  return password === adminPassword;
 }
 
 // 간단한 토큰 생성 (role + timestamp + signature)
 export function generateAdminToken(): string {
-  if (!hasValidSecretKey()) {
-    throw new Error('관리자 토큰 비밀키가 안전하게 설정되지 않았습니다.');
-  }
-
   const payload = {
     role: 'admin',
     iat: Date.now(),
@@ -125,13 +106,13 @@ export function generateAdminToken(): string {
   };
   
   const payloadStr = JSON.stringify(payload);
-  const payloadBase64 = Buffer.from(payloadStr).toString('base64url');
+  const payloadBase64 = Buffer.from(payloadStr).toString('base64');
   
   // HMAC 서명 생성
   const signature = crypto
     .createHmac('sha256', SECRET_KEY)
     .update(payloadBase64)
-    .digest('base64url');
+    .digest('base64');
   
   return `${payloadBase64}.${signature}`;
 }
@@ -139,38 +120,26 @@ export function generateAdminToken(): string {
 // 토큰 검증
 export function verifyAdminToken(token: string): boolean {
   try {
-    if (!hasValidSecretKey()) {
-      return false;
-    }
-
     const [payloadBase64, signature] = token.split('.');
-
-    if (!payloadBase64 || !signature) {
-      return false;
-    }
     
     // 서명 검증
     const expectedSignature = crypto
       .createHmac('sha256', SECRET_KEY)
       .update(payloadBase64)
-      .digest('base64url');
+      .digest('base64');
     
-    if (!safeCompareStrings(signature, expectedSignature)) {
+    if (signature !== expectedSignature) {
       return false;
     }
     
     // 페이로드 파싱 및 만료 시간 확인
-    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString());
-
-    if (payload.role !== 'admin' || typeof payload.exp !== 'number' || typeof payload.iat !== 'number') {
-      return false;
-    }
+    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64').toString());
     
     if (payload.exp < Date.now()) {
       return false; // 토큰 만료
     }
     
-    return true;
+    return payload.role === 'admin';
   } catch (error) {
     return false;
   }
