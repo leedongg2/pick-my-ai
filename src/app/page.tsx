@@ -1,15 +1,6 @@
-'use client';
-
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { Landing } from '@/components/Landing';
 
 export default function HomePage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.push('/chat');
-  }, [router]);
-
-  return null;
+  return <Landing />;
 }
 

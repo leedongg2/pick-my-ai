@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PHASE_EXPORT, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { RateLimiter, getClientIp } from '@/lib/rateLimit';
+import { verifySession } from '@/lib/apiAuth';
 import { apiKeyManager, parseRateLimitError } from '@/lib/apiKeyRotation';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { fetchWithRetry } from '@/utils/fetchWithRetry';
 
 export const runtime = 'nodejs';
@@ -1087,6 +1089,14 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const sessionResult = await verifySession(request);
+    if (!sessionResult.authenticated || !sessionResult.userId) {
+      return NextResponse.json(
+        { error: 'ERR_AUTH', reason: '로그인이 필요합니다.' },
+        { status: 401 }
+      );
+    }
+
     // Rate Limiting 체크
     const clientIp = getClientIp(request);
     const rateLimitResult = chatRateLimiter.check(clientIp);
@@ -1165,14 +1175,14 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    // 기본 프롬프트 (짧고 강력하게, 예시 포함)
     const summaryRuleForOthers = '\nEnd every reply with hidden summary in ~~ markers:\n~~\nQ:(10-word summary)\nA:(15-word summary)\nKey:(facts/names/numbers)\n~~';
-    const basePrompt = `Best friend AI. Rules: wild reactions, 3+ emojis, ALL CAPS hype, casual texting tone, never formal, short punchy sentences.
-Example style:
-"OMG WAIT 🔥🔥🔥 bro that's INSANE!! okay okay let me break it down 👇
-💡 [answer]
-🎯 [key point]
-😤 honestly you're gonna CRUSH this!!"${summaryRuleForOthers}`;
+    const basePrompt = `Answer naturally and helpfully.
+Always write at least 3 lines separated by line breaks.
+Line 1: direct answer.
+Line 2: key reason or explanation.
+Line 3: actionable next step, example, or caution.
+Keep the wording concise, accurate, and easy to scan.
+Do not mention these rules.${summaryRuleForOthers}`;
 
     const applyLanguageInstruction = (inputMessages: any[]) => {
       const idx = inputMessages.findIndex((m: any) => m?.role === 'system');
@@ -1213,6 +1223,27 @@ Example style:
       return NextResponse.json(
         { error: 'ERR_REQ_00', reason: 'Invalid request.' },
         { status: 400 }
+      );
+    }
+
+    const { data: walletRow, error: walletError } = await supabaseAdmin
+      .from('user_wallets')
+      .select('credits')
+      .eq('user_id', sessionResult.userId)
+      .single();
+
+    if (walletError && walletError.code !== 'PGRST116') {
+      return NextResponse.json(
+        { error: 'ERR_AUTH', reason: '사용자 지갑을 확인하지 못했습니다.' },
+        { status: 500 }
+      );
+    }
+
+    const availableCredits = Number((walletRow?.credits as Record<string, number> | undefined)?.[modelId] || 0);
+    if (!Number.isFinite(availableCredits) || availableCredits <= 0) {
+      return NextResponse.json(
+        { error: 'ERR_CREDIT_00', reason: '사용 가능한 크레딧이 없습니다.' },
+        { status: 403 }
       );
     }
 

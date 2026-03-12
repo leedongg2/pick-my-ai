@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useStore } from '@/store';
 import { shallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/Button';
-import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square, Star, Volume2, RefreshCw, Search, FileText, Link2, Swords } from 'lucide-react';
+import { Plus, Settings, LayoutDashboard, Trash2, X, Download, Pencil, Check, Bot, Paperclip, ChevronRight, AlertCircle, MessageSquare, GitCompare, UserCircle, Copy, Square, Star, Volume2, RefreshCw, Search, FileText, Link2, Swords, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
 import { useRouter } from 'next/navigation';
@@ -1057,18 +1057,22 @@ export const Chat: React.FC = () => {
     const stripped = stripSummaryBlock(content).replace(/[#*`]/g, '').trim();
     const utter = new SpeechSynthesisUtterance(stripped);
     utter.lang = language === 'en' ? 'en-US' : language === 'ja' ? 'ja-JP' : 'ko-KR';
-    utter.rate = 1.1;
+    utter.rate = language === 'en' ? 1.0 : 1.05;
     utter.pitch = 1.0;
     utter.volume = 1.0;
     
-    // 더 좋은 음성 선택 (사용 가능한 경우)
     const voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) {
-      const preferredVoice = voices.find(v => 
-        (language === 'ko' && (v.name.includes('Google') || v.name.includes('Yuna') || v.name.includes('Sora'))) ||
-        (language === 'en' && (v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Karen'))) ||
-        (language === 'ja' && (v.name.includes('Google') || v.name.includes('Kyoko')))
-      );
+      const localePrefix = language === 'en' ? 'en' : language === 'ja' ? 'ja' : 'ko';
+      const preferredNames = language === 'en'
+        ? ['Google US English', 'Microsoft Aria', 'Samantha', 'Jenny', 'Karen']
+        : language === 'ja'
+          ? ['Google 日本語', 'Microsoft Nanami', 'Kyoko', 'Keita']
+          : ['Google 한국의', 'Microsoft SunHi', 'Yuna', 'Sora', 'Heami'];
+      const normalizedVoices = voices.filter(v => v.lang.toLowerCase().startsWith(localePrefix));
+      const preferredVoice = preferredNames
+        .map((name) => normalizedVoices.find((v) => v.name.includes(name)))
+        .find(Boolean) || normalizedVoices[0];
       if (preferredVoice) utter.voice = preferredVoice;
     }
     
@@ -1189,12 +1193,18 @@ export const Chat: React.FC = () => {
       abortControllerRef.current = null;
       sendInFlightRef.current = false;
     }
-  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, refundCredit, releasePendingRefundToken, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage, isLoading, addStoredFacts]);
+  }, [currentSessionId, selectedModelId, walletCredits, modelById, finalizeMessageContent, deductCredit, refundCredit, releasePendingRefundToken, temperature, language, speechLevel, startDraftMessage, flushDraftMessage, clearDraftMessage, isLoading, addStoredFacts, currentUser, router, t.chat.loginRequired]);
 
   const handleSendMessage = useCallback(async () => {
     const trimmedMessage = message.trim();
 
     if (!trimmedMessage || !selectedModelId || !selectedModel) {
+      return;
+    }
+
+    if (!currentUser) {
+      toast.error(t.chat.loginRequired);
+      router.push('/login');
       return;
     }
 
@@ -2442,20 +2452,6 @@ export const Chat: React.FC = () => {
                 })}
               </select>
             </div>
-            {/* 스마트 라우터 */}
-            {message.trim().length > 0 && availableModels.length > 0 && (
-              <div className="mb-3">
-                <SmartRouterContent
-                  question={message}
-                  models={availableModels}
-                  speechLevel={speechLevel}
-                  language={language}
-                  compact
-                />
-              </div>
-            )}
-
-
             {/* 첨부 미리보기 */}
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
@@ -2526,6 +2522,40 @@ export const Chat: React.FC = () => {
                       <div className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
                         <div className="p-2">
                           {/* 템플릿 */}
+                          <button
+                            onClick={() => {
+                              if (!currentUser) {
+                                toast.error(t.chat.loginRequired);
+                                router.push('/login');
+                                setShowPlusMenu(false);
+                                return;
+                              }
+                              setShowPlusMenu(false);
+                            }}
+                            disabled={!message.trim() || availableModels.length === 0}
+                            className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                              <Sparkles className="w-5 h-5 text-indigo-700" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-semibold text-gray-900">{t.chat.analyzeQuestion}</div>
+                              <div className="text-xs text-gray-500">{t.chat.analyzeQuestionDescription}</div>
+                            </div>
+                          </button>
+
+                          {!showPlusMenu ? null : message.trim().length > 0 && availableModels.length > 0 ? (
+                            <div className="px-3 py-2">
+                              <SmartRouterContent
+                                question={message}
+                                models={availableModels}
+                                speechLevel={speechLevel}
+                                language={language}
+                                compact
+                              />
+                            </div>
+                          ) : null}
+
                           <button
                             onClick={() => {
                               setShowTemplates(true);

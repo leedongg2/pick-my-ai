@@ -41,7 +41,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 보호된 경로 정의
-  const protectedPaths = ['/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
+  const protectedPaths = ['/chat', '/dashboard', '/settings', '/configurator', '/checkout', '/feedback'];
   const isProtectedPath = protectedPaths.some(p => pathname.startsWith(p));
 
   // 보호된 경로에 대한 세션 검증
@@ -86,7 +86,7 @@ export async function middleware(request: NextRequest) {
 
   // CSRF 검증 (상태 변경 메서드 + API 라우트)
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method) && pathname.startsWith('/api/')) {
-    const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/auth/social-session', '/api/chat'];
+    const publicEndpoints = ['/api/auth/login', '/api/auth/register', '/api/auth/social-session'];
     const isPublicEndpoint = publicEndpoints.some(ep => pathname.startsWith(ep));
 
     if (!isPublicEndpoint) {

@@ -31,6 +31,18 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
     [models]
   );
 
+  const loginRequiredMessage = language === 'en'
+    ? 'Login is required to analyze a question.'
+    : language === 'ja'
+      ? '質問を分析するにはログインが必要です。'
+      : '질문 분석을 사용하려면 로그인이 필요합니다.';
+
+  const failedMessage = language === 'en'
+    ? 'Analysis failed. Please try again.'
+    : language === 'ja'
+      ? '分析に失敗しました。もう一度お試しください。'
+      : '분석에 실패했습니다. 다시 시도해주세요.';
+
   const handleAnalyze = useCallback(async (premium = false) => {
     if (!question.trim()) return;
     setLoading(true);
@@ -45,6 +57,7 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
       const res = await fetch('/api/smart-router', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           question,
           models: routerModels,
@@ -53,15 +66,18 @@ export const SmartRouter: React.FC<Props> = ({ question, models, speechLevel, la
           premium,
         }),
       });
-      if (!res.ok) throw new Error('분석 실패');
+      if (res.status === 401) {
+        throw new Error('ERR_AUTH');
+      }
+      if (!res.ok) throw new Error('ERR_ANALYZE');
       const data = await res.json();
       setRecommendation(data.recommendation);
-    } catch {
-      setRecommendation('분석에 실패했습니다. 다시 시도해주세요.');
+    } catch (error: any) {
+      setRecommendation(error?.message === 'ERR_AUTH' ? loginRequiredMessage : failedMessage);
     } finally {
       setLoading(false);
     }
-  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed]);
+  }, [question, routerModels, speechLevel, language, smartRouterPurchased, smartRouterFreeUsed, setSmartRouterFreeUsed, loginRequiredMessage, failedMessage]);
 
   if (!question.trim() || models.length === 0) return null;
 
